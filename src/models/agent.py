@@ -1,0 +1,50 @@
+"""エージェントモデル定義。"""
+
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class AgentRole(str, Enum):
+    """エージェントの役割。"""
+
+    OWNER = "owner"
+    """全体指揮、タスク分解、Issue作成"""
+
+    ADMIN = "admin"
+    """Worker管理、進捗管理、ダッシュボード更新"""
+
+    WORKER = "worker"
+    """割り当てられたタスクのdev-flow実行"""
+
+
+class AgentStatus(str, Enum):
+    """エージェントの状態。"""
+
+    IDLE = "idle"
+    """待機中"""
+
+    BUSY = "busy"
+    """作業中"""
+
+    ERROR = "error"
+    """エラー発生"""
+
+    TERMINATED = "terminated"
+    """終了済み"""
+
+
+class Agent(BaseModel):
+    """エージェント情報。"""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: str = Field(description="エージェントの一意識別子")
+    role: AgentRole = Field(description="エージェントの役割")
+    status: AgentStatus = Field(default=AgentStatus.IDLE, description="エージェントの状態")
+    tmux_session: str = Field(description="tmuxセッション名")
+    worktree_path: str | None = Field(default=None, description="割り当てられたworktreeのパス")
+    current_task: str | None = Field(default=None, description="現在実行中のタスク")
+    created_at: datetime = Field(description="作成日時")
+    last_activity: datetime = Field(description="最終活動日時")

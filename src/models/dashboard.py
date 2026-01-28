@@ -1,0 +1,123 @@
+"""ダッシュボードモデル。"""
+
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+
+class TaskStatus(str, Enum):
+    """タスクのステータス。"""
+
+    PENDING = "pending"  # 未着手
+    IN_PROGRESS = "in_progress"  # 進行中
+    COMPLETED = "completed"  # 完了
+    FAILED = "failed"  # 失敗
+    BLOCKED = "blocked"  # ブロック中
+    CANCELLED = "cancelled"  # キャンセル
+
+
+class TaskInfo(BaseModel):
+    """タスク情報。"""
+
+    id: str = Field(..., description="タスクID")
+    title: str = Field(..., description="タスクタイトル")
+    description: str = Field(default="", description="タスク説明")
+    status: TaskStatus = Field(
+        default=TaskStatus.PENDING, description="ステータス"
+    )
+    assigned_agent_id: str | None = Field(
+        None, description="割り当てられたエージェントID"
+    )
+    branch: str | None = Field(None, description="関連ブランチ")
+    worktree_path: str | None = Field(None, description="worktreeパス")
+    progress: int = Field(default=0, ge=0, le=100, description="進捗率（0-100）")
+    created_at: datetime = Field(
+        default_factory=datetime.now, description="作成日時"
+    )
+    started_at: datetime | None = Field(None, description="開始日時")
+    completed_at: datetime | None = Field(None, description="完了日時")
+    error_message: str | None = Field(None, description="エラーメッセージ")
+    metadata: dict = Field(default_factory=dict, description="追加メタデータ")
+
+
+class AgentSummary(BaseModel):
+    """エージェントサマリー情報。"""
+
+    agent_id: str = Field(..., description="エージェントID")
+    role: str = Field(..., description="役割")
+    status: str = Field(..., description="ステータス")
+    current_task_id: str | None = Field(None, description="現在のタスクID")
+    worktree_path: str | None = Field(None, description="worktreeパス")
+    branch: str | None = Field(None, description="ブランチ")
+    last_activity: datetime | None = Field(None, description="最終活動日時")
+
+
+class Dashboard(BaseModel):
+    """ダッシュボード情報。"""
+
+    workspace_id: str = Field(..., description="ワークスペースID")
+    workspace_path: str = Field(..., description="ワークスペースパス")
+    updated_at: datetime = Field(
+        default_factory=datetime.now, description="更新日時"
+    )
+
+    # エージェント情報
+    agents: list[AgentSummary] = Field(
+        default_factory=list, description="エージェント一覧"
+    )
+
+    # タスク情報
+    tasks: list[TaskInfo] = Field(
+        default_factory=list, description="タスク一覧"
+    )
+
+    # 統計情報
+    total_agents: int = Field(default=0, description="エージェント総数")
+    active_agents: int = Field(default=0, description="アクティブエージェント数")
+    total_tasks: int = Field(default=0, description="タスク総数")
+    completed_tasks: int = Field(default=0, description="完了タスク数")
+    failed_tasks: int = Field(default=0, description="失敗タスク数")
+
+    # Worktree情報
+    total_worktrees: int = Field(default=0, description="worktree総数")
+    active_worktrees: int = Field(
+        default=0, description="アクティブworktree数"
+    )
+
+    def get_task(self, task_id: str) -> TaskInfo | None:
+        """タスクを取得する。"""
+        for task in self.tasks:
+            if task.id == task_id:
+                return task
+        return None
+
+    def get_agent(self, agent_id: str) -> AgentSummary | None:
+        """エージェントサマリーを取得する。"""
+        for agent in self.agents:
+            if agent.agent_id == agent_id:
+                return agent
+        return None
+
+    def get_tasks_by_status(self, status: TaskStatus) -> list[TaskInfo]:
+        """指定ステータスのタスクを取得する。"""
+        return [t for t in self.tasks if t.status == status]
+
+    def get_tasks_by_agent(self, agent_id: str) -> list[TaskInfo]:
+        """指定エージェントのタスクを取得する。"""
+        return [t for t in self.tasks if t.assigned_agent_id == agent_id]
+
+    def calculate_stats(self) -> None:
+        """統計情報を再計算する。"""
+        self.total_agents = len(self.agents)
+        self.active_agents = len(
+            [a for a in self.agents if a.status in ("busy", "idle")]
+        )
+        self.total_tasks = len(self.tasks)
+        self.completed_tasks = len(
+            [t for t in self.tasks if t.status == TaskStatus.COMPLETED]
+        )
+        self.failed_tasks = len(
+            [t for t in self.tasks if t.status == TaskStatus.FAILED]
+        )
+        self.updated_at = datetime.now()
