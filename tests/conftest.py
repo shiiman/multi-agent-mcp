@@ -30,10 +30,13 @@ def temp_dir():
 @pytest.fixture
 def settings(temp_dir):
     """テスト用の設定を作成する。"""
+    from src.config.settings import TerminalApp
+
     return Settings(
         workspace_base_dir=str(temp_dir / "workspaces"),
         max_workers=3,
         tmux_prefix="test-mcp-agent",
+        default_terminal=TerminalApp.AUTO,
     )
 
 

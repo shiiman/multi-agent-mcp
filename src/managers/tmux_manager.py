@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.config.settings import Settings
 
+from src.config.settings import TerminalApp
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +22,7 @@ class TmuxManager:
             settings: アプリケーション設定
         """
         self.prefix = settings.tmux_prefix
+        self.default_terminal = settings.default_terminal
 
     async def _run(self, *args: str) -> tuple[int, str, str]:
         """tmuxコマンドを実行する。
@@ -207,7 +210,8 @@ class TmuxManager:
     async def open_session_in_terminal(self, session: str) -> bool:
         """tmuxセッションをターミナルアプリで開く。
 
-        優先順位: ghostty → iTerm2 → Terminal.app
+        環境変数 MCP_DEFAULT_TERMINAL で指定されたターミナルを使用。
+        auto の場合は優先順位: ghostty → iTerm2 → Terminal.app
 
         Args:
             session: セッション名（プレフィックスなし）
@@ -215,13 +219,29 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        import shutil
-        from pathlib import Path
-
         session_name = self._session_name(session)
         attach_cmd = f"tmux attach -t {session_name}"
 
-        # ghostty を確認（PATHまたはmacOSアプリケーション）
+        # 指定されたターミナルを使用
+        if self.default_terminal == TerminalApp.GHOSTTY:
+            return await self._open_in_ghostty(attach_cmd)
+        elif self.default_terminal == TerminalApp.ITERM2:
+            return await self._open_in_iterm2(attach_cmd)
+        elif self.default_terminal == TerminalApp.TERMINAL:
+            return await self._open_in_terminal_app(attach_cmd)
+
+        # auto: 優先順位で試行
+        if await self._open_in_ghostty(attach_cmd):
+            return True
+        if await self._open_in_iterm2(attach_cmd):
+            return True
+        return await self._open_in_terminal_app(attach_cmd)
+
+    async def _open_in_ghostty(self, attach_cmd: str) -> bool:
+        """Ghostty でセッションを開く。"""
+        import shutil
+        from pathlib import Path
+
         ghostty_path = shutil.which("ghostty")
         if not ghostty_path:
             macos_ghostty = Path("/Applications/Ghostty.app/Contents/MacOS/ghostty")
@@ -230,10 +250,11 @@ class TmuxManager:
 
         if ghostty_path:
             code, _, _ = await self._run_shell(f'"{ghostty_path}" -e "{attach_cmd}"')
-            if code == 0:
-                return True
+            return code == 0
+        return False
 
-        # iTerm2 を確認
+    async def _open_in_iterm2(self, attach_cmd: str) -> bool:
+        """iTerm2 でセッションを開く。"""
         iterm_check = await self._run_shell(
             "osascript -e 'application \"iTerm\" exists'"
         )
@@ -248,10 +269,11 @@ class TmuxManager:
             end tell
             '''
             code, _, _ = await self._run_shell(f"osascript -e '{applescript}'")
-            if code == 0:
-                return True
+            return code == 0
+        return False
 
-        # Terminal.app にフォールバック
+    async def _open_in_terminal_app(self, attach_cmd: str) -> bool:
+        """macOS Terminal.app でセッションを開く。"""
         applescript = f'''
         tell application "Terminal"
             activate

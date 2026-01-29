@@ -403,7 +403,7 @@ class DashboardManager:
         Returns:
             作成したタスクファイルのパス
         """
-        task_dir = project_root / ".claude" / "tmp" / session_id / "tasks"
+        task_dir = project_root / ".multi-agent-mcp" / session_id / "tasks"
         task_dir.mkdir(parents=True, exist_ok=True)
         task_file = task_dir / f"{agent_id}.md"
         task_file.write_text(task_content, encoding="utf-8")
@@ -423,7 +423,7 @@ class DashboardManager:
         Returns:
             タスクファイルのパス
         """
-        return project_root / ".claude" / "tmp" / session_id / "tasks" / f"{agent_id}.md"
+        return project_root / ".multi-agent-mcp" / session_id / "tasks" / f"{agent_id}.md"
 
     def read_task_file(
         self, project_root: Path, session_id: str, agent_id: str
@@ -556,7 +556,7 @@ class DashboardManager:
             保存したファイルのパス
         """
         md_content = self.generate_markdown_dashboard()
-        dashboard_dir = project_root / ".claude" / "tmp" / session_id / "dashboard"
+        dashboard_dir = project_root / ".multi-agent-mcp" / session_id / "dashboard"
         dashboard_dir.mkdir(parents=True, exist_ok=True)
         md_path = dashboard_dir / "dashboard.md"
         md_path.write_text(md_content, encoding="utf-8")

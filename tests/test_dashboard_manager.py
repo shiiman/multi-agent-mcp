@@ -185,7 +185,7 @@ class TestTaskFileManagement:
         assert task_file.exists()
         assert task_file.read_text(encoding="utf-8") == task_content
         assert task_file.name == "agent-001.md"
-        assert ".claude/tmp/123/tasks" in str(task_file)
+        assert ".multi-agent-mcp/123/tasks" in str(task_file)
 
     def test_get_task_file_path(self, dashboard_manager, temp_dir):
         """タスクファイルパス取得をテスト。"""
@@ -197,7 +197,7 @@ class TestTaskFileManagement:
             agent_id="agent-002",
         )
 
-        expected = project_root / ".claude" / "tmp" / "456" / "tasks" / "agent-002.md"
+        expected = project_root / ".multi-agent-mcp" / "456" / "tasks" / "agent-002.md"
         assert path == expected
 
     def test_read_task_file(self, dashboard_manager, temp_dir):
@@ -311,7 +311,7 @@ class TestMarkdownDashboard:
 
         assert md_path.exists()
         assert md_path.name == "dashboard.md"
-        assert ".claude/tmp/dashboard-test/dashboard" in str(md_path)
+        assert ".multi-agent-mcp/dashboard-test/dashboard" in str(md_path)
 
         content = md_path.read_text(encoding="utf-8")
         assert "# Multi-Agent Dashboard" in content

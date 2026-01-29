@@ -19,6 +19,22 @@ class AICli(str, Enum):
     """Google Gemini CLI"""
 
 
+class TerminalApp(str, Enum):
+    """サポートするターミナルアプリ。"""
+
+    AUTO = "auto"
+    """自動検出（ghostty → iTerm2 → Terminal.app）"""
+
+    GHOSTTY = "ghostty"
+    """Ghostty"""
+
+    ITERM2 = "iterm2"
+    """iTerm2"""
+
+    TERMINAL = "terminal"
+    """macOS Terminal.app"""
+
+
 # AI CLI のデフォルトコマンドマッピング
 DEFAULT_AI_CLI_COMMANDS: dict[str, str] = {
     AICli.CLAUDE: "claude",
@@ -69,3 +85,9 @@ class Settings(BaseSettings):
 
     heartbeat_timeout_seconds: int = 300
     """ハートビートタイムアウト（秒）"""
+
+    # ターミナル設定
+    default_terminal: TerminalApp = Field(
+        default=TerminalApp.AUTO, description="デフォルトのターミナルアプリ"
+    )
+    """デフォルトで使用するターミナルアプリ"""

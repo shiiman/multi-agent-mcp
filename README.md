@@ -172,6 +172,17 @@ cleanup_workspace()
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 300 | ヘルスチェック間隔（秒） |
 | `MCP_HEARTBEAT_TIMEOUT_SECONDS` | 300 | ハートビートタイムアウト（秒） |
+| `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
+
+## gitignore 推奨
+
+タスクファイルやダッシュボードは `.multi-agent-mcp/` ディレクトリに出力されます。
+このディレクトリは一時ファイルなので、`.gitignore` に追加することを推奨します。
+
+```bash
+# プロジェクトの .gitignore に追加
+echo ".multi-agent-mcp/" >> .gitignore
+```
 
 ## 開発（コントリビューター向け）
 
