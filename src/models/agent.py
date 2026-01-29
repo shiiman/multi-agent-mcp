@@ -48,3 +48,12 @@ class Agent(BaseModel):
     current_task: str | None = Field(default=None, description="現在実行中のタスク")
     created_at: datetime = Field(description="作成日時")
     last_activity: datetime = Field(description="最終活動日時")
+
+    # グリッドレイアウト用フィールド
+    session_name: str | None = Field(
+        default=None, description="セッション名（command または workers）"
+    )
+    window_index: int | None = Field(default=None, description="ウィンドウ番号（0, 1, 2, ...）")
+    pane_index: int | None = Field(
+        default=None, description="ウィンドウ内のペインインデックス"
+    )

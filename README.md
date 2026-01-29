@@ -10,7 +10,7 @@ Claude Code + tmux + git worktree を使用したマルチエージェントワ�
 
 - **Owner** (1体): 全体指揮、タスク分解、Issue作成
 - **Admin** (1体): Worker管理、進捗管理、ダッシュボード更新
-- **Worker** (最大5体): 割り当てられたタスクの実行
+- **Worker** (最大6体): 割り当てられたタスクの実行
 
 ## 必要条件
 
@@ -48,7 +48,7 @@ claude mcp add --scope project multi-agent-mcp -- uvx --refresh --from git+https
         "multi-agent-mcp"
       ],
       "env": {
-        "MCP_MAX_WORKERS": "5",
+        "MCP_MAX_WORKERS": "6",
         "MCP_DEFAULT_AI_CLI": "claude"
       }
     }
@@ -70,7 +70,7 @@ claude mcp add --scope project multi-agent-mcp -- uvx --refresh --from git+https
         "multi-agent-mcp"
       ],
       "env": {
-        "MCP_MAX_WORKERS": "5",
+        "MCP_MAX_WORKERS": "6",
         "MCP_DEFAULT_AI_CLI": "claude"
       }
     }
@@ -163,12 +163,11 @@ cleanup_workspace()
 
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
-| `MCP_MAX_WORKERS` | 5 | Workerの最大数 |
+| `MCP_MAX_WORKERS` | 6 | Workerの最大数 |
 | `MCP_TMUX_PREFIX` | mcp-agent | tmuxセッション名のプレフィックス |
 | `MCP_WORKSPACE_BASE_DIR` | /tmp/mcp-workspaces | ワークスペースのベースディレクトリ |
 | `MCP_MESSAGE_RETENTION_SECONDS` | 3600 | メッセージ保持時間（秒） |
 | `MCP_DEFAULT_AI_CLI` | claude | デフォルトのAI CLI（claude/codex/gemini） |
-| `MCP_CLAUDE_CODE_COMMAND` | claude | Claude Code実行コマンド |
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 300 | ヘルスチェック間隔（秒） |
 | `MCP_HEARTBEAT_TIMEOUT_SECONDS` | 300 | ハートビートタイムアウト（秒） |

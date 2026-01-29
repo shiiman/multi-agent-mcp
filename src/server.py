@@ -13,6 +13,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import AICli, Settings
 from src.config.templates import get_template, get_template_names, list_templates
+from src.managers.agent_manager import COMMAND_PANE_ASSIGNMENTS
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.cost_manager import CostManager
 from src.managers.dashboard_manager import DashboardManager
@@ -23,7 +24,13 @@ from src.managers.memory_manager import MemoryManager
 from src.managers.metrics_manager import MetricsManager
 from src.managers.persona_manager import PersonaManager
 from src.managers.scheduler_manager import SchedulerManager, TaskPriority
-from src.managers.tmux_manager import TmuxManager
+from src.managers.tmux_manager import (
+    MAIN_SESSION,
+    MAIN_WINDOW_PANE_ADMIN,
+    MAIN_WINDOW_PANE_OWNER,
+    MAIN_WINDOW_WORKER_PANES,
+    TmuxManager,
+)
 from src.managers.worktree_manager import WorktreeManager
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus
@@ -160,7 +167,12 @@ async def cleanup_workspace(ctx: Context) -> dict[str, Any]:
 
 @mcp.tool()
 async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, Any]:
-    """新しいエージェントを作成し、tmuxセッションを起動する。
+    """新しいエージェントを作成し、メインセッションのペインに配置する。
+
+    単一セッション方式: 左右50:50分離レイアウト
+    - 左半分: Owner (pane 0) + Admin (pane 1)
+    - 右半分: Worker 1-6 (pane 2-7)
+    - Worker 7以降は追加ウィンドウ（6×2=12ペイン/ウィンドウ）
 
     Args:
         role: エージェントの役割（owner/admin/worker）
@@ -201,16 +213,51 @@ async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, A
                 "error": f"{agent_role.value}は既に存在します（ID: {existing[0].id}）",
             }
 
+    # メインセッションを確保（単一セッション方式）
+    if not await tmux.create_main_session(working_dir):
+        return {
+            "success": False,
+            "error": "メインセッションの作成に失敗しました",
+        }
+
     # エージェントIDを生成
     agent_id = str(uuid.uuid4())[:8]
 
-    # tmuxセッションを作成
-    success = await tmux.create_session(agent_id, working_dir)
-    if not success:
-        return {
-            "success": False,
-            "error": "tmuxセッションの作成に失敗しました",
-        }
+    # ロールに応じてペイン位置を決定（全て MAIN_SESSION 内）
+    session_name = MAIN_SESSION
+    if agent_role == AgentRole.OWNER:
+        window_index = 0
+        pane_index = MAIN_WINDOW_PANE_OWNER
+    elif agent_role == AgentRole.ADMIN:
+        window_index = 0
+        pane_index = MAIN_WINDOW_PANE_ADMIN
+    else:  # WORKER
+        # 次の空きスロットを探す
+        slot = _get_next_worker_slot(agents, settings)
+        if slot is None:
+            return {
+                "success": False,
+                "error": "利用可能なWorkerスロットがありません",
+            }
+        window_index, pane_index = slot
+
+        # 追加ウィンドウが必要な場合は作成
+        if window_index > 0:
+            success = await tmux.add_extra_worker_window(
+                window_index,
+                rows=settings.extra_worker_rows,
+                cols=settings.extra_worker_cols,
+            )
+            if not success:
+                return {
+                    "success": False,
+                    "error": f"追加Workerウィンドウ {window_index} の作成に失敗しました",
+                }
+
+    # ペインにタイトルを設定
+    await tmux.set_pane_title(
+        session_name, window_index, pane_index, f"{agent_role.value}-{agent_id}"
+    )
 
     # エージェント情報を登録
     now = datetime.now()
@@ -218,19 +265,77 @@ async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, A
         id=agent_id,
         role=agent_role,
         status=AgentStatus.IDLE,
-        tmux_session=agent_id,
+        tmux_session=f"{session_name}:{window_index}.{pane_index}",
+        session_name=session_name,
+        window_index=window_index,
+        pane_index=pane_index,
         created_at=now,
         last_activity=now,
     )
     agents[agent_id] = agent
 
-    logger.info(f"エージェント {agent_id}（{role}）を作成しました")
+    logger.info(
+        f"エージェント {agent_id}（{role}）を作成しました: "
+        f"{session_name}:{window_index}.{pane_index}"
+    )
 
     return {
         "success": True,
         "agent": agent.model_dump(mode="json"),
         "message": f"エージェント {agent_id}（{role}）を作成しました",
     }
+
+
+def _get_next_worker_slot(
+    agents: dict[str, Agent], settings: Settings
+) -> tuple[int, int] | None:
+    """次に利用可能なWorkerスロット（ウィンドウ, ペイン）を取得する。
+
+    単一セッション方式:
+    - メインウィンドウ（window 0）: Worker 1-6 はペイン 2-7
+    - 追加ウィンドウ（window 1+）: 12ペイン/ウィンドウ
+
+    Args:
+        agents: エージェント辞書
+        settings: 設定オブジェクト
+
+    Returns:
+        (window_index, pane_index) のタプル、空きがない場合はNone
+    """
+    # 最大Worker数チェック
+    total_workers = len(
+        [a for a in agents.values() if a.role == AgentRole.WORKER]
+    )
+    if total_workers >= settings.max_workers:
+        return None
+
+    # 現在のWorkerペイン割り当て状況を取得
+    used_slots: set[tuple[int, int]] = set()
+    for agent in agents.values():
+        if (
+            agent.role == AgentRole.WORKER
+            and agent.session_name == MAIN_SESSION
+            and agent.window_index is not None
+            and agent.pane_index is not None
+        ):
+            used_slots.add((agent.window_index, agent.pane_index))
+
+    # メインウィンドウ（Worker 1-6: pane 2-7）の空きを探す
+    for pane_index in MAIN_WINDOW_WORKER_PANES:
+        if (0, pane_index) not in used_slots:
+            return (0, pane_index)
+
+    # 追加ウィンドウの空きを探す
+    panes_per_extra = settings.workers_per_extra_window
+    extra_worker_index = 0
+    while total_workers + extra_worker_index < settings.max_workers:
+        window_index = 1 + (extra_worker_index // panes_per_extra)
+        pane_index = extra_worker_index % panes_per_extra
+        if (window_index, pane_index) not in used_slots:
+            return (window_index, pane_index)
+        extra_worker_index += 1
+
+    return None
 
 
 @mcp.tool()
@@ -284,7 +389,9 @@ async def get_agent_status(agent_id: str, ctx: Context) -> dict[str, Any]:
 
 @mcp.tool()
 async def terminate_agent(agent_id: str, ctx: Context) -> dict[str, Any]:
-    """エージェントを終了し、tmuxセッションを削除する。
+    """エージェントを終了する。
+
+    グリッドレイアウトではペインは維持され、再利用可能になる。
 
     Args:
         agent_id: 終了するエージェントID
@@ -303,7 +410,27 @@ async def terminate_agent(agent_id: str, ctx: Context) -> dict[str, Any]:
             "error": f"エージェント {agent_id} が見つかりません",
         }
 
-    await tmux.kill_session(agent.tmux_session)
+    # グリッドレイアウトの場合はペインをクリアするだけ（セッションは維持）
+    if (
+        agent.session_name is not None
+        and agent.window_index is not None
+        and agent.pane_index is not None
+    ):
+        # ペインに Ctrl+C を送信してプロセスを停止
+        await tmux.send_keys_to_pane(
+            agent.session_name, agent.window_index, agent.pane_index, "", literal=False
+        )
+        session_name = tmux._session_name(agent.session_name)
+        target = f"{session_name}:{agent.window_index}.{agent.pane_index}"
+        await tmux._run("send-keys", "-t", target, "C-c")
+        # ペインタイトルをクリア
+        await tmux.set_pane_title(
+            agent.session_name, agent.window_index, agent.pane_index, "(empty)"
+        )
+    else:
+        # フォールバック: 従来のセッション方式（個別セッションを終了）
+        await tmux.kill_session(agent.tmux_session)
+
     del agents[agent_id]
 
     logger.info(f"エージェント {agent_id} を終了しました")
@@ -340,7 +467,18 @@ async def send_command(agent_id: str, command: str, ctx: Context) -> dict[str, A
             "error": f"エージェント {agent_id} が見つかりません",
         }
 
-    success = await tmux.send_keys(agent.tmux_session, command)
+    # グリッドレイアウトのペイン指定でコマンド送信
+    if (
+        agent.session_name is not None
+        and agent.window_index is not None
+        and agent.pane_index is not None
+    ):
+        success = await tmux.send_keys_to_pane(
+            agent.session_name, agent.window_index, agent.pane_index, command
+        )
+    else:
+        # フォールバック: 従来のセッション方式
+        success = await tmux.send_keys(agent.tmux_session, command)
 
     if success:
         agent.status = AgentStatus.BUSY
@@ -376,7 +514,18 @@ async def get_output(agent_id: str, lines: int = 50, ctx: Context = None) -> dic
             "error": f"エージェント {agent_id} が見つかりません",
         }
 
-    output = await tmux.capture_pane(agent.tmux_session, lines)
+    # グリッドレイアウトのペイン指定で出力取得
+    if (
+        agent.session_name is not None
+        and agent.window_index is not None
+        and agent.pane_index is not None
+    ):
+        output = await tmux.capture_pane_by_index(
+            agent.session_name, agent.window_index, agent.pane_index, lines
+        )
+    else:
+        # フォールバック: 従来のセッション方式
+        output = await tmux.capture_pane(agent.tmux_session, lines)
 
     return {
         "success": True,
@@ -433,7 +582,16 @@ async def send_task(
 
     # Workerに claude < TASK.md コマンドを送信
     read_command = f"claude < {task_file}"
-    success = await tmux.send_keys(agent.tmux_session, read_command)
+    if (
+        agent.session_name is not None
+        and agent.window_index is not None
+        and agent.pane_index is not None
+    ):
+        success = await tmux.send_keys_to_pane(
+            agent.session_name, agent.window_index, agent.pane_index, read_command
+        )
+    else:
+        success = await tmux.send_keys(agent.tmux_session, read_command)
 
     if success:
         agent.status = AgentStatus.BUSY
@@ -474,12 +632,23 @@ async def open_session(agent_id: str, ctx: Context = None) -> dict[str, Any]:
             "error": f"エージェント {agent_id} が見つかりません",
         }
 
-    success = await tmux.open_session_in_terminal(agent.tmux_session)
+    # グリッドレイアウトの場合はセッション名を使用
+    if agent.session_name is not None:
+        success = await tmux.open_session_in_terminal(agent.session_name)
+        session_display = agent.session_name
+    else:
+        success = await tmux.open_session_in_terminal(agent.tmux_session)
+        session_display = agent.tmux_session
 
     return {
         "success": success,
         "agent_id": agent_id,
-        "session": agent.tmux_session,
+        "session": session_display,
+        "pane": (
+            f"{agent.window_index}.{agent.pane_index}"
+            if agent.window_index is not None
+            else None
+        ),
         "message": (
             "ターミナルでセッションを開きました"
             if success
@@ -522,7 +691,17 @@ async def broadcast_command(
         if target_role and agent.role != target_role:
             continue
 
-        success = await tmux.send_keys(agent.tmux_session, command)
+        # グリッドレイアウトのペイン指定でコマンド送信
+        if (
+            agent.session_name is not None
+            and agent.window_index is not None
+            and agent.pane_index is not None
+        ):
+            success = await tmux.send_keys_to_pane(
+                agent.session_name, agent.window_index, agent.pane_index, command
+            )
+        else:
+            success = await tmux.send_keys(agent.tmux_session, command)
         results[aid] = success
 
         if success:

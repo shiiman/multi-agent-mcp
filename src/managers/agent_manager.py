@@ -5,6 +5,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from src.config.settings import Settings
+from src.managers.tmux_manager import (
+    MAIN_SESSION,
+    MAIN_WINDOW_PANE_ADMIN,
+    MAIN_WINDOW_PANE_OWNER,
+)
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.models.workspace import WorktreeAssignment
 
@@ -259,3 +264,171 @@ class AgentManager:
         return {
             "MAX_THINKING_TOKENS": str(tokens),
         }
+
+    # ========== グリッドレイアウト関連メソッド ==========
+
+    def get_pane_for_role(
+        self, role: AgentRole, worker_index: int = 0
+    ) -> tuple[str, int, int]:
+        """ロールに対応するペイン位置を取得する（単一セッション方式）。
+
+        Args:
+            role: エージェントの役割
+            worker_index: Worker番号（0始まり、roleがWORKERの場合のみ使用）
+
+        Returns:
+            (session_name, window_index, pane_index) のタプル
+        """
+        if role == AgentRole.OWNER:
+            return MAIN_SESSION, 0, MAIN_WINDOW_PANE_OWNER
+        elif role == AgentRole.ADMIN:
+            return MAIN_SESSION, 0, MAIN_WINDOW_PANE_ADMIN
+        elif role == AgentRole.WORKER:
+            # Worker 1-6 はメインウィンドウ
+            if worker_index < 6:
+                # ペイン番号: 2, 3, 4, 5, 6, 7
+                pane_index = 2 + worker_index
+                return MAIN_SESSION, 0, pane_index
+            else:
+                # Worker 7以降は追加ウィンドウ（12ペイン/ウィンドウ）
+                extra_worker_index = worker_index - 6
+                window_index = 1 + (extra_worker_index // 12)
+                pane_index = extra_worker_index % 12
+                return MAIN_SESSION, window_index, pane_index
+        else:
+            raise ValueError(f"不明なロール: {role}")
+
+    def is_pane_occupied(
+        self, session_name: str, window_index: int, pane_index: int
+    ) -> bool:
+        """指定したペインが使用中か確認する。
+
+        Args:
+            session_name: セッション名
+            window_index: ウィンドウインデックス
+            pane_index: ペインインデックス
+
+        Returns:
+            使用中の場合True
+        """
+        for agent in self.agents.values():
+            if (
+                agent.session_name == session_name
+                and agent.window_index == window_index
+                and agent.pane_index == pane_index
+            ):
+                return True
+        return False
+
+    def get_all_pane_assignments(self) -> dict[tuple[str, int, int], str]:
+        """全ペインの割り当て状況を取得する。
+
+        Returns:
+            {(session_name, window_index, pane_index): agent_id} の辞書
+        """
+        assignments = {}
+        for agent in self.agents.values():
+            if (
+                agent.session_name is not None
+                and agent.window_index is not None
+                and agent.pane_index is not None
+            ):
+                key = (agent.session_name, agent.window_index, agent.pane_index)
+                assignments[key] = agent.id
+        return assignments
+
+    def get_next_worker_slot(
+        self, settings: Settings
+    ) -> tuple[int, int] | None:
+        """次に利用可能なWorkerスロット（ウィンドウ, ペイン）を取得する。
+
+        Args:
+            settings: 設定オブジェクト
+
+        Returns:
+            (window_index, pane_index) のタプル、空きがない場合はNone
+        """
+        total_workers = self.count_workers()
+        if total_workers >= settings.max_workers:
+            return None
+
+        # 使用中のペイン位置を収集
+        used_slots = set()
+        for agent in self.agents.values():
+            if (
+                agent.role == AgentRole.WORKER
+                and agent.window_index is not None
+                and agent.pane_index is not None
+            ):
+                used_slots.add((agent.window_index, agent.pane_index))
+
+        # メインウィンドウ（Worker 1-6）の空きを探す
+        for i in range(6):
+            pane_index = 2 + i  # ペイン 2-7
+            if (0, pane_index) not in used_slots:
+                return (0, pane_index)
+
+        # 追加ウィンドウの空きを探す
+        panes_per_extra = settings.workers_per_extra_window
+        extra_worker_index = 0
+        while total_workers + extra_worker_index < settings.max_workers:
+            window_index = 1 + (extra_worker_index // panes_per_extra)
+            pane_index = extra_worker_index % panes_per_extra
+            if (window_index, pane_index) not in used_slots:
+                return (window_index, pane_index)
+            extra_worker_index += 1
+
+        return None
+
+    def count_workers(self) -> int:
+        """Workerエージェントの数を取得する。
+
+        Returns:
+            Worker数
+        """
+        return len([a for a in self.agents.values() if a.role == AgentRole.WORKER])
+
+    async def ensure_sessions_exist(
+        self, settings: Settings, working_dir: str
+    ) -> tuple[bool, str]:
+        """メインセッションが存在することを確認し、なければ作成する。
+
+        単一セッション方式: 左右50:50分離レイアウト
+        - 左半分: Owner + Admin
+        - 右半分: Worker 1-6
+
+        Args:
+            settings: 設定オブジェクト
+            working_dir: 作業ディレクトリ
+
+        Returns:
+            (成功フラグ, メッセージ) のタプル
+        """
+        # メインセッション（単一セッション方式）
+        if not await self.tmux.create_main_session(working_dir):
+            return False, "メインセッションの作成に失敗しました"
+
+        return True, "メインセッションを作成しました"
+
+    async def ensure_worker_window_exists(
+        self, window_index: int, settings: Settings
+    ) -> bool:
+        """指定したWorkerウィンドウが存在することを確認し、なければ作成する。
+
+        Args:
+            window_index: ウィンドウインデックス（1以上：追加ウィンドウ）
+            settings: 設定オブジェクト
+
+        Returns:
+            成功した場合True
+        """
+        # メインウィンドウ（0）は create_main_session で作成済み
+        if window_index == 0:
+            return True
+
+        # 追加ウィンドウの作成
+        return await self.tmux.add_extra_worker_window(
+            window_index,
+            rows=settings.extra_worker_rows,
+            cols=settings.extra_worker_cols,
+        )

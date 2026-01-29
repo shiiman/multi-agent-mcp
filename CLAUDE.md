@@ -42,7 +42,9 @@ multi-agent-mcp/
 │   │   ├── metrics_manager.py # Statistics collection
 │   │   ├── cost_manager.py    # API cost tracking
 │   │   ├── ipc_manager.py     # Inter-process communication
-│   │   └── dashboard_manager.py # Dashboard state management
+│   │   ├── dashboard_manager.py # Dashboard state management
+│   │   ├── memory_manager.py  # Persistent knowledge management
+│   │   └── persona_manager.py # Task-based persona optimization
 │   └── tools/
 │       ├── session.py         # Workspace tools
 │       ├── agent.py           # Agent tools
@@ -144,7 +146,7 @@ Tools are defined in `server.py` using FastMCP decorators:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MCP_MAX_WORKERS` | Maximum number of worker agents | 5 |
+| `MCP_MAX_WORKERS` | Maximum number of worker agents | 6 |
 | `MCP_TMUX_PREFIX` | Prefix for tmux session names | mcp-agent |
 | `MCP_WORKSPACE_BASE_DIR` | Base directory for workspaces | /tmp/mcp-workspaces |
 | `MCP_DEFAULT_AI_CLI` | Default AI CLI to use | claude |

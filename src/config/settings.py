@@ -53,12 +53,32 @@ class Settings(BaseSettings):
     model_config = ConfigDict(env_prefix="MCP_")
 
     # エージェント設定
-    max_workers: int = 5
-    """Workerエージェントの最大数"""
+    max_workers: int = 6
+    """Workerエージェントの最大数（デフォルト: メインウィンドウに収まる6）"""
 
     # tmux設定
     tmux_prefix: str = "mcp-agent"
     """tmuxセッション名のプレフィックス"""
+
+    # tmux グリッド設定（メインウィンドウ: 左右50:50分離）
+    main_worker_rows: int = 2
+    """メインウィンドウのWorkerエリア行数"""
+
+    main_worker_cols: int = 3
+    """メインウィンドウのWorkerエリア列数"""
+
+    workers_per_main_window: int = 6
+    """メインウィンドウのWorker数（main_worker_rows × main_worker_cols）"""
+
+    # tmux グリッド設定（追加ウィンドウ: Worker 7以降）
+    extra_worker_rows: int = 2
+    """追加ウィンドウの行数"""
+
+    extra_worker_cols: int = 6
+    """追加ウィンドウの列数"""
+
+    workers_per_extra_window: int = 12
+    """追加ウィンドウのWorker数（extra_worker_rows × extra_worker_cols）"""
 
     # ワークスペース設定
     workspace_base_dir: str = "/tmp/mcp-workspaces"
@@ -71,9 +91,6 @@ class Settings(BaseSettings):
     # AI CLI設定
     default_ai_cli: AICli = Field(default=AICli.CLAUDE, description="デフォルトのAI CLI")
     """デフォルトで使用するAI CLI"""
-
-    claude_code_command: str = "claude"
-    """Claude Code CLIのコマンド（後方互換性のため維持）"""
 
     # コスト設定
     cost_warning_threshold_usd: float = 10.0
