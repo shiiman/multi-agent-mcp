@@ -34,36 +34,60 @@ pip install -e .
 
 ## Claude Code での設定
 
-`~/.claude/settings.json` に以下を追加:
+### 方法1: CLI で追加（推奨）
+
+```bash
+# グローバル設定（全プロジェクトで使用可能）
+claude mcp add --transport stdio --scope user multi-agent-mcp -- \
+  uv --directory /path/to/multi-agent-mcp run multi-agent-mcp
+
+# プロジェクト設定（そのプロジェクトのみ、チーム共有）
+claude mcp add --transport stdio --scope project multi-agent-mcp -- \
+  uv --directory /path/to/multi-agent-mcp run multi-agent-mcp
+```
+
+### 方法2: 設定ファイルに直接記述
+
+**グローバル設定** (`~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
-    "multi-agent": {
+    "multi-agent-mcp": {
+      "type": "stdio",
       "command": "uv",
-      "args": [
-        "--directory",
-        "/path/to/multi-agent-mcp",
-        "run",
-        "python",
-        "-m",
-        "src.server"
-      ]
+      "args": ["--directory", "/path/to/multi-agent-mcp", "run", "multi-agent-mcp"],
+      "env": {
+        "MCP_MAX_WORKERS": "5",
+        "MCP_DEFAULT_AI_CLI": "claude"
+      }
     }
   }
 }
 ```
 
-または、インストール済みの場合:
+**プロジェクト設定** (`.mcp.json` をプロジェクトルートに作成):
 
 ```json
 {
   "mcpServers": {
-    "multi-agent": {
-      "command": "multi-agent-mcp"
+    "multi-agent-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "/path/to/multi-agent-mcp", "run", "multi-agent-mcp"],
+      "env": {
+        "MCP_MAX_WORKERS": "5",
+        "MCP_DEFAULT_AI_CLI": "claude"
+      }
     }
   }
 }
+```
+
+### 設定の確認
+
+```bash
+claude mcp list
 ```
 
 ## 提供するTools
@@ -128,6 +152,12 @@ cleanup_workspace()
 | `MCP_MAX_WORKERS` | 5 | Workerの最大数 |
 | `MCP_TMUX_PREFIX` | mcp-agent | tmuxセッション名のプレフィックス |
 | `MCP_WORKSPACE_BASE_DIR` | /tmp/mcp-workspaces | ワークスペースのベースディレクトリ |
+| `MCP_MESSAGE_RETENTION_SECONDS` | 3600 | メッセージ保持時間（秒） |
+| `MCP_DEFAULT_AI_CLI` | claude | デフォルトのAI CLI（claude/codex/gemini） |
+| `MCP_CLAUDE_CODE_COMMAND` | claude | Claude Code実行コマンド |
+| `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
+| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 300 | ヘルスチェック間隔（秒） |
+| `MCP_HEARTBEAT_TIMEOUT_SECONDS` | 300 | ハートビートタイムアウト（秒） |
 
 ## 開発
 
