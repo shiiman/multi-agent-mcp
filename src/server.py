@@ -11,9 +11,16 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.config.settings import Settings
+from src.config.settings import AICli, Settings
+from src.config.templates import get_template, get_template_names, list_templates
+from src.managers.ai_cli_manager import AiCliManager
+from src.managers.cost_manager import CostManager
 from src.managers.dashboard_manager import DashboardManager
+from src.managers.gtrconfig_manager import GtrconfigManager
+from src.managers.healthcheck_manager import HealthcheckManager
 from src.managers.ipc_manager import IPCManager
+from src.managers.metrics_manager import MetricsManager
+from src.managers.scheduler_manager import SchedulerManager, TaskPriority
 from src.managers.tmux_manager import TmuxManager
 from src.managers.worktree_manager import WorktreeManager
 from src.models.agent import Agent, AgentRole, AgentStatus
@@ -34,10 +41,16 @@ class AppContext:
 
     settings: Settings
     tmux: TmuxManager
+    ai_cli: AiCliManager
     agents: dict[str, Agent] = field(default_factory=dict)
     worktree_managers: dict[str, WorktreeManager] = field(default_factory=dict)
+    gtrconfig_managers: dict[str, GtrconfigManager] = field(default_factory=dict)
     ipc_manager: IPCManager | None = None
     dashboard_manager: DashboardManager | None = None
+    scheduler_manager: SchedulerManager | None = None
+    healthcheck_manager: HealthcheckManager | None = None
+    metrics_manager: MetricsManager | None = None
+    cost_manager: CostManager | None = None
     workspace_id: str | None = None
 
 
@@ -56,12 +69,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     # リソースを初期化
     settings = Settings()
     tmux = TmuxManager(settings)
+    ai_cli = AiCliManager(settings)
 
     # ワークスペースディレクトリを作成
     os.makedirs(settings.workspace_base_dir, exist_ok=True)
 
     try:
-        yield AppContext(settings=settings, tmux=tmux)
+        yield AppContext(settings=settings, tmux=tmux, ai_cli=ai_cli)
     finally:
         # クリーンアップ
         logger.info("サーバーをシャットダウンしています...")
@@ -1205,6 +1219,626 @@ async def get_dashboard_summary(ctx: Context = None) -> dict[str, Any]:
         dashboard.update_agent_summary(agent)
 
     summary = dashboard.get_summary()
+
+    return {
+        "success": True,
+        "summary": summary,
+    }
+
+
+# ========== AI CLI Tools ==========
+
+
+@mcp.tool()
+async def get_available_ai_clis(ctx: Context = None) -> dict[str, Any]:
+    """利用可能なAI CLI一覧を取得する。
+
+    Returns:
+        AI CLI一覧（success, clis, default）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    ai_cli = app_ctx.ai_cli
+
+    return {
+        "success": True,
+        "clis": ai_cli.get_all_cli_info(),
+        "default": ai_cli.get_default_cli().value,
+    }
+
+
+@mcp.tool()
+async def open_worktree_with_ai_cli(
+    worktree_path: str,
+    cli: str | None = None,
+    prompt: str | None = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """指定のAI CLIでworktreeを開く。
+
+    Args:
+        worktree_path: worktreeのパス
+        cli: 使用するAI CLI（claude/codex/gemini、省略でデフォルト）
+        prompt: 初期プロンプト（オプション）
+
+    Returns:
+        実行結果（success, cli, message または error）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    ai_cli_manager = app_ctx.ai_cli
+
+    # CLI の検証
+    selected_cli = None
+    if cli:
+        try:
+            selected_cli = AICli(cli)
+        except ValueError:
+            valid_clis = [c.value for c in AICli]
+            return {
+                "success": False,
+                "error": f"無効なAI CLIです: {cli}（有効: {valid_clis}）",
+            }
+
+    success, message = await ai_cli_manager.open_worktree(
+        worktree_path, selected_cli, prompt
+    )
+
+    used_cli = selected_cli or ai_cli_manager.get_default_cli()
+
+    # コスト記録
+    if success and app_ctx.cost_manager:
+        app_ctx.cost_manager.record_call(used_cli.value)
+
+    return {
+        "success": success,
+        "cli": used_cli.value if success else None,
+        "worktree_path": worktree_path if success else None,
+        "message": message,
+    }
+
+
+# ========== Gtrconfig Tools ==========
+
+
+def _get_gtrconfig_manager(app_ctx: AppContext, project_path: str) -> GtrconfigManager:
+    """指定プロジェクトのGtrconfigManagerを取得または作成する。"""
+    if project_path not in app_ctx.gtrconfig_managers:
+        app_ctx.gtrconfig_managers[project_path] = GtrconfigManager(project_path)
+    return app_ctx.gtrconfig_managers[project_path]
+
+
+@mcp.tool()
+async def check_gtrconfig(project_path: str, ctx: Context = None) -> dict[str, Any]:
+    """Gtrconfigの存在確認と内容取得。
+
+    Args:
+        project_path: プロジェクトのルートパス
+
+    Returns:
+        Gtrconfig状態（success, status）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    gtrconfig = _get_gtrconfig_manager(app_ctx, project_path)
+
+    status = gtrconfig.get_status()
+
+    return {
+        "success": True,
+        "status": status,
+    }
+
+
+@mcp.tool()
+async def analyze_project_for_gtrconfig(
+    project_path: str,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """プロジェクト構造を解析して推奨設定を提案する。
+
+    Args:
+        project_path: プロジェクトのルートパス
+
+    Returns:
+        推奨設定（success, recommended_config）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    gtrconfig = _get_gtrconfig_manager(app_ctx, project_path)
+
+    config = gtrconfig.analyze_project()
+
+    return {
+        "success": True,
+        "recommended_config": config,
+    }
+
+
+@mcp.tool()
+async def generate_gtrconfig(
+    project_path: str,
+    overwrite: bool = False,
+    generate_example: bool = True,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """Gtrconfigを自動生成する。
+
+    Args:
+        project_path: プロジェクトのルートパス
+        overwrite: 既存ファイルを上書きするか
+        generate_example: .gtrconfig.example も生成するか
+
+    Returns:
+        生成結果（success, config, message または error）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    gtrconfig = _get_gtrconfig_manager(app_ctx, project_path)
+
+    success, result = gtrconfig.generate(overwrite)
+
+    if not success:
+        return {
+            "success": False,
+            "error": result,
+        }
+
+    # .gtrconfig.example も生成
+    if generate_example:
+        gtrconfig.generate_example()
+
+    return {
+        "success": True,
+        "config": result,
+        "message": ".gtrconfig を生成しました",
+    }
+
+
+# ========== Template Tools ==========
+
+
+@mcp.tool()
+async def list_workspace_templates(ctx: Context = None) -> dict[str, Any]:
+    """利用可能なテンプレート一覧を取得する。
+
+    Returns:
+        テンプレート一覧（success, templates, names）
+    """
+    templates = list_templates()
+
+    return {
+        "success": True,
+        "templates": [t.to_dict() for t in templates],
+        "names": get_template_names(),
+    }
+
+
+@mcp.tool()
+async def get_workspace_template(
+    template_name: str,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """特定テンプレートの詳細を取得する。
+
+    Args:
+        template_name: テンプレート名
+
+    Returns:
+        テンプレート詳細（success, template または error）
+    """
+    template = get_template(template_name)
+
+    if not template:
+        return {
+            "success": False,
+            "error": f"テンプレート '{template_name}' が見つかりません。"
+            f"有効なテンプレート: {get_template_names()}",
+        }
+
+    return {
+        "success": True,
+        "template": template.to_dict(),
+    }
+
+
+# ========== Scheduler Tools ==========
+
+
+def _ensure_scheduler_manager(app_ctx: AppContext) -> SchedulerManager:
+    """SchedulerManagerが初期化されていることを確認する。"""
+    if app_ctx.scheduler_manager is None:
+        dashboard = _ensure_dashboard_manager(app_ctx)
+        app_ctx.scheduler_manager = SchedulerManager(dashboard, app_ctx.agents)
+    return app_ctx.scheduler_manager
+
+
+@mcp.tool()
+async def enqueue_task(
+    task_id: str,
+    priority: str = "medium",
+    dependencies: list[str] | None = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """タスクをスケジューラーキューに追加する。
+
+    Args:
+        task_id: タスクID
+        priority: 優先度（critical/high/medium/low）
+        dependencies: 依存タスクのIDリスト
+
+    Returns:
+        追加結果（success, task_id, priority, message または error）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    scheduler = _ensure_scheduler_manager(app_ctx)
+
+    # 優先度の検証
+    try:
+        task_priority = TaskPriority[priority.upper()]
+    except KeyError:
+        valid_priorities = [p.name.lower() for p in TaskPriority]
+        return {
+            "success": False,
+            "error": f"無効な優先度です: {priority}（有効: {valid_priorities}）",
+        }
+
+    success = scheduler.enqueue_task(task_id, task_priority, dependencies)
+
+    if not success:
+        return {
+            "success": False,
+            "error": f"タスク {task_id} は既にキューに存在します",
+        }
+
+    return {
+        "success": True,
+        "task_id": task_id,
+        "priority": priority,
+        "message": f"タスク {task_id} をキューに追加しました",
+    }
+
+
+@mcp.tool()
+async def auto_assign_tasks(ctx: Context = None) -> dict[str, Any]:
+    """空いているWorkerにタスクを自動割り当てする。
+
+    Returns:
+        割り当て結果（success, assignments, count）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    scheduler = _ensure_scheduler_manager(app_ctx)
+
+    assignments = scheduler.run_auto_assign_loop()
+
+    return {
+        "success": True,
+        "assignments": [
+            {"task_id": tid, "worker_id": wid} for tid, wid in assignments
+        ],
+        "count": len(assignments),
+        "message": f"{len(assignments)} 件のタスクを割り当てました",
+    }
+
+
+@mcp.tool()
+async def get_task_queue(ctx: Context = None) -> dict[str, Any]:
+    """現在のタスクキューを取得する。
+
+    Returns:
+        キュー状態（success, queue）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    scheduler = _ensure_scheduler_manager(app_ctx)
+
+    queue_status = scheduler.get_queue_status()
+
+    return {
+        "success": True,
+        "queue": queue_status,
+    }
+
+
+# ========== Healthcheck Tools ==========
+
+
+def _ensure_healthcheck_manager(app_ctx: AppContext) -> HealthcheckManager:
+    """HealthcheckManagerが初期化されていることを確認する。"""
+    if app_ctx.healthcheck_manager is None:
+        app_ctx.healthcheck_manager = HealthcheckManager(
+            app_ctx.tmux,
+            app_ctx.agents,
+            app_ctx.settings.heartbeat_timeout_seconds,
+        )
+    return app_ctx.healthcheck_manager
+
+
+@mcp.tool()
+async def healthcheck_agent(agent_id: str, ctx: Context = None) -> dict[str, Any]:
+    """特定エージェントのヘルスチェックを実行する。
+
+    Args:
+        agent_id: エージェントID
+
+    Returns:
+        ヘルス状態（success, health_status）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    healthcheck = _ensure_healthcheck_manager(app_ctx)
+
+    status = await healthcheck.check_agent(agent_id)
+
+    return {
+        "success": True,
+        "health_status": status.to_dict(),
+    }
+
+
+@mcp.tool()
+async def healthcheck_all(ctx: Context = None) -> dict[str, Any]:
+    """全エージェントのヘルスチェックを実行する。
+
+    Returns:
+        全ヘルス状態（success, statuses, summary）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    healthcheck = _ensure_healthcheck_manager(app_ctx)
+
+    statuses = await healthcheck.check_all_agents()
+    healthy_count = sum(1 for s in statuses if s.is_healthy)
+    unhealthy_count = len(statuses) - healthy_count
+
+    return {
+        "success": True,
+        "statuses": [s.to_dict() for s in statuses],
+        "summary": {
+            "total": len(statuses),
+            "healthy": healthy_count,
+            "unhealthy": unhealthy_count,
+        },
+    }
+
+
+@mcp.tool()
+async def get_unhealthy_agents(ctx: Context = None) -> dict[str, Any]:
+    """異常なエージェント一覧を取得する。
+
+    Returns:
+        異常エージェント一覧（success, unhealthy_agents, count）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    healthcheck = _ensure_healthcheck_manager(app_ctx)
+
+    unhealthy = await healthcheck.get_unhealthy_agents()
+
+    return {
+        "success": True,
+        "unhealthy_agents": [s.to_dict() for s in unhealthy],
+        "count": len(unhealthy),
+    }
+
+
+@mcp.tool()
+async def attempt_recovery(agent_id: str, ctx: Context = None) -> dict[str, Any]:
+    """エージェントの復旧を試みる。
+
+    Args:
+        agent_id: エージェントID
+
+    Returns:
+        復旧結果（success, message）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    healthcheck = _ensure_healthcheck_manager(app_ctx)
+
+    success, message = await healthcheck.attempt_recovery(agent_id)
+
+    return {
+        "success": success,
+        "agent_id": agent_id,
+        "message": message,
+    }
+
+
+@mcp.tool()
+async def record_heartbeat(agent_id: str, ctx: Context = None) -> dict[str, Any]:
+    """ハートビートを記録する。
+
+    Args:
+        agent_id: エージェントID
+
+    Returns:
+        記録結果（success, message）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    healthcheck = _ensure_healthcheck_manager(app_ctx)
+
+    success = healthcheck.record_heartbeat(agent_id)
+
+    return {
+        "success": success,
+        "agent_id": agent_id,
+        "message": "ハートビートを記録しました" if success else "エージェントが見つかりません",
+    }
+
+
+# ========== Metrics Tools ==========
+
+
+def _ensure_metrics_manager(app_ctx: AppContext) -> MetricsManager:
+    """MetricsManagerが初期化されていることを確認する。"""
+    if app_ctx.metrics_manager is None:
+        metrics_dir = os.path.join(app_ctx.settings.workspace_base_dir, ".metrics")
+        app_ctx.metrics_manager = MetricsManager(metrics_dir)
+    return app_ctx.metrics_manager
+
+
+@mcp.tool()
+async def get_task_metrics(task_id: str, ctx: Context = None) -> dict[str, Any]:
+    """タスクのメトリクスを取得する。
+
+    Args:
+        task_id: タスクID
+
+    Returns:
+        タスクメトリクス（success, metrics または error）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    metrics = _ensure_metrics_manager(app_ctx)
+
+    task_metrics = metrics.get_task_metrics(task_id)
+
+    if not task_metrics:
+        return {
+            "success": False,
+            "error": f"タスク {task_id} のメトリクスが見つかりません",
+        }
+
+    return {
+        "success": True,
+        "metrics": task_metrics.to_dict(),
+    }
+
+
+@mcp.tool()
+async def get_agent_metrics(agent_id: str, ctx: Context = None) -> dict[str, Any]:
+    """エージェントのメトリクスを取得する。
+
+    Args:
+        agent_id: エージェントID
+
+    Returns:
+        エージェントメトリクス（success, metrics）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    metrics = _ensure_metrics_manager(app_ctx)
+
+    agent_metrics = metrics.get_agent_metrics(agent_id)
+
+    return {
+        "success": True,
+        "metrics": agent_metrics.to_dict(),
+    }
+
+
+@mcp.tool()
+async def get_workspace_metrics(ctx: Context = None) -> dict[str, Any]:
+    """ワークスペース全体のメトリクスを取得する。
+
+    Returns:
+        ワークスペースメトリクス（success, metrics）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    metrics = _ensure_metrics_manager(app_ctx)
+
+    workspace_metrics = metrics.get_workspace_metrics(app_ctx.agents)
+
+    return {
+        "success": True,
+        "metrics": workspace_metrics.to_dict(),
+    }
+
+
+@mcp.tool()
+async def get_metrics_summary(ctx: Context = None) -> dict[str, Any]:
+    """メトリクスのサマリーを取得する。
+
+    Returns:
+        サマリー（success, summary）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    metrics = _ensure_metrics_manager(app_ctx)
+
+    summary = metrics.get_summary()
+
+    return {
+        "success": True,
+        "summary": summary,
+    }
+
+
+# ========== Cost Tools ==========
+
+
+def _ensure_cost_manager(app_ctx: AppContext) -> CostManager:
+    """CostManagerが初期化されていることを確認する。"""
+    if app_ctx.cost_manager is None:
+        app_ctx.cost_manager = CostManager(
+            app_ctx.settings.cost_warning_threshold_usd
+        )
+    return app_ctx.cost_manager
+
+
+@mcp.tool()
+async def get_cost_estimate(ctx: Context = None) -> dict[str, Any]:
+    """現在のコスト推定を取得する。
+
+    Returns:
+        コスト推定（success, estimate, warning）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    cost = _ensure_cost_manager(app_ctx)
+
+    estimate = cost.get_estimate()
+    warning = cost.check_warning()
+
+    return {
+        "success": True,
+        "estimate": estimate.to_dict(),
+        "warning": warning,
+    }
+
+
+@mcp.tool()
+async def set_cost_warning_threshold(
+    threshold_usd: float,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """コスト警告の閾値を設定する。
+
+    Args:
+        threshold_usd: 新しい閾値（USD）
+
+    Returns:
+        設定結果（success, threshold, message）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    cost = _ensure_cost_manager(app_ctx)
+
+    cost.set_warning_threshold(threshold_usd)
+
+    return {
+        "success": True,
+        "threshold": threshold_usd,
+        "message": f"コスト警告閾値を ${threshold_usd:.2f} に設定しました",
+    }
+
+
+@mcp.tool()
+async def reset_cost_counter(ctx: Context = None) -> dict[str, Any]:
+    """コストカウンターをリセットする。
+
+    Returns:
+        リセット結果（success, deleted_count, message）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    cost = _ensure_cost_manager(app_ctx)
+
+    deleted = cost.reset()
+
+    return {
+        "success": True,
+        "deleted_count": deleted,
+        "message": f"{deleted} 件の記録をリセットしました",
+    }
+
+
+@mcp.tool()
+async def get_cost_summary(ctx: Context = None) -> dict[str, Any]:
+    """コストサマリーを取得する。
+
+    Returns:
+        コストサマリー（success, summary）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    cost = _ensure_cost_manager(app_ctx)
+
+    summary = cost.get_summary()
 
     return {
         "success": True,

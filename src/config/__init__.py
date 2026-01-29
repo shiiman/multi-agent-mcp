@@ -1,5 +1,20 @@
 """設定モジュール。"""
 
-from .settings import Settings
+from .settings import AICli, Settings
+from .templates import (
+    TEMPLATES,
+    WorkspaceTemplate,
+    get_template,
+    get_template_names,
+    list_templates,
+)
 
-__all__ = ["Settings"]
+__all__ = [
+    "AICli",
+    "Settings",
+    "TEMPLATES",
+    "WorkspaceTemplate",
+    "get_template",
+    "get_template_names",
+    "list_templates",
+]

@@ -64,6 +64,3 @@ Thumbs.db
 
 # MCP workspaces (runtime data)
 /tmp/mcp-workspaces/
-
-# Claude
-.claude/
