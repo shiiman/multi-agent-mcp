@@ -386,3 +386,179 @@ class DashboardManager:
             "active_worktrees": self.dashboard.active_worktrees,
             "updated_at": self.dashboard.updated_at.isoformat(),
         }
+
+    # タスクファイル管理メソッド（ファイルベースのタスク配布）
+
+    def write_task_file(
+        self, project_root: Path, session_id: str, agent_id: str, task_content: str
+    ) -> Path:
+        """Worker用のタスクファイルを作成する（Markdown形式）。
+
+        Args:
+            project_root: プロジェクトルートパス
+            session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
+            agent_id: エージェントID
+            task_content: タスク内容
+
+        Returns:
+            作成したタスクファイルのパス
+        """
+        task_dir = project_root / ".claude" / "tmp" / session_id / "tasks"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        task_file = task_dir / f"{agent_id}.md"
+        task_file.write_text(task_content, encoding="utf-8")
+        logger.info(f"タスクファイルを作成しました: {task_file}")
+        return task_file
+
+    def get_task_file_path(
+        self, project_root: Path, session_id: str, agent_id: str
+    ) -> Path:
+        """Worker用のタスクファイルパスを取得する。
+
+        Args:
+            project_root: プロジェクトルートパス
+            session_id: Issue番号または一意なタスクID
+            agent_id: エージェントID
+
+        Returns:
+            タスクファイルのパス
+        """
+        return project_root / ".claude" / "tmp" / session_id / "tasks" / f"{agent_id}.md"
+
+    def read_task_file(
+        self, project_root: Path, session_id: str, agent_id: str
+    ) -> str | None:
+        """Worker用のタスクファイルを読み取る。
+
+        Args:
+            project_root: プロジェクトルートパス
+            session_id: Issue番号または一意なタスクID
+            agent_id: エージェントID
+
+        Returns:
+            タスクファイルの内容、存在しない場合はNone
+        """
+        task_file = self.get_task_file_path(project_root, session_id, agent_id)
+        if task_file.exists():
+            return task_file.read_text(encoding="utf-8")
+        return None
+
+    def clear_task_file(
+        self, project_root: Path, session_id: str, agent_id: str
+    ) -> bool:
+        """タスクファイルをクリアする。
+
+        Args:
+            project_root: プロジェクトルートパス
+            session_id: Issue番号または一意なタスクID
+            agent_id: エージェントID
+
+        Returns:
+            削除に成功した場合True
+        """
+        task_file = self.get_task_file_path(project_root, session_id, agent_id)
+        if task_file.exists():
+            task_file.unlink()
+            logger.info(f"タスクファイルを削除しました: {task_file}")
+            return True
+        return False
+
+    # Markdown ダッシュボード生成メソッド
+
+    def generate_markdown_dashboard(self) -> str:
+        """Markdown形式のダッシュボードを生成する。
+
+        Returns:
+            Markdown形式のダッシュボード文字列
+        """
+        dashboard = self.get_dashboard()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        lines = [
+            "# Multi-Agent Dashboard",
+            "",
+            f"**更新時刻**: {now}",
+            "",
+            "---",
+            "",
+            "## エージェント状態",
+            "",
+            "| ID | 役割 | 状態 | 現在のタスク | Worktree |",
+            "|:---|:---|:---|:---|:---|",
+        ]
+
+        status_emoji = {
+            "idle": "🟢",
+            "busy": "🔵",
+            "error": "🔴",
+            "offline": "⚫",
+        }
+
+        for agent in dashboard.agents:
+            emoji = status_emoji.get(str(agent.status).lower(), "⚪")
+            current_task = agent.current_task_id or "-"
+            worktree = agent.worktree_path or "-"
+            lines.append(
+                f"| `{agent.agent_id[:8]}` | {agent.role} | {emoji} {agent.status} | "
+                f"{current_task} | `{worktree}` |"
+            )
+
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## タスク状態",
+            "",
+            "| ID | タイトル | 状態 | 担当 | 進捗 |",
+            "|:---|:---|:---|:---|:---|",
+        ])
+
+        task_emoji = {
+            "pending": "⏳",
+            "in_progress": "🔄",
+            "completed": "✅",
+            "failed": "❌",
+            "blocked": "🚫",
+            "cancelled": "🗑️",
+        }
+
+        for task in dashboard.tasks:
+            emoji = task_emoji.get(str(task.status.value).lower(), "❓")
+            assigned = task.assigned_agent_id[:8] if task.assigned_agent_id else "-"
+            lines.append(
+                f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
+                f"`{assigned}` | {task.progress}% |"
+            )
+
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 統計",
+            "",
+            f"- **総エージェント数**: {dashboard.total_agents}",
+            f"- **アクティブエージェント**: {dashboard.active_agents}",
+            f"- **総タスク数**: {dashboard.total_tasks}",
+            f"- **完了タスク**: {dashboard.completed_tasks}",
+            f"- **失敗タスク**: {dashboard.failed_tasks}",
+        ])
+
+        return "\n".join(lines)
+
+    def save_markdown_dashboard(self, project_root: Path, session_id: str) -> Path:
+        """Markdownダッシュボードをファイルに保存する。
+
+        Args:
+            project_root: プロジェクトルートパス
+            session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
+
+        Returns:
+            保存したファイルのパス
+        """
+        md_content = self.generate_markdown_dashboard()
+        dashboard_dir = project_root / ".claude" / "tmp" / session_id / "dashboard"
+        dashboard_dir.mkdir(parents=True, exist_ok=True)
+        md_path = dashboard_dir / "dashboard.md"
+        md_path.write_text(md_content, encoding="utf-8")
+        logger.info(f"Markdownダッシュボードを保存しました: {md_path}")
+        return md_path

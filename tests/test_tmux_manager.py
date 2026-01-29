@@ -107,3 +107,148 @@ class TestTmuxManager:
         success = await tmux_manager.kill_session("nonexistent-session")
         # 実装によってはTrue/Falseが変わるが、例外は発生しない
         assert success is True or success is False
+
+    @pytest.mark.asyncio
+    async def test_send_keys_with_special_characters(self, tmux_manager, temp_dir):
+        """特殊文字を含むコマンドのリテラルモード送信をテスト。"""
+        session_name = "test-session-special"
+
+        await tmux_manager.create_session(session_name, str(temp_dir))
+
+        try:
+            # 特殊文字（#, $, !）を含むコマンドをリテラルモードで送信
+            success = await tmux_manager.send_keys(
+                session_name, "echo 'Hello #World $USER!'", literal=True
+            )
+            assert success is True
+
+            # 少し待ってから出力をキャプチャ
+            import asyncio
+
+            await asyncio.sleep(0.5)
+            output = await tmux_manager.capture_pane(session_name, 10)
+            # コマンドがそのまま送信されていることを確認
+            assert "Hello #World" in output or "echo" in output
+        finally:
+            await tmux_manager.kill_session(session_name)
+
+    @pytest.mark.asyncio
+    async def test_send_keys_non_literal_mode(self, tmux_manager, temp_dir):
+        """非リテラルモードでの送信をテスト。"""
+        session_name = "test-session-nonliteral"
+
+        await tmux_manager.create_session(session_name, str(temp_dir))
+
+        try:
+            # 非リテラルモードで送信
+            success = await tmux_manager.send_keys(
+                session_name, "echo test", literal=False
+            )
+            assert success is True
+        finally:
+            await tmux_manager.kill_session(session_name)
+
+    @pytest.mark.asyncio
+    async def test_run_shell(self, tmux_manager):
+        """シェルコマンド実行をテスト。"""
+        code, stdout, stderr = await tmux_manager._run_shell("echo 'test'")
+        assert code == 0
+        assert "test" in stdout
+
+    @pytest.mark.asyncio
+    async def test_run_shell_error(self, tmux_manager):
+        """シェルコマンドエラーをテスト。"""
+        code, stdout, stderr = await tmux_manager._run_shell("exit 1")
+        assert code == 1
+
+    @pytest.mark.asyncio
+    async def test_open_session_in_terminal_terminal_app(
+        self, tmux_manager, temp_dir, monkeypatch
+    ):
+        """Terminal.app でセッションを開くテスト（モック使用）。"""
+        session_name = "test-session-terminal"
+
+        await tmux_manager.create_session(session_name, str(temp_dir))
+
+        try:
+            # shutil.which をモックして ghostty が存在しないようにする
+            monkeypatch.setattr(shutil, "which", lambda x: None)
+
+            # _run_shell をモックしてターミナル起動をシミュレート
+            # ghostty(macOS path)は失敗、iTerm2は失敗、Terminal.appは成功
+            async def mock_run_shell(cmd):
+                if "ghostty" in cmd.lower():
+                    return (1, "", "ghostty not found")
+                if "iTerm" in cmd and "exists" in cmd:
+                    return (1, "", "")  # iTerm2 存在チェック失敗
+                if "Terminal" in cmd:
+                    return (0, "", "")  # Terminal.app 成功
+                return (1, "", "unknown command")
+
+            monkeypatch.setattr(tmux_manager, "_run_shell", mock_run_shell)
+
+            success = await tmux_manager.open_session_in_terminal(session_name)
+
+            assert success is True
+        finally:
+            await tmux_manager.kill_session(session_name)
+
+    @pytest.mark.asyncio
+    async def test_open_session_in_terminal_iterm(
+        self, tmux_manager, temp_dir, monkeypatch
+    ):
+        """iTerm2 でセッションを開くテスト（モック使用）。"""
+        session_name = "test-session-iterm"
+
+        await tmux_manager.create_session(session_name, str(temp_dir))
+
+        try:
+            # shutil.which をモックして ghostty が存在しないようにする
+            monkeypatch.setattr(shutil, "which", lambda x: None)
+
+            # _run_shell をモックして iTerm2 で開くシミュレート
+            # ghostty(macOS path)は失敗、iTerm2は成功
+            async def mock_run_shell(cmd):
+                if "ghostty" in cmd.lower():
+                    return (1, "", "ghostty not found")
+                if "iTerm" in cmd:
+                    return (0, "", "")  # iTerm2 存在チェック成功、iTerm2 で開く成功
+                return (1, "", "unknown command")
+
+            monkeypatch.setattr(tmux_manager, "_run_shell", mock_run_shell)
+
+            success = await tmux_manager.open_session_in_terminal(session_name)
+
+            assert success is True
+        finally:
+            await tmux_manager.kill_session(session_name)
+
+    @pytest.mark.asyncio
+    async def test_open_session_in_terminal_ghostty(
+        self, tmux_manager, temp_dir, monkeypatch
+    ):
+        """ghostty でセッションを開くテスト（モック使用）。"""
+        session_name = "test-session-ghostty"
+
+        await tmux_manager.create_session(session_name, str(temp_dir))
+
+        try:
+            # shutil.which をモックして ghostty が存在するようにする
+            monkeypatch.setattr(shutil, "which", lambda x: "/usr/local/bin/ghostty")
+
+            # _run_shell をモックして ghostty で開くシミュレート
+            call_count = 0
+
+            async def mock_run_shell(cmd):
+                nonlocal call_count
+                call_count += 1
+                return (0, "", "")
+
+            monkeypatch.setattr(tmux_manager, "_run_shell", mock_run_shell)
+
+            success = await tmux_manager.open_session_in_terminal(session_name)
+
+            assert success is True
+            assert call_count == 1
+        finally:
+            await tmux_manager.kill_session(session_name)

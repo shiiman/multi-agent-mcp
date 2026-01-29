@@ -75,22 +75,38 @@ class TmuxManager:
             logger.error(f"セッション作成エラー: {stderr}")
         return code == 0
 
-    async def send_keys(self, session: str, command: str) -> bool:
+    async def send_keys(self, session: str, command: str, literal: bool = True) -> bool:
         """セッションにキー入力を送信する。
 
         Args:
             session: セッション名（プレフィックスなし）
             command: 実行するコマンド
+            literal: Trueの場合、特殊文字をリテラルとして送信（デフォルト: True）
 
         Returns:
             成功した場合True
         """
         session_name = self._session_name(session)
-        code, _, stderr = await self._run(
-            "send-keys", "-t", session_name, command, "Enter"
-        )
+
+        # コマンド送信（リテラルモードで特殊文字をエスケープ）
+        # multi-agent-shogun の知見: メッセージと Enter は別々に送信する必要がある
+        if literal:
+            code, _, stderr = await self._run(
+                "send-keys", "-t", session_name, "-l", command
+            )
+        else:
+            code, _, stderr = await self._run(
+                "send-keys", "-t", session_name, command
+            )
+
         if code != 0:
             logger.error(f"キー送信エラー: {stderr}")
+            return False
+
+        # Enter キーを別途送信（重要：multi-agent-shogun の知見）
+        code, _, stderr = await self._run("send-keys", "-t", session_name, "Enter")
+        if code != 0:
+            logger.error(f"Enterキー送信エラー: {stderr}")
         return code == 0
 
     async def capture_pane(self, session: str, lines: int = 100) -> str:
@@ -166,3 +182,81 @@ class TmuxManager:
             if await self.kill_session(name):
                 count += 1
         return count
+
+    async def _run_shell(self, command: str) -> tuple[int, str, str]:
+        """シェルコマンドを実行する。
+
+        Args:
+            command: 実行するシェルコマンド
+
+        Returns:
+            (リターンコード, stdout, stderr) のタプル
+        """
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            return proc.returncode or 0, stdout.decode(), stderr.decode()
+        except Exception as e:
+            logger.error(f"シェルコマンド実行エラー: {e}")
+            return 1, "", str(e)
+
+    async def open_session_in_terminal(self, session: str) -> bool:
+        """tmuxセッションをターミナルアプリで開く。
+
+        優先順位: ghostty → iTerm2 → Terminal.app
+
+        Args:
+            session: セッション名（プレフィックスなし）
+
+        Returns:
+            成功した場合True
+        """
+        import shutil
+        from pathlib import Path
+
+        session_name = self._session_name(session)
+        attach_cmd = f"tmux attach -t {session_name}"
+
+        # ghostty を確認（PATHまたはmacOSアプリケーション）
+        ghostty_path = shutil.which("ghostty")
+        if not ghostty_path:
+            macos_ghostty = Path("/Applications/Ghostty.app/Contents/MacOS/ghostty")
+            if macos_ghostty.exists():
+                ghostty_path = str(macos_ghostty)
+
+        if ghostty_path:
+            code, _, _ = await self._run_shell(f'"{ghostty_path}" -e "{attach_cmd}"')
+            if code == 0:
+                return True
+
+        # iTerm2 を確認
+        iterm_check = await self._run_shell(
+            "osascript -e 'application \"iTerm\" exists'"
+        )
+        if iterm_check[0] == 0:
+            applescript = f'''
+            tell application "iTerm"
+                activate
+                create window with default profile
+                tell current session of current window
+                    write text "{attach_cmd}"
+                end tell
+            end tell
+            '''
+            code, _, _ = await self._run_shell(f"osascript -e '{applescript}'")
+            if code == 0:
+                return True
+
+        # Terminal.app にフォールバック
+        applescript = f'''
+        tell application "Terminal"
+            activate
+            do script "{attach_cmd}"
+        end tell
+        '''
+        code, _, _ = await self._run_shell(f"osascript -e '{applescript}'")
+        return code == 0

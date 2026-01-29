@@ -1,5 +1,6 @@
 """DashboardManagerのテスト。"""
 
+from pathlib import Path
 
 from src.models.dashboard import TaskStatus
 
@@ -163,3 +164,169 @@ class TestDashboardManager:
 
         assert success is False
         assert "見つかりません" in message
+
+
+class TestTaskFileManagement:
+    """タスクファイル管理機能のテスト。"""
+
+    def test_write_task_file(self, dashboard_manager, temp_dir):
+        """タスクファイル作成をテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        task_content = "# Task\n\nDo something important."
+        task_file = dashboard_manager.write_task_file(
+            project_root=project_root,
+            session_id="123",
+            agent_id="agent-001",
+            task_content=task_content,
+        )
+
+        assert task_file.exists()
+        assert task_file.read_text(encoding="utf-8") == task_content
+        assert task_file.name == "agent-001.md"
+        assert ".claude/tmp/123/tasks" in str(task_file)
+
+    def test_get_task_file_path(self, dashboard_manager, temp_dir):
+        """タスクファイルパス取得をテスト。"""
+        project_root = temp_dir / "project"
+
+        path = dashboard_manager.get_task_file_path(
+            project_root=project_root,
+            session_id="456",
+            agent_id="agent-002",
+        )
+
+        expected = project_root / ".claude" / "tmp" / "456" / "tasks" / "agent-002.md"
+        assert path == expected
+
+    def test_read_task_file(self, dashboard_manager, temp_dir):
+        """タスクファイル読み取りをテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        task_content = "# Read Test\n\nContent here."
+        dashboard_manager.write_task_file(
+            project_root=project_root,
+            session_id="789",
+            agent_id="agent-003",
+            task_content=task_content,
+        )
+
+        read_content = dashboard_manager.read_task_file(
+            project_root=project_root,
+            session_id="789",
+            agent_id="agent-003",
+        )
+
+        assert read_content == task_content
+
+    def test_read_task_file_not_exists(self, dashboard_manager, temp_dir):
+        """存在しないタスクファイル読み取りをテスト。"""
+        project_root = temp_dir / "project"
+
+        read_content = dashboard_manager.read_task_file(
+            project_root=project_root,
+            session_id="999",
+            agent_id="nonexistent",
+        )
+
+        assert read_content is None
+
+    def test_clear_task_file(self, dashboard_manager, temp_dir):
+        """タスクファイル削除をテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        # ファイルを作成
+        task_file = dashboard_manager.write_task_file(
+            project_root=project_root,
+            session_id="delete-test",
+            agent_id="agent-delete",
+            task_content="To be deleted",
+        )
+        assert task_file.exists()
+
+        # 削除
+        success = dashboard_manager.clear_task_file(
+            project_root=project_root,
+            session_id="delete-test",
+            agent_id="agent-delete",
+        )
+
+        assert success is True
+        assert not task_file.exists()
+
+    def test_clear_task_file_not_exists(self, dashboard_manager, temp_dir):
+        """存在しないタスクファイル削除をテスト。"""
+        project_root = temp_dir / "project"
+
+        success = dashboard_manager.clear_task_file(
+            project_root=project_root,
+            session_id="nonexistent",
+            agent_id="nonexistent",
+        )
+
+        assert success is False
+
+
+class TestMarkdownDashboard:
+    """Markdownダッシュボード機能のテスト。"""
+
+    def test_generate_markdown_dashboard(self, dashboard_manager):
+        """Markdownダッシュボード生成をテスト。"""
+        # タスクを作成
+        dashboard_manager.create_task(title="Task 1", description="First task")
+        task2 = dashboard_manager.create_task(title="Task 2", description="Second task")
+        dashboard_manager.update_task_status(task2.id, TaskStatus.IN_PROGRESS)
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+
+        # 基本的な構造を確認
+        assert "# Multi-Agent Dashboard" in md_content
+        assert "## エージェント状態" in md_content
+        assert "## タスク状態" in md_content
+        assert "## 統計" in md_content
+        assert "更新時刻" in md_content
+
+        # タスク情報が含まれていることを確認
+        assert "Task 1" in md_content
+        assert "Task 2" in md_content
+
+        # 統計情報が含まれていることを確認
+        assert "総タスク数" in md_content
+        assert "完了タスク" in md_content
+
+    def test_save_markdown_dashboard(self, dashboard_manager, temp_dir):
+        """Markdownダッシュボード保存をテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        dashboard_manager.create_task(title="Dashboard Test Task")
+
+        md_path = dashboard_manager.save_markdown_dashboard(
+            project_root=project_root,
+            session_id="dashboard-test",
+        )
+
+        assert md_path.exists()
+        assert md_path.name == "dashboard.md"
+        assert ".claude/tmp/dashboard-test/dashboard" in str(md_path)
+
+        content = md_path.read_text(encoding="utf-8")
+        assert "# Multi-Agent Dashboard" in content
+        assert "Dashboard Test Task" in content
+
+    def test_markdown_dashboard_with_completed_task(self, dashboard_manager, temp_dir):
+        """完了タスクを含むMarkdownダッシュボードをテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        task = dashboard_manager.create_task(title="Completed Task")
+        dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED)
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+
+        # 完了タスクのemojiが含まれていることを確認
+        assert "✅" in md_content
+        assert "Completed Task" in md_content
