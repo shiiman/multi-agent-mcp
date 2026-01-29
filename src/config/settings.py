@@ -91,3 +91,13 @@ class Settings(BaseSettings):
         default=TerminalApp.AUTO, description="デフォルトのターミナルアプリ"
     )
     """デフォルトで使用するターミナルアプリ"""
+
+    # Extended Thinking 設定（ロール別）
+    owner_thinking_tokens: int = 0
+    """Owner の思考トークン数（0 = 即断即決モード）"""
+
+    admin_thinking_tokens: int = 1000
+    """Admin の思考トークン数（中程度の思考）"""
+
+    worker_thinking_tokens: int = 10000
+    """Worker の思考トークン数（深い思考が可能）"""

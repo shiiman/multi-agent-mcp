@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from src.config.settings import Settings
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.models.workspace import WorktreeAssignment
 
@@ -223,4 +224,38 @@ class AgentManager:
             "by_role": by_role,
             "by_status": by_status,
             "assigned_worktrees": len(self.assignments),
+        }
+
+    @staticmethod
+    def get_thinking_tokens_for_role(role: AgentRole, settings: Settings) -> int:
+        """ロールに応じた Extended Thinking トークン数を取得する。
+
+        Args:
+            role: エージェントの役割
+            settings: 設定オブジェクト
+
+        Returns:
+            思考トークン数
+        """
+        if role == AgentRole.OWNER:
+            return settings.owner_thinking_tokens
+        elif role == AgentRole.ADMIN:
+            return settings.admin_thinking_tokens
+        else:  # WORKER
+            return settings.worker_thinking_tokens
+
+    @staticmethod
+    def get_thinking_env_vars(role: AgentRole, settings: Settings) -> dict[str, str]:
+        """ロールに応じた Extended Thinking 環境変数を取得する。
+
+        Args:
+            role: エージェントの役割
+            settings: 設定オブジェクト
+
+        Returns:
+            環境変数の辞書
+        """
+        tokens = AgentManager.get_thinking_tokens_for_role(role, settings)
+        return {
+            "MAX_THINKING_TOKENS": str(tokens),
         }

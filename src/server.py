@@ -19,7 +19,9 @@ from src.managers.dashboard_manager import DashboardManager
 from src.managers.gtrconfig_manager import GtrconfigManager
 from src.managers.healthcheck_manager import HealthcheckManager
 from src.managers.ipc_manager import IPCManager
+from src.managers.memory_manager import MemoryManager
 from src.managers.metrics_manager import MetricsManager
+from src.managers.persona_manager import PersonaManager
 from src.managers.scheduler_manager import SchedulerManager, TaskPriority
 from src.managers.tmux_manager import TmuxManager
 from src.managers.worktree_manager import WorktreeManager
@@ -51,7 +53,11 @@ class AppContext:
     healthcheck_manager: HealthcheckManager | None = None
     metrics_manager: MetricsManager | None = None
     cost_manager: CostManager | None = None
+    persona_manager: PersonaManager | None = None
+    memory_manager: MemoryManager | None = None
     workspace_id: str | None = None
+    project_root: str | None = None
+    """プロジェクトルート（.multi-agent-mcp/ の親ディレクトリ）"""
 
 
 @asynccontextmanager
@@ -1941,6 +1947,628 @@ async def get_cost_summary(ctx: Context = None) -> dict[str, Any]:
     cost = _ensure_cost_manager(app_ctx)
 
     summary = cost.get_summary()
+
+    return {
+        "success": True,
+        "summary": summary,
+    }
+
+
+# ========== Persona Tools ==========
+
+
+def _ensure_persona_manager(app_ctx: AppContext) -> PersonaManager:
+    """PersonaManagerが初期化されていることを確認する。"""
+    if app_ctx.persona_manager is None:
+        app_ctx.persona_manager = PersonaManager()
+    return app_ctx.persona_manager
+
+
+@mcp.tool()
+async def detect_task_type(
+    task_description: str,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """タスクの説明からタスクタイプを検出する。
+
+    Args:
+        task_description: タスクの説明文
+
+    Returns:
+        検出結果（success, task_type, persona）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    persona = _ensure_persona_manager(app_ctx)
+
+    task_type = persona.detect_task_type(task_description)
+    persona_info = persona.get_persona(task_type)
+
+    return {
+        "success": True,
+        "task_type": task_type.value,
+        "persona": {
+            "name": persona_info.name,
+            "description": persona_info.description,
+        },
+    }
+
+
+@mcp.tool()
+async def get_optimal_persona(
+    task_description: str,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """タスクに最適なペルソナを取得する。
+
+    Args:
+        task_description: タスクの説明文
+
+    Returns:
+        ペルソナ情報（success, persona, system_prompt_addition）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    persona_manager = _ensure_persona_manager(app_ctx)
+
+    persona = persona_manager.get_optimal_persona(task_description)
+
+    return {
+        "success": True,
+        "persona": {
+            "name": persona.name,
+            "description": persona.description,
+        },
+        "system_prompt_addition": persona.system_prompt_addition,
+    }
+
+
+@mcp.tool()
+async def list_personas(ctx: Context = None) -> dict[str, Any]:
+    """利用可能なペルソナ一覧を取得する。
+
+    Returns:
+        ペルソナ一覧（success, personas, count）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    persona_manager = _ensure_persona_manager(app_ctx)
+
+    personas = persona_manager.list_personas()
+
+    return {
+        "success": True,
+        "personas": personas,
+        "count": len(personas),
+    }
+
+
+# ========== Memory Tools ==========
+
+
+def _ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
+    """MemoryManagerが初期化されていることを確認する。"""
+    if app_ctx.memory_manager is None:
+        # プロジェクトルートを決定
+        project_root = app_ctx.project_root
+
+        # プロジェクトルートが未設定の場合、エージェントの worktree_path から取得
+        if not project_root:
+            for agent in app_ctx.agents.values():
+                if agent.worktree_path:
+                    project_root = agent.worktree_path
+                    break
+
+        # それでも未設定の場合は workspace_base_dir を使用
+        if not project_root:
+            project_root = app_ctx.settings.workspace_base_dir
+
+        # .multi-agent-mcp/memory/memory.json に保存
+        memory_path = os.path.join(project_root, ".multi-agent-mcp", "memory", "memory.json")
+        app_ctx.memory_manager = MemoryManager(storage_path=memory_path)
+    return app_ctx.memory_manager
+
+
+@mcp.tool()
+async def save_to_memory(
+    key: str,
+    content: str,
+    tags: list[str] | None = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """知識をメモリに保存する。
+
+    Args:
+        key: エントリのキー（一意な識別子）
+        content: 保存するコンテンツ
+        tags: タグのリスト（オプション）
+
+    Returns:
+        保存結果（success, entry, message）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    entry = memory.save(key, content, tags)
+
+    return {
+        "success": True,
+        "entry": memory.to_dict(entry),
+        "message": f"メモリに保存しました: {key}",
+    }
+
+
+@mcp.tool()
+async def retrieve_from_memory(
+    query: str,
+    tags: list[str] | None = None,
+    limit: int = 10,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """メモリから知識を検索する。
+
+    Args:
+        query: 検索クエリ
+        tags: フィルタリングするタグ（オプション）
+        limit: 最大結果数
+
+    Returns:
+        検索結果（success, entries, count）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    entries = memory.search(query, tags, limit)
+
+    return {
+        "success": True,
+        "entries": [memory.to_dict(e) for e in entries],
+        "count": len(entries),
+    }
+
+
+@mcp.tool()
+async def get_memory_entry(key: str, ctx: Context = None) -> dict[str, Any]:
+    """キーでメモリエントリを取得する。
+
+    Args:
+        key: エントリのキー
+
+    Returns:
+        エントリ情報（success, entry または error）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    entry = memory.get(key)
+
+    if not entry:
+        return {
+            "success": False,
+            "error": f"メモリエントリ '{key}' が見つかりません",
+        }
+
+    return {
+        "success": True,
+        "entry": memory.to_dict(entry),
+    }
+
+
+@mcp.tool()
+async def list_memory_entries(
+    tags: list[str] | None = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """メモリエントリ一覧を取得する。
+
+    Args:
+        tags: フィルタリングするタグ（オプション）
+
+    Returns:
+        エントリ一覧（success, entries, count）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    if tags:
+        entries = memory.list_by_tags(tags)
+    else:
+        entries = memory.list_all()
+
+    return {
+        "success": True,
+        "entries": [memory.to_dict(e) for e in entries],
+        "count": len(entries),
+    }
+
+
+@mcp.tool()
+async def delete_memory_entry(key: str, ctx: Context = None) -> dict[str, Any]:
+    """メモリエントリを削除する。
+
+    Args:
+        key: 削除するエントリのキー
+
+    Returns:
+        削除結果（success, key, message）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    success = memory.delete(key)
+
+    if not success:
+        return {
+            "success": False,
+            "error": f"メモリエントリ '{key}' が見つかりません",
+        }
+
+    return {
+        "success": True,
+        "key": key,
+        "message": f"メモリエントリを削除しました: {key}",
+    }
+
+
+@mcp.tool()
+async def get_memory_summary(ctx: Context = None) -> dict[str, Any]:
+    """メモリのサマリー情報を取得する。
+
+    Returns:
+        サマリー情報（success, summary）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    summary = memory.get_summary()
+
+    return {
+        "success": True,
+        "summary": summary,
+    }
+
+
+# ========== Memory Archive Tools (Layer 3) ==========
+
+
+@mcp.tool()
+async def search_memory_archive(
+    query: str,
+    tags: list[str] | None = None,
+    limit: int = 10,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """アーカイブされたメモリを検索する。
+
+    prune で移動されたエントリを検索できる。
+
+    Args:
+        query: 検索クエリ
+        tags: フィルタリングするタグ（オプション）
+        limit: 最大結果数
+
+    Returns:
+        検索結果（success, entries, count）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    entries = memory.search_archive(query, tags, limit)
+
+    return {
+        "success": True,
+        "entries": [memory.to_dict(e) for e in entries],
+        "count": len(entries),
+    }
+
+
+@mcp.tool()
+async def list_memory_archive(
+    limit: int | None = 50,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """アーカイブされたメモリエントリ一覧を取得する。
+
+    Args:
+        limit: 最大結果数（デフォルト: 50）
+
+    Returns:
+        エントリ一覧（success, entries, count）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    entries = memory.list_archive(limit)
+
+    return {
+        "success": True,
+        "entries": [memory.to_dict(e) for e in entries],
+        "count": len(entries),
+    }
+
+
+@mcp.tool()
+async def restore_from_memory_archive(key: str, ctx: Context = None) -> dict[str, Any]:
+    """アーカイブからメモリエントリを復元する。
+
+    Args:
+        key: 復元するエントリのキー
+
+    Returns:
+        復元結果（success, entry, message または error）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    entry = memory.restore_from_archive(key)
+
+    if not entry:
+        return {
+            "success": False,
+            "error": f"アーカイブにエントリ '{key}' が見つかりません",
+        }
+
+    return {
+        "success": True,
+        "entry": memory.to_dict(entry),
+        "message": f"アーカイブから復元しました: {key}",
+    }
+
+
+@mcp.tool()
+async def get_memory_archive_summary(ctx: Context = None) -> dict[str, Any]:
+    """アーカイブのサマリー情報を取得する。
+
+    Returns:
+        サマリー情報（success, summary）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    memory = _ensure_memory_manager(app_ctx)
+
+    summary = memory.get_archive_summary()
+
+    return {
+        "success": True,
+        "summary": summary,
+    }
+
+
+# ========== Global Memory Tools (Layer 2) ==========
+
+
+# グローバルメモリマネージャーのキャッシュ（アプリケーション全体で共有）
+_global_memory_manager: MemoryManager | None = None
+
+
+def _ensure_global_memory_manager() -> MemoryManager:
+    """グローバルMemoryManagerが初期化されていることを確認する。"""
+    global _global_memory_manager
+    if _global_memory_manager is None:
+        _global_memory_manager = MemoryManager.from_global()
+    return _global_memory_manager
+
+
+@mcp.tool()
+async def save_to_global_memory(
+    key: str,
+    content: str,
+    tags: list[str] | None = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """知識をグローバルメモリに保存する（全プロジェクト共通）。
+
+    保存先: ~/.multi-agent-mcp/memory/memory.json
+
+    Args:
+        key: エントリのキー（一意な識別子）
+        content: 保存するコンテンツ
+        tags: タグのリスト（オプション）
+
+    Returns:
+        保存結果（success, entry, message）
+    """
+    memory = _ensure_global_memory_manager()
+
+    entry = memory.save(key, content, tags)
+
+    return {
+        "success": True,
+        "entry": memory.to_dict(entry),
+        "message": f"グローバルメモリに保存しました: {key}",
+    }
+
+
+@mcp.tool()
+async def retrieve_from_global_memory(
+    query: str,
+    tags: list[str] | None = None,
+    limit: int = 10,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """グローバルメモリから知識を検索する（全プロジェクト共通）。
+
+    Args:
+        query: 検索クエリ
+        tags: フィルタリングするタグ（オプション）
+        limit: 最大結果数
+
+    Returns:
+        検索結果（success, entries, count）
+    """
+    memory = _ensure_global_memory_manager()
+
+    entries = memory.search(query, tags, limit)
+
+    return {
+        "success": True,
+        "entries": [memory.to_dict(e) for e in entries],
+        "count": len(entries),
+    }
+
+
+@mcp.tool()
+async def list_global_memory_entries(
+    tags: list[str] | None = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """グローバルメモリエントリ一覧を取得する（全プロジェクト共通）。
+
+    Args:
+        tags: フィルタリングするタグ（オプション）
+
+    Returns:
+        エントリ一覧（success, entries, count）
+    """
+    memory = _ensure_global_memory_manager()
+
+    if tags:
+        entries = memory.list_by_tags(tags)
+    else:
+        entries = memory.list_all()
+
+    return {
+        "success": True,
+        "entries": [memory.to_dict(e) for e in entries],
+        "count": len(entries),
+    }
+
+
+@mcp.tool()
+async def get_global_memory_summary(ctx: Context = None) -> dict[str, Any]:
+    """グローバルメモリのサマリー情報を取得する（全プロジェクト共通）。
+
+    Returns:
+        サマリー情報（success, summary）
+    """
+    memory = _ensure_global_memory_manager()
+
+    summary = memory.get_summary()
+
+    return {
+        "success": True,
+        "summary": summary,
+    }
+
+
+@mcp.tool()
+async def delete_global_memory_entry(key: str, ctx: Context = None) -> dict[str, Any]:
+    """グローバルメモリエントリを削除する（全プロジェクト共通）。
+
+    Args:
+        key: 削除するエントリのキー
+
+    Returns:
+        削除結果（success, key, message）
+    """
+    memory = _ensure_global_memory_manager()
+
+    success = memory.delete(key)
+
+    if not success:
+        return {
+            "success": False,
+            "error": f"グローバルメモリエントリ '{key}' が見つかりません",
+        }
+
+    return {
+        "success": True,
+        "key": key,
+        "message": f"グローバルメモリエントリを削除しました: {key}",
+    }
+
+
+# ========== Global Memory Archive Tools (Layer 2) ==========
+
+
+@mcp.tool()
+async def search_global_memory_archive(
+    query: str,
+    tags: list[str] | None = None,
+    limit: int = 10,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """グローバルアーカイブを検索する（全プロジェクト共通）。
+
+    Args:
+        query: 検索クエリ
+        tags: フィルタリングするタグ（オプション）
+        limit: 最大結果数
+
+    Returns:
+        検索結果（success, entries, count）
+    """
+    memory = _ensure_global_memory_manager()
+
+    entries = memory.search_archive(query, tags, limit)
+
+    return {
+        "success": True,
+        "entries": [memory.to_dict(e) for e in entries],
+        "count": len(entries),
+    }
+
+
+@mcp.tool()
+async def list_global_memory_archive(
+    limit: int | None = 50,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """グローバルアーカイブエントリ一覧を取得する（全プロジェクト共通）。
+
+    Args:
+        limit: 最大結果数（デフォルト: 50）
+
+    Returns:
+        エントリ一覧（success, entries, count）
+    """
+    memory = _ensure_global_memory_manager()
+
+    entries = memory.list_archive(limit)
+
+    return {
+        "success": True,
+        "entries": [memory.to_dict(e) for e in entries],
+        "count": len(entries),
+    }
+
+
+@mcp.tool()
+async def restore_from_global_memory_archive(
+    key: str,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """グローバルアーカイブからエントリを復元する（全プロジェクト共通）。
+
+    Args:
+        key: 復元するエントリのキー
+
+    Returns:
+        復元結果（success, entry, message または error）
+    """
+    memory = _ensure_global_memory_manager()
+
+    entry = memory.restore_from_archive(key)
+
+    if not entry:
+        return {
+            "success": False,
+            "error": f"グローバルアーカイブにエントリ '{key}' が見つかりません",
+        }
+
+    return {
+        "success": True,
+        "entry": memory.to_dict(entry),
+        "message": f"グローバルアーカイブから復元しました: {key}",
+    }
+
+
+@mcp.tool()
+async def get_global_memory_archive_summary(ctx: Context = None) -> dict[str, Any]:
+    """グローバルアーカイブのサマリー情報を取得する（全プロジェクト共通）。
+
+    Returns:
+        サマリー情報（success, summary）
+    """
+    memory = _ensure_global_memory_manager()
+
+    summary = memory.get_archive_summary()
 
     return {
         "success": True,
