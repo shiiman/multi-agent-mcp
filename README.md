@@ -22,15 +22,19 @@ Claude Code + tmux + git worktree を使用したマルチエージェントワ�
 
 GitHub から直接インストールできます（リポジトリの clone は不要）。
 
-### 方法1: 自動更新あり（推奨）
-
-起動時に毎回 GitHub から最新版を取得します。
+### CLI で追加
 
 ```bash
-claude mcp add multi-agent-mcp -- uvx --refresh --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+# グローバル設定（全プロジェクトで使用可能）
+claude mcp add --scope user multi-agent-mcp -- uvx --refresh --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+
+# プロジェクト設定（そのプロジェクトのみ、チーム共有）
+claude mcp add --scope project multi-agent-mcp -- uvx --refresh --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
 ```
 
-または設定ファイルに直接記述（`~/.claude.json` または `.mcp.json`）:
+### 設定ファイルに直接記述
+
+**グローバル設定** (`~/.claude.json`):
 
 ```json
 {
@@ -52,15 +56,7 @@ claude mcp add multi-agent-mcp -- uvx --refresh --from git+https://github.com/sh
 }
 ```
 
-### 方法2: 自動更新なし（高速起動）
-
-初回のみ GitHub から取得し、以降はキャッシュを使用します。起動が高速になります。
-
-```bash
-claude mcp add multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
-```
-
-または設定ファイルに直接記述:
+**プロジェクト設定** (`.mcp.json` をプロジェクトルートに作成):
 
 ```json
 {
@@ -69,6 +65,7 @@ claude mcp add multi-agent-mcp -- uvx --from git+https://github.com/shiiman/mult
       "type": "stdio",
       "command": "uvx",
       "args": [
+        "--refresh",
         "--from", "git+https://github.com/shiiman/multi-agent-mcp",
         "multi-agent-mcp"
       ],
@@ -81,7 +78,19 @@ claude mcp add multi-agent-mcp -- uvx --from git+https://github.com/shiiman/mult
 }
 ```
 
-**手動更新方法**（方法2の場合）:
+### 自動更新について
+
+上記の例では `--refresh` オプションを使用しており、起動時に毎回 GitHub から最新版を取得します。
+
+**自動更新が不要な場合**（高速起動）:
+
+`--refresh` を削除すると、初回のみ GitHub から取得し、以降はキャッシュを使用します。
+
+```bash
+claude mcp add --scope user multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+```
+
+**手動更新方法**（`--refresh` なしの場合）:
 
 ```bash
 uv cache clean multi-agent-mcp
