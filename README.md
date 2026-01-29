@@ -20,43 +20,29 @@ Claude Code + tmux + git worktree を使用したマルチエージェントワ�
 
 ## インストール
 
-```bash
-# リポジトリをクローン
-git clone https://github.com/shiiman/multi-agent-mcp.git
-cd multi-agent-mcp
+GitHub から直接インストールできます（リポジトリの clone は不要）。
 
-# 依存関係をインストール（uvを使用）
-uv sync
+### 方法1: 自動更新あり（推奨）
 
-# または pip を使用
-pip install -e .
-```
-
-## Claude Code での設定
-
-### 方法1: CLI で追加（推奨）
+起動時に毎回 GitHub から最新版を取得します。
 
 ```bash
-# グローバル設定（全プロジェクトで使用可能）
-claude mcp add --transport stdio --scope user multi-agent-mcp -- \
-  uv --directory /path/to/multi-agent-mcp run multi-agent-mcp
-
-# プロジェクト設定（そのプロジェクトのみ、チーム共有）
-claude mcp add --transport stdio --scope project multi-agent-mcp -- \
-  uv --directory /path/to/multi-agent-mcp run multi-agent-mcp
+claude mcp add multi-agent-mcp -- uvx --refresh --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
 ```
 
-### 方法2: 設定ファイルに直接記述
-
-**グローバル設定** (`~/.claude.json`):
+または設定ファイルに直接記述（`~/.claude.json` または `.mcp.json`）:
 
 ```json
 {
   "mcpServers": {
     "multi-agent-mcp": {
       "type": "stdio",
-      "command": "uv",
-      "args": ["--directory", "/path/to/multi-agent-mcp", "run", "multi-agent-mcp"],
+      "command": "uvx",
+      "args": [
+        "--refresh",
+        "--from", "git+https://github.com/shiiman/multi-agent-mcp",
+        "multi-agent-mcp"
+      ],
       "env": {
         "MCP_MAX_WORKERS": "5",
         "MCP_DEFAULT_AI_CLI": "claude"
@@ -66,15 +52,26 @@ claude mcp add --transport stdio --scope project multi-agent-mcp -- \
 }
 ```
 
-**プロジェクト設定** (`.mcp.json` をプロジェクトルートに作成):
+### 方法2: 自動更新なし（高速起動）
+
+初回のみ GitHub から取得し、以降はキャッシュを使用します。起動が高速になります。
+
+```bash
+claude mcp add multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+```
+
+または設定ファイルに直接記述:
 
 ```json
 {
   "mcpServers": {
     "multi-agent-mcp": {
       "type": "stdio",
-      "command": "uv",
-      "args": ["--directory", "/path/to/multi-agent-mcp", "run", "multi-agent-mcp"],
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/shiiman/multi-agent-mcp",
+        "multi-agent-mcp"
+      ],
       "env": {
         "MCP_MAX_WORKERS": "5",
         "MCP_DEFAULT_AI_CLI": "claude"
@@ -82,6 +79,14 @@ claude mcp add --transport stdio --scope project multi-agent-mcp -- \
     }
   }
 }
+```
+
+**手動更新方法**（方法2の場合）:
+
+```bash
+uv cache clean multi-agent-mcp
+# または
+uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
 ```
 
 ### 設定の確認
@@ -159,9 +164,15 @@ cleanup_workspace()
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 300 | ヘルスチェック間隔（秒） |
 | `MCP_HEARTBEAT_TIMEOUT_SECONDS` | 300 | ハートビートタイムアウト（秒） |
 
-## 開発
+## 開発（コントリビューター向け）
+
+ローカルで開発する場合は、リポジトリをクローンしてください。
 
 ```bash
+# リポジトリをクローン
+git clone https://github.com/shiiman/multi-agent-mcp.git
+cd multi-agent-mcp
+
 # 開発用依存関係をインストール
 uv sync --all-extras
 
