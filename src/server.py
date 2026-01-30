@@ -13,7 +13,6 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import AICli, Settings
 from src.config.templates import get_template, get_template_names, list_templates
-from src.managers.agent_manager import COMMAND_PANE_ASSIGNMENTS
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.cost_manager import CostManager
 from src.managers.dashboard_manager import DashboardManager
