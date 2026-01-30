@@ -26,10 +26,10 @@ GitHub から直接インストールできます（リポジトリの clone は
 
 ```bash
 # グローバル設定（全プロジェクトで使用可能）
-claude mcp add --scope user multi-agent-mcp -- uvx --refresh --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+claude mcp add --scope user multi-agent-mcp -- uvx --reinstall --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
 
 # プロジェクト設定（そのプロジェクトのみ、チーム共有）
-claude mcp add --scope project multi-agent-mcp -- uvx --refresh --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+claude mcp add --scope project multi-agent-mcp -- uvx --reinstall --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
 ```
 
 ### 設定ファイルに直接記述
@@ -43,7 +43,7 @@ claude mcp add --scope project multi-agent-mcp -- uvx --refresh --from git+https
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "--refresh",
+        "--reinstall",
         "--from", "git+https://github.com/shiiman/multi-agent-mcp",
         "multi-agent-mcp"
       ],
@@ -65,7 +65,7 @@ claude mcp add --scope project multi-agent-mcp -- uvx --refresh --from git+https
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "--refresh",
+        "--reinstall",
         "--from", "git+https://github.com/shiiman/multi-agent-mcp",
         "multi-agent-mcp"
       ],
@@ -80,17 +80,19 @@ claude mcp add --scope project multi-agent-mcp -- uvx --refresh --from git+https
 
 ### 自動更新について
 
-上記の例では `--refresh` オプションを使用しており、起動時に毎回 GitHub から最新版を取得します。
+上記の例では `--reinstall` オプションを使用しており、起動時に毎回 GitHub から最新版を再インストールします。
+
+> **Note**: `--refresh` オプションでは Git リポジトリのキャッシュが効いたままになり、更新が反映されないことがあります。確実に最新版を使用するには `--reinstall` を推奨します。
 
 **自動更新が不要な場合**（高速起動）:
 
-`--refresh` を削除すると、初回のみ GitHub から取得し、以降はキャッシュを使用します。
+`--reinstall` を削除すると、初回のみ GitHub から取得し、以降はキャッシュを使用します。
 
 ```bash
 claude mcp add --scope user multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
 ```
 
-**手動更新方法**（`--refresh` なしの場合）:
+**手動更新方法**（`--reinstall` なしの場合）:
 
 ```bash
 uv cache clean multi-agent-mcp
