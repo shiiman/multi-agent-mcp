@@ -46,6 +46,7 @@ class Agent(BaseModel):
     tmux_session: str | None = Field(
         default=None, description="tmuxセッション名（Owner は None）"
     )
+    working_dir: str | None = Field(default=None, description="作業ディレクトリのパス")
     worktree_path: str | None = Field(default=None, description="割り当てられたworktreeのパス")
     current_task: str | None = Field(default=None, description="現在実行中のタスク")
     created_at: datetime = Field(description="作成日時")

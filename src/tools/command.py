@@ -132,10 +132,12 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"エージェント {agent_id} が見つかりません",
             }
 
-        # プロジェクトルートを取得（Workerの working_dir から）
-        # worktree_path が設定されていればそれを使用、なければ workspace_base_dir を使用
+        # プロジェクトルートを取得
+        # 優先順位: worktree_path > working_dir > workspace_base_dir
         if agent.worktree_path:
             project_root = Path(agent.worktree_path)
+        elif agent.working_dir:
+            project_root = Path(agent.working_dir)
         else:
             project_root = Path(app_ctx.settings.workspace_base_dir)
 

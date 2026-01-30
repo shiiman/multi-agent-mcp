@@ -194,6 +194,7 @@ def register_tools(mcp: FastMCP) -> None:
             role=agent_role,
             status=AgentStatus.IDLE,
             tmux_session=tmux_session,
+            working_dir=working_dir,
             session_name=session_name,
             window_index=window_index,
             pane_index=pane_index,
