@@ -146,7 +146,8 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # Workerに claude < TASK.md コマンドを送信
-        read_command = f"claude < {task_file}"
+        # --dangerously-skip-permissions で確認プロンプトをスキップ
+        read_command = f"claude --dangerously-skip-permissions < {task_file}"
         if (
             agent.session_name is not None
             and agent.window_index is not None
