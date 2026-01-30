@@ -99,6 +99,79 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 mcp = FastMCP("Multi-Agent MCP", lifespan=app_lifespan)
 
 
+# ========== ロールチェック ヘルパー ==========
+
+
+def get_agent_role(app_ctx: AppContext, agent_id: str) -> AgentRole | None:
+    """エージェントIDからロールを取得する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        agent_id: エージェントID
+
+    Returns:
+        エージェントのロール、見つからない場合はNone
+    """
+    agent = app_ctx.agents.get(agent_id)
+    if agent:
+        return AgentRole(agent.role)
+    return None
+
+
+def check_role_permission(
+    app_ctx: AppContext,
+    caller_agent_id: str | None,
+    allowed_roles: list[str],
+) -> dict[str, Any] | None:
+    """ロール権限をチェックする。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        caller_agent_id: 呼び出し元エージェントID
+        allowed_roles: 許可されたロールのリスト
+
+    Returns:
+        権限エラーの場合はエラー dict、許可されている場合は None
+    """
+    if caller_agent_id is None:
+        return {
+            "success": False,
+            "error": "caller_agent_id が必要です（このツールはロール制限があります）",
+        }
+
+    role = get_agent_role(app_ctx, caller_agent_id)
+    if role is None:
+        return {
+            "success": False,
+            "error": f"エージェント {caller_agent_id} が見つかりません",
+        }
+
+    if role.value not in allowed_roles:
+        return {
+            "success": False,
+            "error": f"このツールは {allowed_roles} のみ使用可能です（現在: {role.value}）",
+        }
+
+    return None
+
+
+def find_agents_by_role(app_ctx: AppContext, role: str) -> list[str]:
+    """指定されたロールのエージェントIDを取得する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        role: 検索するロール（"owner", "admin", "worker"）
+
+    Returns:
+        該当するエージェントIDのリスト
+    """
+    return [
+        agent_id
+        for agent_id, agent in app_ctx.agents.items()
+        if agent.role == role
+    ]
+
+
 # ========== セッション管理 Tools ==========
 
 
@@ -1296,20 +1369,30 @@ async def update_task_status(
     status: str,
     progress: int | None = None,
     error_message: str | None = None,
+    caller_agent_id: str | None = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """タスクのステータスを更新する。
+
+    ※ Admin のみ使用可能。Worker は report_task_completion を使用してください。
 
     Args:
         task_id: タスクID
         status: 新しいステータス（pending/in_progress/completed/failed/blocked）
         progress: 進捗率（0-100）
         error_message: エラーメッセージ（failedの場合）
+        caller_agent_id: 呼び出し元エージェントID（ロールチェック用）
 
     Returns:
         更新結果（success, task_id, status, message または error）
     """
     app_ctx: AppContext = ctx.request_context.lifespan_context
+
+    # ロールチェック: Admin のみ
+    role_error = check_role_permission(app_ctx, caller_agent_id, ["admin"])
+    if role_error:
+        return role_error
+
     dashboard = _ensure_dashboard_manager(app_ctx)
 
     # ステータスの検証
@@ -1343,20 +1426,30 @@ async def assign_task_to_agent(
     agent_id: str,
     branch: str | None = None,
     worktree_path: str | None = None,
+    caller_agent_id: str | None = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """タスクをエージェントに割り当てる。
+
+    ※ Admin のみ使用可能。
 
     Args:
         task_id: タスクID
         agent_id: エージェントID
         branch: 作業ブランチ（オプション）
         worktree_path: worktreeパス（オプション）
+        caller_agent_id: 呼び出し元エージェントID（ロールチェック用）
 
     Returns:
         割り当て結果（success, task_id, agent_id, message または error）
     """
     app_ctx: AppContext = ctx.request_context.lifespan_context
+
+    # ロールチェック: Admin のみ
+    role_error = check_role_permission(app_ctx, caller_agent_id, ["admin"])
+    if role_error:
+        return role_error
+
     dashboard = _ensure_dashboard_manager(app_ctx)
 
     # エージェントの存在確認
@@ -1417,6 +1510,88 @@ async def list_tasks(
         "success": True,
         "tasks": [t.model_dump(mode="json") for t in tasks],
         "count": len(tasks),
+    }
+
+
+@mcp.tool()
+async def report_task_completion(
+    task_id: str,
+    status: str,
+    message: str,
+    caller_agent_id: str | None = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """Worker が Admin にタスク完了を報告する。
+
+    Worker はこのツールを使って Admin に作業結果を報告します。
+    Admin が受け取って dashboard を更新します。
+
+    ※ Worker のみ使用可能。
+
+    Args:
+        task_id: 完了したタスクのID
+        status: 結果ステータス（"completed" | "failed"）
+        message: 完了報告メッセージ（作業内容の要約）
+        caller_agent_id: 呼び出し元エージェントID（Worker のID）
+
+    Returns:
+        報告結果（success, message または error）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+
+    # ロールチェック: Worker のみ
+    role_error = check_role_permission(app_ctx, caller_agent_id, ["worker"])
+    if role_error:
+        return role_error
+
+    # Admin を検索
+    admin_ids = find_agents_by_role(app_ctx, "admin")
+    if not admin_ids:
+        return {
+            "success": False,
+            "error": "Admin エージェントが見つかりません",
+        }
+
+    # 最初の Admin に報告（通常は1人のみ）
+    admin_id = admin_ids[0]
+
+    # status の検証
+    if status not in ["completed", "failed"]:
+        return {
+            "success": False,
+            "error": f"無効なステータスです: {status}（有効: completed, failed）",
+        }
+
+    # IPC マネージャーを取得
+    ipc = app_ctx.ipc_manager
+    if ipc is None:
+        return {
+            "success": False,
+            "error": "IPC マネージャーが初期化されていません",
+        }
+
+    # タスク完了報告を送信
+    from src.models.message import MessagePriority, MessageType
+
+    ipc.send_message(
+        sender_id=caller_agent_id,
+        receiver_id=admin_id,
+        message_type=MessageType.TASK_COMPLETE if status == "completed" else MessageType.ERROR,
+        subject=f"タスク報告: {task_id} ({status})",
+        content=message,
+        priority=MessagePriority.HIGH,
+        metadata={
+            "task_id": task_id,
+            "status": status,
+            "reporter": caller_agent_id,
+        },
+    )
+
+    return {
+        "success": True,
+        "message": f"Admin ({admin_id}) に報告を送信しました",
+        "task_id": task_id,
+        "reported_status": status,
     }
 
 

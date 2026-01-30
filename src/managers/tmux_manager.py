@@ -337,26 +337,26 @@ class TmuxManager:
             logger.error(f"左右分割エラー: {stderr}")
             return False
 
-        # 3. 左側を上下に分割（Owner/Admin）
+        # 3. 左側を左右に分割（Owner/Admin）- 横並びにする
         code, _, stderr = await self._run(
-            "split-window", "-v", "-t", f"{target}.0"
+            "split-window", "-h", "-t", f"{target}.0"
         )
         if code != 0:
-            logger.error(f"左側上下分割エラー: {stderr}")
+            logger.error(f"左側左右分割エラー: {stderr}")
             return False
 
-        # 4. 右側を3列に分割
-        # 現在のペイン配置: 0(左上), 1(左下), 2(右)
-        # pane 2 を分割して3列にする
-        # 最初の分割: 67% (2/3) を残す
+        # 4. 右側（pane 1）を3列に分割
+        # ステップ3後のペイン配置: 0(Owner), 2(Admin), 1(Workers右50%)
+        # pane 1（右50%）を分割して3列にする
+        # 最初の分割: 67% (2/3) を残す → pane 3 ができる
         code, _, stderr = await self._run(
-            "split-window", "-h", "-t", f"{target}.2", "-p", "67"
+            "split-window", "-h", "-t", f"{target}.1", "-p", "67"
         )
         if code != 0:
             logger.error(f"右側列分割エラー(1): {stderr}")
             return False
 
-        # 2回目の分割: 残りの50%
+        # 2回目の分割: 残りの50% → pane 4 ができる
         code, _, stderr = await self._run(
             "split-window", "-h", "-t", f"{target}.3", "-p", "50"
         )
@@ -364,9 +364,9 @@ class TmuxManager:
             logger.error(f"右側列分割エラー(2): {stderr}")
             return False
 
-        # 5. 各列を上下に分割（3列 → 6ペイン）
-        # 現在: 0(左上), 1(左下), 2(右列1), 3(右列2), 4(右列3)
-        for pane_idx in [2, 3, 4]:
+        # 5. 各Worker列を上下に分割（3列 → 6ペイン）
+        # ステップ4後: 0(Owner), 2(Admin), 1(W列1), 3(W列2), 4(W列3)
+        for pane_idx in [1, 3, 4]:
             code, _, stderr = await self._run(
                 "split-window", "-v", "-t", f"{target}.{pane_idx}"
             )
