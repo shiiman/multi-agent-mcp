@@ -337,7 +337,7 @@ class TmuxManager:
             logger.info(f"メインセッション {session_name} は既に存在します")
             return True
 
-        # 1. セッション作成
+        # 1. セッション作成（ウィンドウ名: main）
         code, _, stderr = await self._run(
             "new-session", "-d", "-s", session_name, "-c", working_dir, "-n", "main"
         )
@@ -345,7 +345,12 @@ class TmuxManager:
             logger.error(f"メインセッション作成エラー: {stderr}")
             return False
 
-        target = f"{session_name}:0"
+        # セッション固有のオプション設定（base-index に依存しないようにする）
+        await self._run("set-option", "-t", session_name, "base-index", "0")
+        await self._run("set-option", "-t", session_name, "pane-base-index", "0")
+
+        # ウィンドウ名 "main" を使用
+        target = f"{session_name}:main"
 
         # 2. 左右50:50に分割（右側を作成）
         code, _, stderr = await self._run(
@@ -711,6 +716,7 @@ class TmuxManager:
             シェルスクリプト文字列
         """
         # シェル変数でエスケープ問題を回避
+        # 注意: ウィンドウ名 "main" を使用（base-index 設定に依存しないため）
         script = f'''#!/bin/bash
 set -e
 
@@ -721,24 +727,28 @@ WD="{working_dir}"
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "Creating new tmux session: $SESSION"
 
-    # 1. セッション作成
+    # 1. セッション作成（ウィンドウ名: main）
     tmux new-session -d -s "$SESSION" -c "$WD" -n main
 
+    # セッション固有のオプション設定（base-index に依存しないようにする）
+    tmux set-option -t "$SESSION" base-index 0
+    tmux set-option -t "$SESSION" pane-base-index 0
+
     # 2. 左右50:50に分割（右側を作成）
-    tmux split-window -h -t "$SESSION:0" -p 50
+    tmux split-window -h -t "$SESSION:main" -p 50
 
     # 3. 左側を左右に分割（Owner/Admin）
-    tmux split-window -h -t "$SESSION:0.0"
+    tmux split-window -h -t "$SESSION:main.0"
 
     # 4. 右側を3列に分割
     # ステップ3後: 0(Owner), 2(Admin), 1(Workers右50%)
-    tmux split-window -h -t "$SESSION:0.1" -p 67
-    tmux split-window -h -t "$SESSION:0.3" -p 50
+    tmux split-window -h -t "$SESSION:main.1" -p 67
+    tmux split-window -h -t "$SESSION:main.3" -p 50
 
     # 5. 各Worker列を上下に分割（6ペイン）
-    tmux split-window -v -t "$SESSION:0.1"
-    tmux split-window -v -t "$SESSION:0.3"
-    tmux split-window -v -t "$SESSION:0.4"
+    tmux split-window -v -t "$SESSION:main.1"
+    tmux split-window -v -t "$SESSION:main.3"
+    tmux split-window -v -t "$SESSION:main.4"
 
     echo "Workspace layout created"
 else
