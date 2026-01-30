@@ -352,6 +352,9 @@ class TmuxManager:
         # ウィンドウ名 "main" を使用
         target = f"{session_name}:main"
 
+        # 分割順序: 右側を先に完成させてから、最後に左側を分割
+        # これにより、分割中のペイン番号のシフトを回避
+
         # 2. 左右50:50に分割（右側を作成）
         code, _, stderr = await self._run(
             "split-window", "-h", "-t", target, "-p", "50"
@@ -360,18 +363,9 @@ class TmuxManager:
             logger.error(f"左右分割エラー: {stderr}")
             return False
 
-        # 3. 左側を左右に分割（Owner/Admin）- 横並びにする
-        code, _, stderr = await self._run(
-            "split-window", "-h", "-t", f"{target}.0"
-        )
-        if code != 0:
-            logger.error(f"左側左右分割エラー: {stderr}")
-            return False
-
-        # 4. 右側（pane 1）を3列に分割
-        # ステップ3後のペイン配置: 0(Owner), 2(Admin), 1(Workers右50%)
-        # pane 1（右50%）を分割して3列にする
-        # 最初の分割: 67% (2/3) を残す → pane 3 ができる
+        # 3. 右側（pane 1）を3列に分割
+        # 現在のペイン配置: 0(左50%), 1(右50%)
+        # 最初の分割: 67% (2/3) を残す → pane 2 ができる
         code, _, stderr = await self._run(
             "split-window", "-h", "-t", f"{target}.1", "-p", "67"
         )
@@ -379,23 +373,35 @@ class TmuxManager:
             logger.error(f"右側列分割エラー(1): {stderr}")
             return False
 
-        # 2回目の分割: 残りの50% → pane 4 ができる
+        # 2回目の分割: 残りの50% → pane 3 ができる
+        # 現在のペイン配置: 0(左50%), 1(W列1), 2(W列2+3)
         code, _, stderr = await self._run(
-            "split-window", "-h", "-t", f"{target}.3", "-p", "50"
+            "split-window", "-h", "-t", f"{target}.2", "-p", "50"
         )
         if code != 0:
             logger.error(f"右側列分割エラー(2): {stderr}")
             return False
 
-        # 5. 各Worker列を上下に分割（3列 → 6ペイン）
-        # ステップ4後: 0(Owner), 2(Admin), 1(W列1), 3(W列2), 4(W列3)
-        for pane_idx in [1, 3, 4]:
+        # 4. 各Worker列を上下に分割（3列 → 6ペイン）
+        # 現在のペイン配置: 0(左50%), 1(W列1), 2(W列2), 3(W列3)
+        # 重要: 逆順（.3 → .2 → .1）で分割することで、
+        # 分割時のペイン番号シフトを回避
+        for pane_idx in [3, 2, 1]:
             code, _, stderr = await self._run(
                 "split-window", "-v", "-t", f"{target}.{pane_idx}"
             )
             if code != 0:
                 logger.error(f"右側行分割エラー(pane {pane_idx}): {stderr}")
                 return False
+
+        # 5. 最後に左側（pane 0）をOwner/Adminに分割
+        # 現在のペイン配置: 0(左50%), 1-6(Workers)
+        code, _, stderr = await self._run(
+            "split-window", "-h", "-t", f"{target}.0", "-p", "50"
+        )
+        if code != 0:
+            logger.error(f"左側左右分割エラー: {stderr}")
+            return False
 
         logger.info(f"メインセッション作成完了: {session_name}")
         return True
@@ -734,21 +740,29 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     tmux set-option -t "$SESSION" base-index 0
     tmux set-option -t "$SESSION" pane-base-index 0
 
-    # 2. 左右50:50に分割（右側を作成）
+    # 分割順序: 右側を先に完成させてから、最後に左側を分割
+    # これにより pane 0 が途中で番号変更されるのを防ぐ
+
+    # 2. 左右50:50に分割
+    # pane 0 = 左50%, pane 1 = 右50%
     tmux split-window -h -t "$SESSION:main" -p 50
 
-    # 3. 左側を左右に分割（Owner/Admin）
-    tmux split-window -h -t "$SESSION:main.0"
-
-    # 4. 右側を3列に分割
-    # ステップ3後: 0(Owner), 2(Admin), 1(Workers右50%)
+    # 3. 右側（pane 1）を3列に分割
     tmux split-window -h -t "$SESSION:main.1" -p 67
-    tmux split-window -h -t "$SESSION:main.3" -p 50
+    tmux split-window -h -t "$SESSION:main.2" -p 50
+    # pane 0 = 左, pane 1 = W列1, pane 2 = W列2, pane 3 = W列3
 
-    # 5. 各Worker列を上下に分割（6ペイン）
-    tmux split-window -v -t "$SESSION:main.1"
+    # 4. 各Worker列を上下に分割（6ペイン）
+    # 重要: 逆順（.3 → .2 → .1）で分割することで、
+    # 分割時のペイン番号シフトを回避
     tmux split-window -v -t "$SESSION:main.3"
-    tmux split-window -v -t "$SESSION:main.4"
+    tmux split-window -v -t "$SESSION:main.2"
+    tmux split-window -v -t "$SESSION:main.1"
+    # pane 0 = 左, pane 1-6 = Workers (番号は分割順序で決まる)
+
+    # 5. 最後に左側（pane 0）をOwner/Adminに分割
+    tmux split-window -h -t "$SESSION:main.0" -p 50
+    # pane 0 = Owner, pane 7 = Admin, pane 1-6 = Workers
 
     echo "Workspace layout created"
 else
@@ -800,21 +814,32 @@ exec tmux attach -t "$SESSION"
             # 実行権限を付与
             os.chmod(script_path, 0o755)
 
+            # セッション名を取得（タブタイトル用）
+            # スクリプトから SESSION= の行を抽出
+            session_name = "MCP Workspace"
+            for line in script.split("\n"):
+                if line.startswith("SESSION="):
+                    session_name = line.split("=")[1].strip('"')
+                    break
+
             proc = await asyncio.create_subprocess_exec(
                 ghostty_path,
                 f"--working-directory={working_dir}",
+                f"--title={session_name}",
                 "-e",
                 script_path,
                 stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
-            _, stderr = await proc.communicate()
 
-            if proc.returncode == 0:
+            # プロセス起動を確認するために少し待つ
+            await asyncio.sleep(0.5)
+
+            # プロセスがまだ動いていれば成功（tmux attach で待機中）
+            if proc.returncode is None:
                 return True, "Ghostty でワークスペースを開きました"
             else:
-                error_msg = stderr.decode().strip() if stderr else "不明なエラー"
-                return False, f"Ghostty の起動に失敗しました: {error_msg}"
+                return False, f"Ghostty の起動に失敗しました (code: {proc.returncode})"
 
         except Exception as e:
             logger.error(f"Ghostty 起動エラー: {e}")
