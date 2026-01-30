@@ -234,6 +234,134 @@ async def cleanup_workspace(ctx: Context) -> dict[str, Any]:
     }
 
 
+def _check_completion_status(app_ctx: AppContext) -> dict[str, Any]:
+    """タスク完了状態を計算する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+
+    Returns:
+        完了状態の辞書
+    """
+    if app_ctx.dashboard_manager is None:
+        return {
+            "is_all_completed": False,
+            "total_tasks": 0,
+            "pending_tasks": 0,
+            "in_progress_tasks": 0,
+            "completed_tasks": 0,
+            "failed_tasks": 0,
+            "error": "ワークスペースが初期化されていません",
+        }
+
+    summary = app_ctx.dashboard_manager.get_summary()
+
+    total = summary["total_tasks"]
+    pending = summary["pending_tasks"]
+    in_progress = summary["in_progress_tasks"]
+    completed = summary["completed_tasks"]
+    failed = summary["failed_tasks"]
+
+    # 完了条件: タスクがあり、pending/in_progress/failedが全て0
+    is_completed = (total > 0) and (pending == 0) and (in_progress == 0) and (failed == 0)
+
+    return {
+        "is_all_completed": is_completed,
+        "total_tasks": total,
+        "pending_tasks": pending,
+        "in_progress_tasks": in_progress,
+        "completed_tasks": completed,
+        "failed_tasks": failed,
+    }
+
+
+@mcp.tool()
+async def check_all_tasks_completed(ctx: Context) -> dict[str, Any]:
+    """全タスクが完了したかチェックする。
+
+    完了条件: pending=0, in_progress=0, failed=0
+    failedタスクがある場合は完了と見なさない。
+
+    Returns:
+        is_all_completed: 全タスク完了か
+        total_tasks: 総タスク数
+        pending_tasks: 未着手タスク数
+        in_progress_tasks: 進行中タスク数
+        completed_tasks: 完了タスク数
+        failed_tasks: 失敗タスク数
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    status = _check_completion_status(app_ctx)
+
+    return {
+        "success": "error" not in status,
+        **status,
+    }
+
+
+@mcp.tool()
+async def cleanup_on_completion(
+    force: bool = False,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """全タスク完了時にワークスペースをクリーンアップする。
+
+    タスクが完了していない場合はエラーを返す。
+    force=True で未完了でも強制クリーンアップ。
+
+    Args:
+        force: 未完了でも強制的にクリーンアップするか
+
+    Returns:
+        クリーンアップ結果
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    status = _check_completion_status(app_ctx)
+
+    # エラーチェック
+    if "error" in status:
+        return {
+            "success": False,
+            "error": status["error"],
+        }
+
+    # 完了チェック
+    if not status["is_all_completed"] and not force:
+        incomplete_reason = []
+        if status["pending_tasks"] > 0:
+            incomplete_reason.append(f"未着手: {status['pending_tasks']}件")
+        if status["in_progress_tasks"] > 0:
+            incomplete_reason.append(f"進行中: {status['in_progress_tasks']}件")
+        if status["failed_tasks"] > 0:
+            incomplete_reason.append(f"失敗: {status['failed_tasks']}件")
+
+        return {
+            "success": False,
+            "error": f"まだ完了していないタスクがあります（{', '.join(incomplete_reason)}）",
+            **status,
+        }
+
+    # クリーンアップ実行
+    tmux = app_ctx.tmux
+    agents = app_ctx.agents
+
+    terminated_count = await tmux.cleanup_all_sessions()
+    agent_count = len(agents)
+    agents.clear()
+
+    return {
+        "success": True,
+        "terminated_sessions": terminated_count,
+        "cleared_agents": agent_count,
+        "was_forced": force and not status["is_all_completed"],
+        **status,
+        "message": (
+            f"クリーンアップ完了: {terminated_count}セッション終了, "
+            f"{agent_count}エージェントクリア"
+        ),
+    }
+
+
 @mcp.tool()
 async def init_tmux_workspace(
     working_dir: str,
