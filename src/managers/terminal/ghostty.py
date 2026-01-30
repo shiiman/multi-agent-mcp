@@ -97,11 +97,14 @@ end tell
         except Exception:
             return False
 
-    async def _open_in_tab(self, script_path: str, session_name: str) -> bool:
+    async def _open_in_tab(self, script_path: str, session_path: str) -> bool:
         """既存の Ghostty ウィンドウに新しいタブとしてスクリプトを実行する。"""
-        # スクリプトパスをエスケープ
-        escaped_path = script_path.replace('"', '\\"').replace("'", "'\\''")
+        # クリップボードを使用して入力（keystroke は日本語入力モードの影響を受けるため）
+        command = f"exec bash '{script_path}'"
         applescript = f'''
+-- コマンドをクリップボードに設定
+set the clipboard to "{command}"
+
 tell application "Ghostty"
     activate
 end tell
@@ -112,8 +115,8 @@ tell application "System Events"
         click menu item "New Tab" of menu "File" of menu bar 1
         delay 0.5
 
-        -- スクリプトを bash で実行（exec で現在のシェルを置き換え）
-        keystroke "exec bash \\"{escaped_path}\\""
+        -- クリップボードから貼り付け（Cmd+V）
+        keystroke "v" using command down
         delay 0.1
         keystroke return
     end tell

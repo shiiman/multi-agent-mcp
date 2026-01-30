@@ -759,6 +759,9 @@ set -e
 SESSION="{session_name}"
 WD="{working_dir}"
 
+# ターミナルタブ名をセッション名に設定
+printf '\\033]0;%s\\007' "$SESSION"
+
 # セッションが存在しない場合のみ作成
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "Creating new tmux session: $SESSION"
