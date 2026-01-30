@@ -1,1 +1,73 @@
 """MCP Tools モジュール。"""
+
+from mcp.server.fastmcp import FastMCP
+
+from src.tools import (
+    agent,
+    ai_cli,
+    command,
+    cost,
+    dashboard,
+    gtrconfig,
+    healthcheck,
+    ipc,
+    memory,
+    metrics,
+    persona,
+    scheduler,
+    session,
+    template,
+    worktree,
+)
+
+
+def register_all_tools(mcp: FastMCP) -> None:
+    """全ツールをMCPサーバーに登録する。
+
+    Args:
+        mcp: FastMCPインスタンス
+    """
+    # セッション管理
+    session.register_tools(mcp)
+
+    # エージェント管理
+    agent.register_tools(mcp)
+
+    # コマンド実行
+    command.register_tools(mcp)
+
+    # Git worktree管理
+    worktree.register_tools(mcp)
+
+    # IPC/メッセージング
+    ipc.register_tools(mcp)
+
+    # ダッシュボード/タスク管理
+    dashboard.register_tools(mcp)
+
+    # AI CLI
+    ai_cli.register_tools(mcp)
+
+    # Gtrconfig
+    gtrconfig.register_tools(mcp)
+
+    # テンプレート
+    template.register_tools(mcp)
+
+    # スケジューラー
+    scheduler.register_tools(mcp)
+
+    # ヘルスチェック
+    healthcheck.register_tools(mcp)
+
+    # メトリクス
+    metrics.register_tools(mcp)
+
+    # コスト
+    cost.register_tools(mcp)
+
+    # ペルソナ
+    persona.register_tools(mcp)
+
+    # メモリ
+    memory.register_tools(mcp)

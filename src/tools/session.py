@@ -1,87 +1,61 @@
-"""セッション管理 MCP Tools。"""
+"""セッション管理ツール。"""
 
 import os
 from typing import Any
 
+from mcp.server.fastmcp import Context, FastMCP
 
-async def init_workspace(
-    workspace_path: str,
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    """ワークスペースを初期化する。
+from src.context import AppContext
 
-    ディレクトリの作成と基本的な設定を行う。
 
-    Args:
-        workspace_path: ワークスペースのパス
-        context: MCPコンテキスト（settings, tmux, agentsを含む）
+def register_tools(mcp: FastMCP) -> None:
+    """セッション管理ツールを登録する。"""
 
-    Returns:
-        初期化結果
-    """
-    settings = context["settings"]
+    def _check_completion_status(app_ctx: AppContext) -> dict[str, Any]:
+        """タスク完了状態を計算する。
 
-    # ワークスペースディレクトリを作成
-    full_path = os.path.join(settings.workspace_base_dir, workspace_path)
+        Args:
+            app_ctx: アプリケーションコンテキスト
 
-    try:
-        os.makedirs(full_path, exist_ok=True)
+        Returns:
+            完了状態の辞書
+        """
+        if app_ctx.dashboard_manager is None:
+            return {
+                "is_all_completed": False,
+                "total_tasks": 0,
+                "pending_tasks": 0,
+                "in_progress_tasks": 0,
+                "completed_tasks": 0,
+                "failed_tasks": 0,
+                "error": "ワークスペースが初期化されていません",
+            }
+
+        summary = app_ctx.dashboard_manager.get_summary()
+
+        total = summary["total_tasks"]
+        pending = summary["pending_tasks"]
+        in_progress = summary["in_progress_tasks"]
+        completed = summary["completed_tasks"]
+        failed = summary["failed_tasks"]
+
+        # 完了条件: タスクがあり、pending/in_progress/failedが全て0
+        is_completed = (total > 0) and (pending == 0) and (in_progress == 0) and (failed == 0)
+
         return {
-            "success": True,
-            "workspace_path": full_path,
-            "message": f"ワークスペースを初期化しました: {full_path}",
+            "is_all_completed": is_completed,
+            "total_tasks": total,
+            "pending_tasks": pending,
+            "in_progress_tasks": in_progress,
+            "completed_tasks": completed,
+            "failed_tasks": failed,
         }
-    except OSError as e:
-        return {
-            "success": False,
-            "error": f"ワークスペースの初期化に失敗しました: {e}",
-        }
-
-
-async def cleanup_workspace(
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    """ワークスペースをクリーンアップする。
-
-    全エージェントを終了し、リソースを解放する。
-
-    Args:
-        context: MCPコンテキスト（settings, tmux, agentsを含む）
-
-    Returns:
-        クリーンアップ結果
-    """
-    tmux = context["tmux"]
-    agents = context["agents"]
-
-    # 全セッションを終了
-    terminated_count = await tmux.cleanup_all_sessions()
-
-    # エージェント情報をクリア
-    agent_count = len(agents)
-    agents.clear()
-
-    return {
-        "success": True,
-        "terminated_sessions": terminated_count,
-        "cleared_agents": agent_count,
-        "message": (
-            f"{terminated_count} セッションを終了、"
-            f"{agent_count} エージェント情報をクリアしました"
-        ),
-    }
-
-
-def register_tools(mcp: Any) -> None:
-    """セッション管理Toolsを登録する。
-
-    Args:
-        mcp: FastMCPインスタンス
-    """
 
     @mcp.tool()
-    async def init_workspace_tool(workspace_path: str) -> dict[str, Any]:
+    async def init_workspace(workspace_path: str, ctx: Context) -> dict[str, Any]:
         """ワークスペースを初期化する。
+
+        ディレクトリの作成と基本的な設定を行う。
 
         Args:
             workspace_path: ワークスペースのパス（ベースディレクトリからの相対パス）
@@ -89,11 +63,26 @@ def register_tools(mcp: Any) -> None:
         Returns:
             初期化結果（success, workspace_path, message または error）
         """
-        ctx = mcp.get_context()
-        return await init_workspace(workspace_path, ctx)
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+        settings = app_ctx.settings
+
+        full_path = os.path.join(settings.workspace_base_dir, workspace_path)
+
+        try:
+            os.makedirs(full_path, exist_ok=True)
+            return {
+                "success": True,
+                "workspace_path": full_path,
+                "message": f"ワークスペースを初期化しました: {full_path}",
+            }
+        except OSError as e:
+            return {
+                "success": False,
+                "error": f"ワークスペースの初期化に失敗しました: {e}",
+            }
 
     @mcp.tool()
-    async def cleanup_workspace_tool() -> dict[str, Any]:
+    async def cleanup_workspace(ctx: Context) -> dict[str, Any]:
         """ワークスペースをクリーンアップする。
 
         全エージェントを終了し、リソースを解放する。
@@ -101,5 +90,164 @@ def register_tools(mcp: Any) -> None:
         Returns:
             クリーンアップ結果（success, terminated_sessions, cleared_agents, message）
         """
-        ctx = mcp.get_context()
-        return await cleanup_workspace(ctx)
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+        tmux = app_ctx.tmux
+        agents = app_ctx.agents
+
+        terminated_count = await tmux.cleanup_all_sessions()
+        agent_count = len(agents)
+        agents.clear()
+
+        return {
+            "success": True,
+            "terminated_sessions": terminated_count,
+            "cleared_agents": agent_count,
+            "message": (
+                f"{terminated_count} セッションを終了、"
+                f"{agent_count} エージェント情報をクリアしました"
+            ),
+        }
+
+    @mcp.tool()
+    async def check_all_tasks_completed(ctx: Context) -> dict[str, Any]:
+        """全タスクが完了したかチェックする。
+
+        完了条件: pending=0, in_progress=0, failed=0
+        failedタスクがある場合は完了と見なさない。
+
+        Returns:
+            is_all_completed: 全タスク完了か
+            total_tasks: 総タスク数
+            pending_tasks: 未着手タスク数
+            in_progress_tasks: 進行中タスク数
+            completed_tasks: 完了タスク数
+            failed_tasks: 失敗タスク数
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+        status = _check_completion_status(app_ctx)
+
+        return {
+            "success": "error" not in status,
+            **status,
+        }
+
+    @mcp.tool()
+    async def cleanup_on_completion(
+        force: bool = False,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """全タスク完了時にワークスペースをクリーンアップする。
+
+        タスクが完了していない場合はエラーを返す。
+        force=True で未完了でも強制クリーンアップ。
+
+        Args:
+            force: 未完了でも強制的にクリーンアップするか
+
+        Returns:
+            クリーンアップ結果
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+        status = _check_completion_status(app_ctx)
+
+        # エラーチェック
+        if "error" in status:
+            return {
+                "success": False,
+                "error": status["error"],
+            }
+
+        # 完了チェック
+        if not status["is_all_completed"] and not force:
+            incomplete_reason = []
+            if status["pending_tasks"] > 0:
+                incomplete_reason.append(f"未着手: {status['pending_tasks']}件")
+            if status["in_progress_tasks"] > 0:
+                incomplete_reason.append(f"進行中: {status['in_progress_tasks']}件")
+            if status["failed_tasks"] > 0:
+                incomplete_reason.append(f"失敗: {status['failed_tasks']}件")
+
+            return {
+                "success": False,
+                "error": f"まだ完了していないタスクがあります（{', '.join(incomplete_reason)}）",
+                **status,
+            }
+
+        # クリーンアップ実行
+        tmux = app_ctx.tmux
+        agents = app_ctx.agents
+
+        terminated_count = await tmux.cleanup_all_sessions()
+        agent_count = len(agents)
+        agents.clear()
+
+        return {
+            "success": True,
+            "terminated_sessions": terminated_count,
+            "cleared_agents": agent_count,
+            "was_forced": force and not status["is_all_completed"],
+            **status,
+            "message": (
+                f"クリーンアップ完了: {terminated_count}セッション終了, "
+                f"{agent_count}エージェントクリア"
+            ),
+        }
+
+    @mcp.tool()
+    async def init_tmux_workspace(
+        working_dir: str,
+        open_terminal: bool = True,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """ターミナルを開いてtmuxワークスペース（グリッドレイアウト）を構築する。
+
+        ターミナルを先に起動し、その中でtmuxセッション作成・ペイン分割を行う。
+        セッションが既に存在する場合はattachのみ行う。
+
+        レイアウト:
+        ┌────────────┬────────────┬────────┬────────┬────────┐
+        │   pane 0   │   pane 1   │ pane 2 │ pane 4 │ pane 6 │
+        │  (owner)   │  (admin)   ├────────┼────────┼────────┤
+        │    25%     │    25%     │ pane 3 │ pane 5 │ pane 7 │
+        └────────────┴────────────┴────────┴────────┴────────┘
+              左半分 50%                右半分 50%
+
+        Args:
+            working_dir: 作業ディレクトリのパス
+            open_terminal: Trueでターミナルを開いて表示（デフォルト）、
+                           Falseでバックグラウンド作成
+
+        Returns:
+            初期化結果（success, session_name, message または error）
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+        tmux = app_ctx.tmux
+
+        if open_terminal:
+            # ターミナルを開いてセッション作成
+            success, message = await tmux.launch_workspace_in_terminal(working_dir)
+            if success:
+                return {
+                    "success": True,
+                    "session_name": "main",
+                    "message": message,
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": message,
+                }
+        else:
+            # バックグラウンドで作成（従来の動作）
+            success = await tmux.create_main_session(working_dir)
+            if success:
+                return {
+                    "success": True,
+                    "session_name": "main",
+                    "message": "メインセッションをバックグラウンドで作成しました",
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "メインセッションの作成に失敗しました",
+                }
