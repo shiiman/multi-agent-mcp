@@ -22,7 +22,8 @@ This project provides an MCP server that allows Claude Code (or other AI CLIs) t
 ```
 multi-agent-mcp/
 ├── src/
-│   ├── server.py              # MCP server entry point (FastMCP)
+│   ├── server.py              # MCP server entry point (FastMCP, ~70 lines)
+│   ├── context.py             # AppContext definition
 │   ├── config/
 │   │   ├── settings.py        # Pydantic Settings configuration
 │   │   └── templates.py       # Workspace templates
@@ -34,7 +35,6 @@ multi-agent-mcp/
 │   ├── managers/
 │   │   ├── tmux_manager.py    # Tmux session management
 │   │   ├── worktree_manager.py # Git worktree management
-│   │   ├── agent_manager.py   # Agent lifecycle management
 │   │   ├── ai_cli_manager.py  # AI CLI selection and execution
 │   │   ├── gtrconfig_manager.py # .gtrconfig detection/generation
 │   │   ├── scheduler_manager.py # Task priority queue
@@ -45,10 +45,24 @@ multi-agent-mcp/
 │   │   ├── dashboard_manager.py # Dashboard state management
 │   │   ├── memory_manager.py  # Persistent knowledge management
 │   │   └── persona_manager.py # Task-based persona optimization
-│   └── tools/
-│       ├── session.py         # Workspace tools
-│       ├── agent.py           # Agent tools
-│       └── command.py         # Command execution tools
+│   └── tools/                 # MCP tool definitions (57 tools)
+│       ├── __init__.py        # register_all_tools()
+│       ├── helpers.py         # Common helper functions
+│       ├── session.py         # Session management (5 tools)
+│       ├── agent.py           # Agent management (4 tools)
+│       ├── command.py         # Command execution (5 tools)
+│       ├── worktree.py        # Git worktree (8 tools)
+│       ├── ipc.py             # IPC/messaging (5 tools)
+│       ├── dashboard.py       # Dashboard/task management (9 tools)
+│       ├── ai_cli.py          # AI CLI (2 tools)
+│       ├── gtrconfig.py       # Gtrconfig (3 tools)
+│       ├── template.py        # Templates (2 tools)
+│       ├── scheduler.py       # Scheduler (3 tools)
+│       ├── healthcheck.py     # Healthcheck (5 tools)
+│       ├── metrics.py         # Metrics (4 tools)
+│       ├── cost.py            # Cost management (4 tools)
+│       ├── persona.py         # Persona (3 tools)
+│       └── memory.py          # Memory management (19 tools)
 ├── templates/                 # CLAUDE.md templates for agents
 ├── tests/                     # Pytest test files
 ├── pyproject.toml
@@ -131,8 +145,10 @@ All managers follow a consistent pattern:
 
 ### MCP Tools
 
-Tools are defined in `server.py` using FastMCP decorators:
-- `@mcp.tool()` for tool definitions
+Tools are defined in `src/tools/` modules using FastMCP decorators:
+- Each category has its own module (e.g., `session.py`, `agent.py`)
+- Tools are registered via `register_tools(mcp)` function in each module
+- `src/tools/__init__.py` provides `register_all_tools(mcp)` to register all tools
 - Return structured data (dict) for complex responses
 - Error handling with descriptive messages
 
@@ -166,7 +182,26 @@ Tools are defined in `server.py` using FastMCP decorators:
 
 ### Adding a New MCP Tool
 
-1. Define the tool function in `server.py`
-2. Use `@mcp.tool()` decorator
+1. Choose the appropriate module in `src/tools/` (or create a new one)
+2. Define the tool function inside `register_tools(mcp)` using `@mcp.tool()` decorator
 3. Add proper type hints and docstring
-4. Return structured dict for complex data
+4. Return structured dict for complex responses
+5. If creating a new module, add import and call in `src/tools/__init__.py`
+
+Example tool module structure:
+
+```python
+# src/tools/example.py
+from mcp.server.fastmcp import Context, FastMCP
+from src.context import AppContext
+
+def register_tools(mcp: FastMCP) -> None:
+    """Register example tools."""
+
+    @mcp.tool()
+    async def example_tool(param: str, ctx: Context = None) -> dict:
+        """Tool description."""
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+        # Implementation
+        return {"success": True, "result": "..."}
+```
