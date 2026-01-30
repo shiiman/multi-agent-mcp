@@ -110,7 +110,8 @@ claude mcp list
 
 | Tool | 説明 |
 |------|------|
-| `init_workspace` | ワークスペースを初期化 |
+| `init_workspace` | ワークスペースディレクトリを初期化 |
+| `init_tmux_workspace` | ターミナルを開いてtmuxワークスペースを構築（8ペイングリッド） |
 | `cleanup_workspace` | 全エージェントを終了しリソースを解放 |
 
 ### エージェント管理
@@ -133,7 +134,10 @@ claude mcp list
 ## 使用例
 
 ```
-# ワークスペースを初期化
+# ターミナルを開いてtmuxワークスペースを構築（推奨）
+init_tmux_workspace("/path/to/project")
+
+# または、バックグラウンドでワークスペースを初期化
 init_workspace("my-project")
 
 # Ownerエージェントを作成
