@@ -99,6 +99,8 @@ end tell
 
     async def _open_in_tab(self, script_path: str, session_name: str) -> bool:
         """既存の Ghostty ウィンドウに新しいタブとしてスクリプトを実行する。"""
+        # スクリプトパスをエスケープ
+        escaped_path = script_path.replace('"', '\\"').replace("'", "'\\''")
         applescript = f'''
 tell application "Ghostty"
     activate
@@ -108,10 +110,11 @@ tell application "System Events"
     tell process "Ghostty"
         -- 新しいタブを開く
         click menu item "New Tab" of menu "File" of menu bar 1
-        delay 0.3
+        delay 0.5
 
-        -- スクリプトを実行
-        keystroke "{script_path}"
+        -- スクリプトを bash で実行（exec で現在のシェルを置き換え）
+        keystroke "exec bash \\"{escaped_path}\\""
+        delay 0.1
         keystroke return
     end tell
 end tell
@@ -119,7 +122,7 @@ end tell
         try:
             code, _, _ = await self._run_shell(f"osascript -e '{applescript}'")
             if code == 0:
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.5)
                 return True
             return False
         except Exception as e:

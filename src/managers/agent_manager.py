@@ -8,7 +8,6 @@ from src.config.settings import Settings
 from src.managers.tmux_manager import (
     MAIN_SESSION,
     MAIN_WINDOW_PANE_ADMIN,
-    MAIN_WINDOW_PANE_OWNER,
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.models.workspace import WorktreeAssignment
@@ -269,7 +268,7 @@ class AgentManager:
 
     def get_pane_for_role(
         self, role: AgentRole, worker_index: int = 0
-    ) -> tuple[str, int, int]:
+    ) -> tuple[str, int, int] | None:
         """ロールに対応するペイン位置を取得する（単一セッション方式）。
 
         Args:
@@ -277,23 +276,25 @@ class AgentManager:
             worker_index: Worker番号（0始まり、roleがWORKERの場合のみ使用）
 
         Returns:
-            (session_name, window_index, pane_index) のタプル
+            (session_name, window_index, pane_index) のタプル、
+            Owner の場合は None（tmux ペインに配置しない）
         """
         if role == AgentRole.OWNER:
-            return MAIN_SESSION, 0, MAIN_WINDOW_PANE_OWNER
+            # Owner は tmux ペインに配置しない（実行AIエージェントが担う）
+            return None
         elif role == AgentRole.ADMIN:
             return MAIN_SESSION, 0, MAIN_WINDOW_PANE_ADMIN
         elif role == AgentRole.WORKER:
             # Worker 1-6 はメインウィンドウ
             if worker_index < 6:
-                # ペイン番号: 2, 3, 4, 5, 6, 7
-                pane_index = 2 + worker_index
+                # ペイン番号: 1, 2, 3, 4, 5, 6
+                pane_index = 1 + worker_index
                 return MAIN_SESSION, 0, pane_index
             else:
-                # Worker 7以降は追加ウィンドウ（12ペイン/ウィンドウ）
+                # Worker 7以降は追加ウィンドウ（10ペイン/ウィンドウ、2×5）
                 extra_worker_index = worker_index - 6
-                window_index = 1 + (extra_worker_index // 12)
-                pane_index = extra_worker_index % 12
+                window_index = 1 + (extra_worker_index // 10)
+                pane_index = extra_worker_index % 10
                 return MAIN_SESSION, window_index, pane_index
         else:
             raise ValueError(f"不明なロール: {role}")

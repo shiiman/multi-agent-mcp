@@ -31,11 +31,11 @@ def get_project_name(working_dir: str) -> str:
     return Path(working_dir).name
 
 # メインウィンドウのペイン配置
-# 左半分: Owner (0) + Admin (1)
-# 右半分: Worker 1-6 (2-7)
-MAIN_WINDOW_PANE_OWNER = 0
-MAIN_WINDOW_PANE_ADMIN = 1
-MAIN_WINDOW_WORKER_PANES = [2, 3, 4, 5, 6, 7]  # Worker 1-6
+# Owner は tmux ペインに配置しない（実行AIエージェントが担う）
+# 左 40%: Admin (0)
+# 右 60%: Worker 1-6 (1-6)
+MAIN_WINDOW_PANE_ADMIN = 0
+MAIN_WINDOW_WORKER_PANES = [1, 2, 3, 4, 5, 6]  # Worker 1-6
 
 
 class TmuxManager:
@@ -85,6 +85,22 @@ class TmuxManager:
             プレフィックス付きセッション名
         """
         return f"{self.prefix}-{name}"
+
+    def _get_window_name(self, window_index: int) -> str:
+        """ウィンドウインデックスからウィンドウ名を取得する。
+
+        base-index 設定に依存せず、ウィンドウ名で指定することで
+        異なる環境でも一貫した動作を保証する。
+
+        Args:
+            window_index: ウィンドウインデックス（0 = メイン、1+ = 追加）
+
+        Returns:
+            ウィンドウ名（"main" または "workers-N"）
+        """
+        if window_index == 0:
+            return "main"
+        return f"workers-{window_index}"
 
     async def create_session(self, name: str, working_dir: str) -> bool:
         """新しいtmuxセッションを作成する。
@@ -312,15 +328,19 @@ class TmuxManager:
     # ========== グリッドレイアウト関連メソッド ==========
 
     async def create_main_session(self, working_dir: str) -> bool:
-        """メインセッション（左右50:50分離レイアウト）を作成する。
+        """メインセッション（左40:右60分離レイアウト）を作成する。
+
+        Owner は tmux ペインに配置しない（実行AIエージェントが担う）。
 
         レイアウト:
-        ┌────────────┬────────────┬────────┬────────┬────────┐
-        │   pane 0   │   pane 1   │ pane 2 │ pane 4 │ pane 6 │
-        │  (owner)   │  (admin)   ├────────┼────────┼────────┤
-        │    25%     │    25%     │ pane 3 │ pane 5 │ pane 7 │
-        └────────────┴────────────┴────────┴────────┴────────┘
-              左半分 50%                右半分 50%
+        ┌─────────────────┬─────────────────────────────┐
+        │                 │    W1    │    W2    │  W3   │
+        │     Admin       │  pane 1  │  pane 2  │pane 3 │
+        │     pane 0      ├──────────┼──────────┼───────┤
+        │      40%        │    W4    │    W5    │  W6   │
+        │                 │  pane 4  │  pane 5  │pane 6 │
+        └─────────────────┴─────────────────────────────┘
+               40%                    60%
 
         Args:
             working_dir: 作業ディレクトリのパス
@@ -352,19 +372,19 @@ class TmuxManager:
         # ウィンドウ名 "main" を使用
         target = f"{session_name}:main"
 
-        # 分割順序: 右側を先に完成させてから、最後に左側を分割
+        # 分割順序: 右側を先に完成させる
         # これにより、分割中のペイン番号のシフトを回避
 
-        # 2. 左右50:50に分割（右側を作成）
+        # 2. 左右40:60に分割（右側60%を作成）
         code, _, stderr = await self._run(
-            "split-window", "-h", "-t", target, "-p", "50"
+            "split-window", "-h", "-t", target, "-p", "60"
         )
         if code != 0:
             logger.error(f"左右分割エラー: {stderr}")
             return False
 
         # 3. 右側（pane 1）を3列に分割
-        # 現在のペイン配置: 0(左50%), 1(右50%)
+        # 現在のペイン配置: 0(左40%), 1(右60%)
         # 最初の分割: 67% (2/3) を残す → pane 2 ができる
         code, _, stderr = await self._run(
             "split-window", "-h", "-t", f"{target}.1", "-p", "67"
@@ -374,7 +394,7 @@ class TmuxManager:
             return False
 
         # 2回目の分割: 残りの50% → pane 3 ができる
-        # 現在のペイン配置: 0(左50%), 1(W列1), 2(W列2+3)
+        # 現在のペイン配置: 0(左40%), 1(W列1), 2(W列2+3)
         code, _, stderr = await self._run(
             "split-window", "-h", "-t", f"{target}.2", "-p", "50"
         )
@@ -383,7 +403,7 @@ class TmuxManager:
             return False
 
         # 4. 各Worker列を上下に分割（3列 → 6ペイン）
-        # 現在のペイン配置: 0(左50%), 1(W列1), 2(W列2), 3(W列3)
+        # 現在のペイン配置: 0(左40%), 1(W列1), 2(W列2), 3(W列3)
         # 重要: 逆順（.3 → .2 → .1）で分割することで、
         # 分割時のペイン番号シフトを回避
         for pane_idx in [3, 2, 1]:
@@ -394,14 +414,8 @@ class TmuxManager:
                 logger.error(f"右側行分割エラー(pane {pane_idx}): {stderr}")
                 return False
 
-        # 5. 最後に左側（pane 0）をOwner/Adminに分割
-        # 現在のペイン配置: 0(左50%), 1-6(Workers)
-        code, _, stderr = await self._run(
-            "split-window", "-h", "-t", f"{target}.0", "-p", "50"
-        )
-        if code != 0:
-            logger.error(f"左側左右分割エラー: {stderr}")
-            return False
+        # 最終的なペイン配置: 0(Admin), 1-6(Workers)
+        # Owner の分割は不要（実行AIエージェントが Owner の役割を担う）
 
         logger.info(f"メインセッション作成完了: {session_name}")
         return True
@@ -540,8 +554,10 @@ class TmuxManager:
 
     def get_pane_for_role(
         self, role: str, worker_index: int = 0, settings: "Settings | None" = None
-    ) -> tuple[str, int, int]:
+    ) -> tuple[str, int, int] | None:
         """ロールに対応するペイン位置を取得する。
+
+        Owner は tmux ペインに配置しないため、None を返す。
 
         Args:
             role: エージェントの役割（"owner", "admin", "worker"）
@@ -549,16 +565,17 @@ class TmuxManager:
             settings: 設定オブジェクト（Worker 7以上の場合に必要）
 
         Returns:
-            (session_name, window_index, pane_index) のタプル
+            (session_name, window_index, pane_index) のタプル、または None（ownerの場合）
         """
         if role == "owner":
-            return MAIN_SESSION, 0, MAIN_WINDOW_PANE_OWNER
+            # Owner は tmux ペインに配置しない（実行AIエージェントが担う）
+            return None
         elif role == "admin":
             return MAIN_SESSION, 0, MAIN_WINDOW_PANE_ADMIN
         elif role == "worker":
             # Worker 1-6 はメインウィンドウ
             if worker_index < 6:
-                # ペイン番号: 2, 3, 4, 5, 6, 7
+                # ペイン番号: 1, 2, 3, 4, 5, 6
                 pane_index = MAIN_WINDOW_WORKER_PANES[worker_index]
                 return MAIN_SESSION, 0, pane_index
             else:
@@ -587,7 +604,7 @@ class TmuxManager:
 
         Args:
             session: セッション名（プレフィックスなし）
-            window: ウィンドウ番号
+            window: ウィンドウ番号（0 = メイン、1+ = 追加）
             pane: ペインインデックス
             command: 実行するコマンド
             literal: Trueの場合、特殊文字をリテラルとして送信
@@ -596,7 +613,8 @@ class TmuxManager:
             成功した場合True
         """
         session_name = self._session_name(session)
-        target = f"{session_name}:{window}.{pane}"
+        window_name = self._get_window_name(window)
+        target = f"{session_name}:{window_name}.{pane}"
 
         # コマンド送信
         if literal:
@@ -621,7 +639,7 @@ class TmuxManager:
 
         Args:
             session: セッション名（プレフィックスなし）
-            window: ウィンドウ番号
+            window: ウィンドウ番号（0 = メイン、1+ = 追加）
             pane: ペインインデックス
             lines: 取得する行数
 
@@ -629,7 +647,8 @@ class TmuxManager:
             キャプチャした出力テキスト
         """
         session_name = self._session_name(session)
-        target = f"{session_name}:{window}.{pane}"
+        window_name = self._get_window_name(window)
+        target = f"{session_name}:{window_name}.{pane}"
 
         code, stdout, stderr = await self._run(
             "capture-pane", "-t", target, "-p", "-S", f"-{lines}"
@@ -646,7 +665,7 @@ class TmuxManager:
 
         Args:
             session: セッション名（プレフィックスなし）
-            window: ウィンドウ番号
+            window: ウィンドウ番号（0 = メイン、1+ = 追加）
             pane: ペインインデックス
             title: タイトル
 
@@ -654,7 +673,8 @@ class TmuxManager:
             成功した場合True
         """
         session_name = self._session_name(session)
-        target = f"{session_name}:{window}.{pane}"
+        window_name = self._get_window_name(window)
+        target = f"{session_name}:{window_name}.{pane}"
 
         # ペインタイトルを設定
         code, _, stderr = await self._run(
@@ -722,6 +742,7 @@ class TmuxManager:
         """ワークスペース構築用のシェルスクリプトを生成する。
 
         セッション作成・ペイン分割・attachを一度に行うスクリプトを生成。
+        Owner は tmux ペインに配置しない（実行AIエージェントが担う）。
 
         Args:
             session_name: tmuxセッション名（プレフィックス付き）
@@ -749,17 +770,17 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     tmux set-option -t "$SESSION" base-index 0
     tmux set-option -t "$SESSION" pane-base-index 0
 
-    # 分割順序: 右側を先に完成させてから、最後に左側を分割
+    # 分割順序: 右側を先に完成させる
     # これにより pane 0 が途中で番号変更されるのを防ぐ
 
-    # 2. 左右50:50に分割
-    # pane 0 = 左50%, pane 1 = 右50%
-    tmux split-window -h -t "$SESSION:main" -p 50
+    # 2. 左右40:60に分割（左40% Admin, 右60% Workers）
+    # pane 0 = 左40%, pane 1 = 右60%
+    tmux split-window -h -t "$SESSION:main" -p 60
 
     # 3. 右側（pane 1）を3列に分割
     tmux split-window -h -t "$SESSION:main.1" -p 67
     tmux split-window -h -t "$SESSION:main.2" -p 50
-    # pane 0 = 左, pane 1 = W列1, pane 2 = W列2, pane 3 = W列3
+    # pane 0 = Admin, pane 1 = W列1, pane 2 = W列2, pane 3 = W列3
 
     # 4. 各Worker列を上下に分割（6ペイン）
     # 重要: 逆順（.3 → .2 → .1）で分割することで、
@@ -767,11 +788,9 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     tmux split-window -v -t "$SESSION:main.3"
     tmux split-window -v -t "$SESSION:main.2"
     tmux split-window -v -t "$SESSION:main.1"
-    # pane 0 = 左, pane 1-6 = Workers (番号は分割順序で決まる)
+    # pane 0 = Admin, pane 1-6 = Workers
 
-    # 5. 最後に左側（pane 0）をOwner/Adminに分割
-    tmux split-window -h -t "$SESSION:main.0" -p 50
-    # pane 0 = Owner, pane 7 = Admin, pane 1-6 = Workers
+    # Owner の分割は不要（VSCode Claude が Owner の役割を担う）
 
     echo "Workspace layout created"
 else

@@ -11,7 +11,6 @@ from src.config.settings import Settings
 from src.context import AppContext
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
-    MAIN_WINDOW_PANE_OWNER,
     MAIN_WINDOW_WORKER_PANES,
     get_project_name,
 )
@@ -25,9 +24,9 @@ def _get_next_worker_slot(
 ) -> tuple[int, int] | None:
     """次に利用可能なWorkerスロット（ウィンドウ, ペイン）を取得する。
 
-    単一セッション方式:
-    - メインウィンドウ（window 0）: Worker 1-6 はペイン 2-7
-    - 追加ウィンドウ（window 1+）: 12ペイン/ウィンドウ
+    単一セッション方式（40:60 レイアウト）:
+    - メインウィンドウ（window 0）: Admin はペイン 0、Worker 1-6 はペイン 1-6
+    - 追加ウィンドウ（window 1+）: 10ペイン/ウィンドウ（2×5）
 
     Args:
         agents: エージェント辞書
@@ -55,7 +54,7 @@ def _get_next_worker_slot(
         ):
             used_slots.add((agent.window_index, agent.pane_index))
 
-    # メインウィンドウ（Worker 1-6: pane 2-7）の空きを探す
+    # メインウィンドウ（Worker 1-6: pane 1-6）の空きを探す
     for pane_index in MAIN_WINDOW_WORKER_PANES:
         if (0, pane_index) not in used_slots:
             return (0, pane_index)
@@ -78,12 +77,13 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, Any]:
-        """新しいエージェントを作成し、メインセッションのペインに配置する。
+        """新しいエージェントを作成する。
 
-        単一セッション方式: 左右50:50分離レイアウト
-        - 左半分: Owner (pane 0) + Admin (pane 1)
-        - 右半分: Worker 1-6 (pane 2-7)
-        - Worker 7以降は追加ウィンドウ（6×2=12ペイン/ウィンドウ）
+        単一セッション方式: 左右40:60分離レイアウト
+        - Owner: tmux ペインに配置しない（実行AIエージェントが担う）
+        - 左 40%: Admin (pane 0)
+        - 右 60%: Worker 1-6 (pane 1-6)
+        - Worker 7以降は追加ウィンドウ（2×5=10ペイン/ウィンドウ）
 
         Args:
             role: エージェントの役割（owner/admin/worker）
@@ -124,27 +124,37 @@ def register_tools(mcp: FastMCP) -> None:
                     "error": f"{agent_role.value}は既に存在します（ID: {existing[0].id}）",
                 }
 
-        # メインセッションを確保（単一セッション方式）
-        if not await tmux.create_main_session(working_dir):
-            return {
-                "success": False,
-                "error": "メインセッションの作成に失敗しました",
-            }
-
         # エージェントIDを生成
         agent_id = str(uuid.uuid4())[:8]
 
         # ロールに応じてペイン位置を決定（プロジェクト固有のセッション内）
-        session_name = get_project_name(working_dir)
+        project_name = get_project_name(working_dir)
         if agent_role == AgentRole.OWNER:
-            window_index = 0
-            pane_index = MAIN_WINDOW_PANE_OWNER
+            # Owner は tmux ペインに配置しない（実行AIエージェントが担う）
+            session_name: str | None = None
+            window_index: int | None = None
+            pane_index: int | None = None
         elif agent_role == AgentRole.ADMIN:
+            # メインセッションを確保（単一セッション方式）
+            if not await tmux.create_main_session(working_dir):
+                return {
+                    "success": False,
+                    "error": "メインセッションの作成に失敗しました",
+                }
+            session_name = project_name
             window_index = 0
             pane_index = MAIN_WINDOW_PANE_ADMIN
         else:  # WORKER
+            # メインセッションを確保（単一セッション方式）
+            if not await tmux.create_main_session(working_dir):
+                return {
+                    "success": False,
+                    "error": "メインセッションの作成に失敗しました",
+                }
+            session_name = project_name
+
             # 次の空きスロットを探す
-            slot = _get_next_worker_slot(agents, settings, session_name)
+            slot = _get_next_worker_slot(agents, settings, project_name)
             if slot is None:
                 return {
                     "success": False,
@@ -155,7 +165,7 @@ def register_tools(mcp: FastMCP) -> None:
             # 追加ウィンドウが必要な場合は作成
             if window_index > 0:
                 success = await tmux.add_extra_worker_window(
-                    project_name=session_name,
+                    project_name=project_name,
                     window_index=window_index,
                     rows=settings.extra_worker_rows,
                     cols=settings.extra_worker_cols,
@@ -166,10 +176,16 @@ def register_tools(mcp: FastMCP) -> None:
                         "error": f"追加Workerウィンドウ {window_index} の作成に失敗しました",
                     }
 
-        # ペインにタイトルを設定
-        await tmux.set_pane_title(
-            session_name, window_index, pane_index, f"{agent_role.value}-{agent_id}"
-        )
+        # ペインにタイトルを設定（tmux ペインがある場合のみ）
+        if session_name is not None and window_index is not None and pane_index is not None:
+            await tmux.set_pane_title(
+                session_name, window_index, pane_index, f"{agent_role.value}-{agent_id}"
+            )
+            tmux_session = f"{session_name}:{window_index}.{pane_index}"
+            log_location = tmux_session
+        else:
+            tmux_session = None
+            log_location = "tmux なし（VSCode Claude）"
 
         # エージェント情報を登録
         now = datetime.now()
@@ -177,7 +193,7 @@ def register_tools(mcp: FastMCP) -> None:
             id=agent_id,
             role=agent_role,
             status=AgentStatus.IDLE,
-            tmux_session=f"{session_name}:{window_index}.{pane_index}",
+            tmux_session=tmux_session,
             session_name=session_name,
             window_index=window_index,
             pane_index=pane_index,
@@ -187,8 +203,7 @@ def register_tools(mcp: FastMCP) -> None:
         agents[agent_id] = agent
 
         logger.info(
-            f"エージェント {agent_id}（{role}）を作成しました: "
-            f"{session_name}:{window_index}.{pane_index}"
+            f"エージェント {agent_id}（{role}）を作成しました: {log_location}"
         )
 
         return {
@@ -278,7 +293,8 @@ def register_tools(mcp: FastMCP) -> None:
                 agent.session_name, agent.window_index, agent.pane_index, "", literal=False
             )
             session_name = tmux._session_name(agent.session_name)
-            target = f"{session_name}:{agent.window_index}.{agent.pane_index}"
+            window_name = tmux._get_window_name(agent.window_index)
+            target = f"{session_name}:{window_name}.{agent.pane_index}"
             await tmux._run("send-keys", "-t", target, "C-c")
             # ペインタイトルをクリア
             await tmux.set_pane_title(

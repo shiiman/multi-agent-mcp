@@ -43,7 +43,9 @@ class Agent(BaseModel):
     id: str = Field(description="エージェントの一意識別子")
     role: AgentRole = Field(description="エージェントの役割")
     status: AgentStatus = Field(default=AgentStatus.IDLE, description="エージェントの状態")
-    tmux_session: str = Field(description="tmuxセッション名")
+    tmux_session: str | None = Field(
+        default=None, description="tmuxセッション名（Owner は None）"
+    )
     worktree_path: str | None = Field(default=None, description="割り当てられたworktreeのパス")
     current_task: str | None = Field(default=None, description="現在実行中のタスク")
     created_at: datetime = Field(description="作成日時")
