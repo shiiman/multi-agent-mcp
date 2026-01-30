@@ -5,10 +5,12 @@
 
 import asyncio
 import logging
+import shlex
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from src.config.settings import AICli, DEFAULT_AI_CLI_COMMANDS
+from src.config.settings import DEFAULT_AI_CLI_COMMANDS, AICli, TerminalApp
 
 if TYPE_CHECKING:
     from src.config.settings import Settings
@@ -145,7 +147,7 @@ class AiCliManager:
         cli = cli or self.get_default_cli()
 
         if not self.is_available(cli):
-            return False, f"{cli.value} は利用できません（インストールされていないか、パスが通っていません）"
+            return False, f"{cli.value} は利用できません"
 
         args = self._build_cli_args(cli, worktree_path, prompt)
 
@@ -211,3 +213,185 @@ class AiCliManager:
             各CLIの情報を含むリスト
         """
         return [self.get_cli_info(cli) for cli in AICli]
+
+    async def open_worktree_in_terminal(
+        self,
+        worktree_path: str,
+        cli: AICli | None = None,
+        prompt: str | None = None,
+        terminal: TerminalApp = TerminalApp.AUTO,
+    ) -> tuple[bool, str]:
+        """ターミナルアプリを開いてAI CLIを起動する。
+
+        Args:
+            worktree_path: worktreeのパス
+            cli: 使用するAI CLI（Noneでデフォルト）
+            prompt: 初期プロンプト（オプション）
+            terminal: 使用するターミナルアプリ
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        cli = cli or self.get_default_cli()
+
+        if not self.is_available(cli):
+            return False, f"{cli.value} は利用できません"
+
+        # CLI コマンドを構築
+        args = self._build_cli_args(cli, worktree_path, prompt)
+        command = " ".join(shlex.quote(arg) for arg in args)
+
+        # ターミナルを検出/選択
+        if terminal == TerminalApp.AUTO:
+            terminal = await self._detect_terminal()
+
+        # ターミナルで開く
+        if terminal == TerminalApp.GHOSTTY:
+            return await self._open_in_ghostty(worktree_path, command)
+        elif terminal == TerminalApp.ITERM2:
+            return await self._open_in_iterm2(worktree_path, command)
+        elif terminal == TerminalApp.TERMINAL:
+            return await self._open_in_terminal_app(worktree_path, command)
+        else:
+            return False, f"未対応のターミナル: {terminal}"
+
+    async def _detect_terminal(self) -> TerminalApp:
+        """利用可能なターミナルアプリを検出する。
+
+        優先順位: Ghostty → iTerm2 → Terminal.app
+
+        Returns:
+            検出されたターミナルアプリ
+        """
+        # Ghostty を確認
+        ghostty_app = Path("/Applications/Ghostty.app")
+        if ghostty_app.exists():
+            return TerminalApp.GHOSTTY
+
+        # iTerm2 を確認
+        iterm_app = Path("/Applications/iTerm.app")
+        if iterm_app.exists():
+            return TerminalApp.ITERM2
+
+        # デフォルトは Terminal.app
+        return TerminalApp.TERMINAL
+
+    async def _open_in_ghostty(
+        self, worktree_path: str, command: str
+    ) -> tuple[bool, str]:
+        """Ghostty で新しいウィンドウを開いてコマンドを実行する。
+
+        Args:
+            worktree_path: 作業ディレクトリのパス
+            command: 実行するコマンド
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        try:
+            # open -na Ghostty.app --args --working-directory={path} -e {command}
+            proc = await asyncio.create_subprocess_exec(
+                "open", "-na", "Ghostty.app",
+                "--args",
+                f"--working-directory={worktree_path}",
+                "-e", command,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+
+            if proc.returncode == 0:
+                return True, "Ghostty でターミナルを開きました"
+            else:
+                error_msg = stderr.decode().strip() if stderr else "不明なエラー"
+                return False, f"Ghostty の起動に失敗しました: {error_msg}"
+
+        except Exception as e:
+            logger.error(f"Ghostty 起動エラー: {e}")
+            return False, f"Ghostty 起動エラー: {e}"
+
+    async def _open_in_iterm2(
+        self, worktree_path: str, command: str
+    ) -> tuple[bool, str]:
+        """iTerm2 で新しいウィンドウを開いてコマンドを実行する。
+
+        Args:
+            worktree_path: 作業ディレクトリのパス
+            command: 実行するコマンド
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        try:
+            # AppleScript で iTerm2 を制御
+            # shlex.quote でパスをエスケープしてからさらに AppleScript 用にエスケープ
+            escaped_path = worktree_path.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_command = command.replace("\\", "\\\\").replace('"', '\\"')
+
+            applescript = f'''
+            tell application "iTerm"
+                activate
+                create window with default profile
+                tell current session of current window
+                    write text "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                end tell
+            end tell
+            '''
+
+            proc = await asyncio.create_subprocess_exec(
+                "osascript", "-e", applescript,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+
+            if proc.returncode == 0:
+                return True, "iTerm2 でターミナルを開きました"
+            else:
+                error_msg = stderr.decode().strip() if stderr else "不明なエラー"
+                return False, f"iTerm2 の起動に失敗しました: {error_msg}"
+
+        except Exception as e:
+            logger.error(f"iTerm2 起動エラー: {e}")
+            return False, f"iTerm2 起動エラー: {e}"
+
+    async def _open_in_terminal_app(
+        self, worktree_path: str, command: str
+    ) -> tuple[bool, str]:
+        """macOS Terminal.app で新しいウィンドウを開いてコマンドを実行する。
+
+        Args:
+            worktree_path: 作業ディレクトリのパス
+            command: 実行するコマンド
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        try:
+            # AppleScript で Terminal.app を制御
+            escaped_path = worktree_path.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_command = command.replace("\\", "\\\\").replace('"', '\\"')
+
+            applescript = f'''
+            tell application "Terminal"
+                activate
+                do script "cd {shlex.quote(escaped_path)} && {escaped_command}"
+            end tell
+            '''
+
+            proc = await asyncio.create_subprocess_exec(
+                "osascript", "-e", applescript,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+
+            if proc.returncode == 0:
+                return True, "Terminal.app でターミナルを開きました"
+            else:
+                error_msg = stderr.decode().strip() if stderr else "不明なエラー"
+                return False, f"Terminal.app の起動に失敗しました: {error_msg}"
+
+        except Exception as e:
+            logger.error(f"Terminal.app 起動エラー: {e}")
+            return False, f"Terminal.app 起動エラー: {e}"

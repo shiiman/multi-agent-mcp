@@ -17,6 +17,7 @@ from src.managers.ipc_manager import IPCManager
 from src.managers.metrics_manager import MetricsManager
 from src.managers.scheduler_manager import SchedulerManager
 from src.managers.tmux_manager import TmuxManager
+from src.managers.worktree_manager import WorktreeManager
 from src.models.agent import Agent, AgentRole, AgentStatus
 
 
@@ -145,3 +146,9 @@ def metrics_manager(temp_dir):
 def cost_manager():
     """CostManagerインスタンスを作成する。"""
     return CostManager(warning_threshold_usd=10.0)
+
+
+@pytest.fixture
+def worktree_manager(git_repo):
+    """WorktreeManagerインスタンスを作成する。"""
+    return WorktreeManager(str(git_repo))

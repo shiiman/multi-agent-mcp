@@ -125,7 +125,7 @@ class WorktreeManager:
         branch: str,
         create_branch: bool = True,
         base_branch: str | None = None,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, str | None]:
         """新しいworktreeを作成する。
 
         gtr がインストールされている場合は gtr を使用する。
@@ -137,7 +137,7 @@ class WorktreeManager:
             base_branch: 新しいブランチの基点となるブランチ（省略時はHEAD）
 
         Returns:
-            (成功フラグ, メッセージ) のタプル
+            (成功フラグ, メッセージ, 実際のworktreeパス) のタプル
         """
         use_gtr = await self._check_gtr_available()
 
@@ -152,7 +152,7 @@ class WorktreeManager:
         self,
         branch: str,
         base_branch: str | None = None,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, str | None]:
         """gtr を使用してworktreeを作成する。
 
         Args:
@@ -160,7 +160,7 @@ class WorktreeManager:
             base_branch: 基点ブランチ
 
         Returns:
-            (成功フラグ, メッセージ) のタプル
+            (成功フラグ, メッセージ, 実際のworktreeパス) のタプル
         """
         args = ["git", "gtr", "new", branch]
 
@@ -172,10 +172,13 @@ class WorktreeManager:
 
         if code != 0:
             logger.error(f"gtr worktree作成エラー: {stderr}")
-            return False, f"worktree作成に失敗しました: {stderr}"
+            return False, f"worktree作成に失敗しました: {stderr}", None
 
-        logger.info(f"gtr でworktreeを作成しました: {branch}")
-        return True, f"worktreeを作成しました (gtr): {branch}"
+        # gtr が作成した実際のパスを取得
+        actual_path = await self.get_worktree_path_for_branch(branch)
+
+        logger.info(f"gtr でworktreeを作成しました: {branch} ({actual_path})")
+        return True, f"worktreeを作成しました (gtr): {branch}", actual_path
 
     async def _create_worktree_native(
         self,
@@ -183,7 +186,7 @@ class WorktreeManager:
         branch: str,
         create_branch: bool = True,
         base_branch: str | None = None,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, str | None]:
         """通常のgit worktreeコマンドでworktreeを作成する。
 
         Args:
@@ -193,10 +196,10 @@ class WorktreeManager:
             base_branch: 基点ブランチ
 
         Returns:
-            (成功フラグ, メッセージ) のタプル
+            (成功フラグ, メッセージ, 実際のworktreeパス) のタプル
         """
         if os.path.exists(path):
-            return False, f"パスが既に存在します: {path}"
+            return False, f"パスが既に存在します: {path}", None
 
         args = ["worktree", "add"]
 
@@ -213,10 +216,10 @@ class WorktreeManager:
 
         if code != 0:
             logger.error(f"worktree作成エラー: {stderr}")
-            return False, f"worktree作成に失敗しました: {stderr}"
+            return False, f"worktree作成に失敗しました: {stderr}", None
 
         logger.info(f"worktreeを作成しました: {path} ({branch})")
-        return True, f"worktreeを作成しました: {path}"
+        return True, f"worktreeを作成しました: {path}", path
 
     async def remove_worktree(
         self, path_or_branch: str, force: bool = False

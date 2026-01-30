@@ -1,6 +1,10 @@
 """AiCliManagerのテスト。"""
 
-from src.config.settings import AICli
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from src.config.settings import AICli, TerminalApp
 
 
 class TestAiCliManager:
@@ -53,3 +57,126 @@ class TestAiCliManager:
         # 全CLIについて結果があること
         for cli in AICli:
             assert cli in result
+
+
+class TestAiCliManagerTerminal:
+    """ターミナル起動機能のテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_detect_terminal_ghostty(self, ai_cli_manager):
+        """Ghostty が検出されることをテスト。"""
+        with patch("pathlib.Path.exists") as mock_exists:
+            mock_exists.return_value = True
+            terminal = await ai_cli_manager._detect_terminal()
+            assert terminal == TerminalApp.GHOSTTY
+
+    @pytest.mark.asyncio
+    async def test_detect_terminal_iterm2(self, ai_cli_manager):
+        """iTerm2 が検出されることをテスト。"""
+        with patch("pathlib.Path.exists") as mock_exists:
+            def exists_side_effect(self=None):
+                # Ghostty がない場合、iTerm2 を返す
+                path = str(mock_exists.call_args)
+                return "iTerm" in path
+
+            mock_exists.side_effect = lambda: False
+            # 最初の呼び出し（Ghostty）は False、2番目（iTerm）は True
+            mock_exists.side_effect = [False, True]
+            terminal = await ai_cli_manager._detect_terminal()
+            assert terminal == TerminalApp.ITERM2
+
+    @pytest.mark.asyncio
+    async def test_detect_terminal_fallback(self, ai_cli_manager):
+        """Terminal.app にフォールバックすることをテスト。"""
+        with patch("pathlib.Path.exists") as mock_exists:
+            mock_exists.return_value = False
+            terminal = await ai_cli_manager._detect_terminal()
+            assert terminal == TerminalApp.TERMINAL
+
+    @pytest.mark.asyncio
+    async def test_open_in_ghostty_success(self, ai_cli_manager):
+        """Ghostty でターミナルを開くことをテスト。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_exec.return_value = mock_proc
+
+            success, message = await ai_cli_manager._open_in_ghostty(
+                "/tmp/test", "claude"
+            )
+            assert success is True
+            assert "Ghostty" in message
+
+    @pytest.mark.asyncio
+    async def test_open_in_ghostty_failure(self, ai_cli_manager):
+        """Ghostty 起動失敗をテスト。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 1
+            mock_proc.communicate = AsyncMock(return_value=(b"", b"error"))
+            mock_exec.return_value = mock_proc
+
+            success, message = await ai_cli_manager._open_in_ghostty(
+                "/tmp/test", "claude"
+            )
+            assert success is False
+            assert "失敗" in message
+
+    @pytest.mark.asyncio
+    async def test_open_in_iterm2_success(self, ai_cli_manager):
+        """iTerm2 でターミナルを開くことをテスト。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_exec.return_value = mock_proc
+
+            success, message = await ai_cli_manager._open_in_iterm2(
+                "/tmp/test", "claude"
+            )
+            assert success is True
+            assert "iTerm2" in message
+
+    @pytest.mark.asyncio
+    async def test_open_in_terminal_app_success(self, ai_cli_manager):
+        """Terminal.app でターミナルを開くことをテスト。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_exec.return_value = mock_proc
+
+            success, message = await ai_cli_manager._open_in_terminal_app(
+                "/tmp/test", "claude"
+            )
+            assert success is True
+            assert "Terminal.app" in message
+
+    @pytest.mark.asyncio
+    async def test_open_worktree_in_terminal_cli_not_available(self, ai_cli_manager):
+        """CLI が利用できない場合のテスト。"""
+        # 全 CLI を利用不可に
+        ai_cli_manager._available_clis = {cli: False for cli in AICli}
+
+        success, message = await ai_cli_manager.open_worktree_in_terminal(
+            "/tmp/test", AICli.CLAUDE
+        )
+        assert success is False
+        assert "利用できません" in message
+
+    @pytest.mark.asyncio
+    async def test_open_worktree_in_terminal_with_ghostty(self, ai_cli_manager):
+        """Ghostty でターミナルを開くことをテスト。"""
+        ai_cli_manager._available_clis[AICli.CLAUDE] = True
+
+        with patch.object(
+            ai_cli_manager, "_open_in_ghostty", new_callable=AsyncMock
+        ) as mock_open:
+            mock_open.return_value = (True, "success")
+
+            success, message = await ai_cli_manager.open_worktree_in_terminal(
+                "/tmp/test", AICli.CLAUDE, terminal=TerminalApp.GHOSTTY
+            )
+            assert success is True
+            mock_open.assert_called_once()
