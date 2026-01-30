@@ -411,11 +411,12 @@ class AgentManager:
         return True, "メインセッションを作成しました"
 
     async def ensure_worker_window_exists(
-        self, window_index: int, settings: Settings
+        self, project_name: str, window_index: int, settings: Settings
     ) -> bool:
         """指定したWorkerウィンドウが存在することを確認し、なければ作成する。
 
         Args:
+            project_name: プロジェクト名（セッション名の一部）
             window_index: ウィンドウインデックス（1以上：追加ウィンドウ）
             settings: 設定オブジェクト
 
@@ -428,7 +429,8 @@ class AgentManager:
 
         # 追加ウィンドウの作成
         return await self.tmux.add_extra_worker_window(
-            window_index,
+            project_name=project_name,
+            window_index=window_index,
             rows=settings.extra_worker_rows,
             cols=settings.extra_worker_cols,
         )

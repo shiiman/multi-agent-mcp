@@ -422,17 +422,22 @@ class TmuxManager:
         """
         target = f"{session}:{window}"
 
-        # 水平分割で cols 列作成
+        # 1. 水平分割で cols 列作成
         for _ in range(cols - 1):
             code, _, stderr = await self._run("split-window", "-h", "-t", target)
             if code != 0:
                 logger.error(f"水平分割エラー: {stderr}")
                 return False
 
-        # 各列を垂直分割で rows 行に
-        # 現在のペイン: 0, 1, ..., cols-1
-        # 各ペインを (rows-1) 回垂直分割
-        for col in range(cols):
+        # 2. 列幅を均等化（これにより各列が十分な幅を持つ）
+        code, _, _ = await self._run("select-layout", "-t", target, "even-horizontal")
+        if code != 0:
+            logger.warning("列幅均等化に失敗、続行します")
+
+        # 3. 各列を垂直分割で rows 行に
+        # 重要: 逆順（cols-1 → 0）で分割することで、
+        # 分割時のペイン番号シフトを回避
+        for col in range(cols - 1, -1, -1):
             pane_target = f"{target}.{col}"
             for _ in range(rows - 1):
                 code, _, stderr = await self._run(
@@ -441,11 +446,6 @@ class TmuxManager:
                 if code != 0:
                     logger.error(f"垂直分割エラー: {stderr}")
                     return False
-
-        # レイアウトを均等化
-        code, _, stderr = await self._run("select-layout", "-t", target, "tiled")
-        if code != 0:
-            logger.warning(f"レイアウト均等化警告: {stderr}")
 
         logger.debug(f"グリッド分割完了: {target} ({rows}×{cols})")
         return True
@@ -491,11 +491,16 @@ class TmuxManager:
         return window_index
 
     async def add_extra_worker_window(
-        self, window_index: int, rows: int = 2, cols: int = 6
+        self,
+        project_name: str,
+        window_index: int,
+        rows: int = 2,
+        cols: int = 6,
     ) -> bool:
         """追加Workerウィンドウ（6×2グリッド）を作成する。
 
         Args:
+            project_name: プロジェクト名（セッション名の一部）
             window_index: ウィンドウインデックス（1, 2, ...）
             rows: 行数
             cols: 列数
@@ -503,11 +508,11 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(MAIN_SESSION)
+        session_name = self._session_name(project_name)
         window_name = f"workers-{window_index + 1}"
 
         # ウィンドウが既に存在するか確認
-        windows = await self.list_windows(MAIN_SESSION)
+        windows = await self.list_windows(project_name)
         existing_indices = {w["index"] for w in windows}
         if window_index in existing_indices:
             logger.info(f"ウィンドウ {window_index} は既に存在します")
@@ -520,6 +525,10 @@ class TmuxManager:
         if code != 0:
             logger.error(f"追加Workerウィンドウ作成エラー: {stderr}")
             return False
+
+        # ウィンドウに pane-base-index を設定（ユーザーのグローバル設定に依存しない）
+        window_target = f"{session_name}:{window_name}"
+        await self._run("set-window-option", "-t", window_target, "pane-base-index", "0")
 
         # グリッドに分割（6×2 = 12ペイン）
         success = await self._split_into_grid(session_name, window_index, rows, cols)
@@ -774,181 +783,6 @@ exec tmux attach -t "$SESSION"
 '''
         return script
 
-    async def _execute_script_in_ghostty(
-        self, working_dir: str, script: str
-    ) -> tuple[bool, str]:
-        """Ghosttyで新しいウィンドウを開いてスクリプトを実行する。
-
-        Args:
-            working_dir: 作業ディレクトリのパス
-            script: 実行するシェルスクリプト
-
-        Returns:
-            (成功したかどうか, メッセージ) のタプル
-        """
-        import os
-        import shutil
-        import tempfile
-        from pathlib import Path
-
-        ghostty_path = shutil.which("ghostty")
-        if not ghostty_path:
-            macos_ghostty = Path("/Applications/Ghostty.app/Contents/MacOS/ghostty")
-            if macos_ghostty.exists():
-                ghostty_path = str(macos_ghostty)
-
-        if not ghostty_path:
-            return False, "Ghostty が見つかりません"
-
-        try:
-            # スクリプトを一時ファイルに書き出す（コマンドライン長制限を回避）
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".sh",
-                prefix="mcp-workspace-",
-                delete=False,
-            ) as f:
-                f.write(script)
-                script_path = f.name
-
-            # 実行権限を付与
-            os.chmod(script_path, 0o755)
-
-            # セッション名を取得（タブタイトル用）
-            # スクリプトから SESSION= の行を抽出
-            session_name = "MCP Workspace"
-            for line in script.split("\n"):
-                if line.startswith("SESSION="):
-                    session_name = line.split("=")[1].strip('"')
-                    break
-
-            proc = await asyncio.create_subprocess_exec(
-                ghostty_path,
-                f"--working-directory={working_dir}",
-                f"--title={session_name}",
-                "-e",
-                script_path,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-
-            # プロセス起動を確認するために少し待つ
-            await asyncio.sleep(0.5)
-
-            # プロセスがまだ動いていれば成功（tmux attach で待機中）
-            if proc.returncode is None:
-                return True, "Ghostty でワークスペースを開きました"
-            else:
-                return False, f"Ghostty の起動に失敗しました (code: {proc.returncode})"
-
-        except Exception as e:
-            logger.error(f"Ghostty 起動エラー: {e}")
-            return False, f"Ghostty 起動エラー: {e}"
-
-    async def _execute_script_in_iterm2(
-        self, working_dir: str, script: str
-    ) -> tuple[bool, str]:
-        """iTerm2で新しいウィンドウを開いてスクリプトを実行する。
-
-        Args:
-            working_dir: 作業ディレクトリのパス
-            script: 実行するシェルスクリプト
-
-        Returns:
-            (成功したかどうか, メッセージ) のタプル
-        """
-        import os
-        import tempfile
-
-        # iTerm2の存在確認
-        iterm_check = await self._run_shell(
-            "osascript -e 'application \"iTerm\" exists'"
-        )
-        if iterm_check[0] != 0:
-            return False, "iTerm2 が見つかりません"
-
-        try:
-            # スクリプトを一時ファイルに書き出す（コマンドライン長制限を回避）
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".sh",
-                prefix="mcp-workspace-",
-                delete=False,
-            ) as f:
-                f.write(script)
-                script_path = f.name
-
-            # 実行権限を付与
-            os.chmod(script_path, 0o755)
-
-            applescript = f'''
-tell application "iTerm"
-    activate
-    create window with default profile
-    tell current session of current window
-        write text "{script_path}"
-    end tell
-end tell
-'''
-            code, _, stderr = await self._run_shell(f"osascript -e '{applescript}'")
-
-            if code == 0:
-                return True, "iTerm2 でワークスペースを開きました"
-            else:
-                error_msg = stderr.strip() if stderr else "不明なエラー"
-                return False, f"iTerm2 の起動に失敗しました: {error_msg}"
-
-        except Exception as e:
-            logger.error(f"iTerm2 起動エラー: {e}")
-            return False, f"iTerm2 起動エラー: {e}"
-
-    async def _execute_script_in_terminal_app(
-        self, working_dir: str, script: str
-    ) -> tuple[bool, str]:
-        """macOS Terminal.appで新しいウィンドウを開いてスクリプトを実行する。
-
-        Args:
-            working_dir: 作業ディレクトリのパス
-            script: 実行するシェルスクリプト
-
-        Returns:
-            (成功したかどうか, メッセージ) のタプル
-        """
-        import os
-        import tempfile
-
-        try:
-            # スクリプトを一時ファイルに書き出す（コマンドライン長制限を回避）
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".sh",
-                prefix="mcp-workspace-",
-                delete=False,
-            ) as f:
-                f.write(script)
-                script_path = f.name
-
-            # 実行権限を付与
-            os.chmod(script_path, 0o755)
-
-            applescript = f'''
-tell application "Terminal"
-    activate
-    do script "{script_path}"
-end tell
-'''
-            code, _, stderr = await self._run_shell(f"osascript -e '{applescript}'")
-
-            if code == 0:
-                return True, "Terminal.app でワークスペースを開きました"
-            else:
-                error_msg = stderr.strip() if stderr else "不明なエラー"
-                return False, f"Terminal.app の起動に失敗しました: {error_msg}"
-
-        except Exception as e:
-            logger.error(f"Terminal.app 起動エラー: {e}")
-            return False, f"Terminal.app 起動エラー: {e}"
-
     async def launch_workspace_in_terminal(
         self,
         working_dir: str,
@@ -968,6 +802,9 @@ end tell
         """
         import os
         import shutil
+        import tempfile
+
+        from .terminal import GhosttyExecutor, ITerm2Executor, TerminalAppExecutor
 
         # 作業ディレクトリの検証
         if not os.path.isdir(working_dir):
@@ -987,21 +824,38 @@ end tell
         # スクリプト生成
         script = self._generate_workspace_script(session_name, working_dir)
 
+        # スクリプトを一時ファイルに書き出す
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".sh",
+            prefix="mcp-workspace-",
+            delete=False,
+        ) as f:
+            f.write(script)
+            script_path = f.name
+        os.chmod(script_path, 0o755)
+
+        # ターミナル実行クラスの選択
+        executors = {
+            TerminalApp.GHOSTTY: GhosttyExecutor(),
+            TerminalApp.ITERM2: ITerm2Executor(),
+            TerminalApp.TERMINAL: TerminalAppExecutor(),
+        }
+
         # 指定されたターミナルを使用
-        if terminal == TerminalApp.GHOSTTY:
-            return await self._execute_script_in_ghostty(working_dir, script)
-        elif terminal == TerminalApp.ITERM2:
-            return await self._execute_script_in_iterm2(working_dir, script)
-        elif terminal == TerminalApp.TERMINAL:
-            return await self._execute_script_in_terminal_app(working_dir, script)
+        if terminal in executors:
+            executor = executors[terminal]
+            if await executor.is_available():
+                return await executor.execute_script(working_dir, script, script_path)
 
         # auto: 優先順位で試行
-        success, msg = await self._execute_script_in_ghostty(working_dir, script)
-        if success:
-            return True, msg
+        for app in [TerminalApp.GHOSTTY, TerminalApp.ITERM2, TerminalApp.TERMINAL]:
+            executor = executors[app]
+            if await executor.is_available():
+                success, msg = await executor.execute_script(
+                    working_dir, script, script_path
+                )
+                if success:
+                    return True, msg
 
-        success, msg = await self._execute_script_in_iterm2(working_dir, script)
-        if success:
-            return True, msg
-
-        return await self._execute_script_in_terminal_app(working_dir, script)
+        return False, "利用可能なターミナルアプリが見つかりません"

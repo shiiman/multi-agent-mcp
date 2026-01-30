@@ -1,0 +1,157 @@
+"""Ghostty ターミナル実装。"""
+
+import asyncio
+import logging
+import shutil
+from pathlib import Path
+
+from .base import TerminalExecutor
+
+logger = logging.getLogger(__name__)
+
+
+class GhosttyExecutor(TerminalExecutor):
+    """Ghostty でスクリプトを実行するクラス。"""
+
+    @property
+    def name(self) -> str:
+        return "Ghostty"
+
+    def _get_ghostty_path(self) -> str | None:
+        """Ghostty の実行パスを取得する。"""
+        ghostty_path = shutil.which("ghostty")
+        if not ghostty_path:
+            macos_ghostty = Path("/Applications/Ghostty.app/Contents/MacOS/ghostty")
+            if macos_ghostty.exists():
+                ghostty_path = str(macos_ghostty)
+        return ghostty_path
+
+    async def is_available(self) -> bool:
+        """Ghostty が利用可能か確認する。"""
+        return self._get_ghostty_path() is not None
+
+    async def execute_script(
+        self, working_dir: str, script: str, script_path: str
+    ) -> tuple[bool, str]:
+        """Ghostty でスクリプトを実行する。
+
+        既存のウィンドウがある場合は新しいタブとして開く。
+        """
+        ghostty_path = self._get_ghostty_path()
+        if not ghostty_path:
+            return False, "Ghostty が見つかりません"
+
+        session_name = self._extract_session_name(script)
+
+        try:
+            # 既存の Ghostty ウィンドウがあるか確認
+            if await self._has_window():
+                success = await self._open_in_tab(script_path, session_name)
+                if success:
+                    return True, "Ghostty の新しいタブでワークスペースを開きました"
+                # タブ追加に失敗した場合は新しいウィンドウで開く
+
+            # 新しいウィンドウで開く
+            proc = await asyncio.create_subprocess_exec(
+                ghostty_path,
+                f"--working-directory={working_dir}",
+                f"--title={session_name}",
+                "-e",
+                script_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+
+            # プロセス起動を確認するために少し待つ
+            await asyncio.sleep(0.5)
+
+            # プロセスがまだ動いていれば成功（tmux attach で待機中）
+            if proc.returncode is None:
+                # ウィンドウを画面サイズに合わせる（fill arrange）
+                await self._maximize_window()
+                return True, "Ghostty でワークスペースを開きました"
+            else:
+                return False, f"Ghostty の起動に失敗しました (code: {proc.returncode})"
+
+        except Exception as e:
+            logger.error(f"Ghostty 起動エラー: {e}")
+            return False, f"Ghostty 起動エラー: {e}"
+
+    async def _has_window(self) -> bool:
+        """Ghostty ウィンドウが存在するか確認する。"""
+        applescript = '''
+tell application "System Events"
+    if exists process "Ghostty" then
+        tell process "Ghostty"
+            if (count of windows) > 0 then
+                return "true"
+            end if
+        end tell
+    end if
+    return "false"
+end tell
+'''
+        try:
+            code, stdout, _ = await self._run_shell(f"osascript -e '{applescript}'")
+            return code == 0 and "true" in stdout.lower()
+        except Exception:
+            return False
+
+    async def _open_in_tab(self, script_path: str, session_name: str) -> bool:
+        """既存の Ghostty ウィンドウに新しいタブとしてスクリプトを実行する。"""
+        applescript = f'''
+tell application "Ghostty"
+    activate
+end tell
+
+tell application "System Events"
+    tell process "Ghostty"
+        -- 新しいタブを開く
+        click menu item "New Tab" of menu "File" of menu bar 1
+        delay 0.3
+
+        -- スクリプトを実行
+        keystroke "{script_path}"
+        keystroke return
+    end tell
+end tell
+'''
+        try:
+            code, _, _ = await self._run_shell(f"osascript -e '{applescript}'")
+            if code == 0:
+                await asyncio.sleep(0.3)
+                return True
+            return False
+        except Exception as e:
+            logger.warning(f"Ghostty タブ追加に失敗: {e}")
+            return False
+
+    async def _maximize_window(self) -> None:
+        """Ghostty ウィンドウを画面サイズに合わせる（fill arrange）。"""
+        applescript = '''
+tell application "System Events"
+    tell process "Ghostty"
+        if exists window 1 then
+            -- メイン画面のサイズを取得
+            set screenWidth to 1920
+            set screenHeight to 1080
+            try
+                tell application "Finder"
+                    set desktopBounds to bounds of window of desktop
+                    set screenWidth to (item 3 of desktopBounds) - (item 1 of desktopBounds)
+                    set screenHeight to (item 4 of desktopBounds) - (item 2 of desktopBounds)
+                end tell
+            end try
+
+            -- ウィンドウを画面左上に配置し、画面サイズに合わせる
+            -- メニューバー(25px)とDock(70px程度)を考慮
+            set position of window 1 to {0, 25}
+            set size of window 1 to {screenWidth, screenHeight - 95}
+        end if
+    end tell
+end tell
+'''
+        try:
+            await self._run_shell(f"osascript -e '{applescript}'")
+        except Exception as e:
+            logger.warning(f"ウィンドウ最大化に失敗: {e}")

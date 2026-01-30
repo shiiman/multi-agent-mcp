@@ -505,7 +505,8 @@ async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, A
         # 追加ウィンドウが必要な場合は作成
         if window_index > 0:
             success = await tmux.add_extra_worker_window(
-                window_index,
+                project_name=session_name,
+                window_index=window_index,
                 rows=settings.extra_worker_rows,
                 cols=settings.extra_worker_cols,
             )

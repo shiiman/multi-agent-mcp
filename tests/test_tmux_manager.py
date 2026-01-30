@@ -290,8 +290,9 @@ class TestTmuxManager:
         monkeypatch.setattr(shutil, "which", lambda x: "/usr/local/bin/ghostty")
 
         # asyncio.create_subprocess_exec をモックしてプロセス起動をシミュレート
+        # returncode = None はプロセスがまだ実行中であることを示す
         class MockProcess:
-            returncode = 0
+            returncode = None
 
             async def communicate(self):
                 return b"", b""
@@ -315,21 +316,23 @@ class TestTmuxManager:
         self, tmux_manager, temp_dir, monkeypatch
     ):
         """launch_workspace_in_terminal の iTerm2 起動テスト（モック使用）。"""
-        # _execute_script_in_ghostty を失敗させる
-        async def mock_ghostty_fail(working_dir, script):
-            return (False, "Ghostty が見つかりません")
+        from src.managers.terminal import GhosttyExecutor, ITerm2Executor
 
-        monkeypatch.setattr(
-            tmux_manager, "_execute_script_in_ghostty", mock_ghostty_fail
-        )
+        # Ghostty を利用不可にする
+        async def mock_ghostty_unavailable(self):
+            return False
 
-        # _execute_script_in_iterm2 を成功させる
-        async def mock_iterm2_success(working_dir, script):
+        monkeypatch.setattr(GhosttyExecutor, "is_available", mock_ghostty_unavailable)
+
+        # iTerm2 を利用可能にして成功させる
+        async def mock_iterm2_available(self):
+            return True
+
+        async def mock_iterm2_execute(self, working_dir, script, script_path):
             return (True, "iTerm2 でワークスペースを開きました")
 
-        monkeypatch.setattr(
-            tmux_manager, "_execute_script_in_iterm2", mock_iterm2_success
-        )
+        monkeypatch.setattr(ITerm2Executor, "is_available", mock_iterm2_available)
+        monkeypatch.setattr(ITerm2Executor, "execute_script", mock_iterm2_execute)
 
         success, message = await tmux_manager.launch_workspace_in_terminal(
             str(temp_dir)
@@ -343,29 +346,33 @@ class TestTmuxManager:
         self, tmux_manager, temp_dir, monkeypatch
     ):
         """launch_workspace_in_terminal の Terminal.app 起動テスト（モック使用）。"""
-        # _execute_script_in_ghostty を失敗させる
-        async def mock_ghostty_fail(working_dir, script):
-            return (False, "Ghostty が見つかりません")
-
-        monkeypatch.setattr(
-            tmux_manager, "_execute_script_in_ghostty", mock_ghostty_fail
+        from src.managers.terminal import (
+            GhosttyExecutor,
+            ITerm2Executor,
+            TerminalAppExecutor,
         )
 
-        # _execute_script_in_iterm2 を失敗させる
-        async def mock_iterm2_fail(working_dir, script):
-            return (False, "iTerm2 が見つかりません")
+        # Ghostty を利用不可にする
+        async def mock_ghostty_unavailable(self):
+            return False
 
-        monkeypatch.setattr(
-            tmux_manager, "_execute_script_in_iterm2", mock_iterm2_fail
-        )
+        monkeypatch.setattr(GhosttyExecutor, "is_available", mock_ghostty_unavailable)
 
-        # _execute_script_in_terminal_app を成功させる
-        async def mock_terminal_success(working_dir, script):
+        # iTerm2 を利用不可にする
+        async def mock_iterm2_unavailable(self):
+            return False
+
+        monkeypatch.setattr(ITerm2Executor, "is_available", mock_iterm2_unavailable)
+
+        # Terminal.app を利用可能にして成功させる
+        async def mock_terminal_available(self):
+            return True
+
+        async def mock_terminal_execute(self, working_dir, script, script_path):
             return (True, "Terminal.app でワークスペースを開きました")
 
-        monkeypatch.setattr(
-            tmux_manager, "_execute_script_in_terminal_app", mock_terminal_success
-        )
+        monkeypatch.setattr(TerminalAppExecutor, "is_available", mock_terminal_available)
+        monkeypatch.setattr(TerminalAppExecutor, "execute_script", mock_terminal_execute)
 
         success, message = await tmux_manager.launch_workspace_in_terminal(
             str(temp_dir)
