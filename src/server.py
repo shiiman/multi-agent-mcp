@@ -234,6 +234,66 @@ async def cleanup_workspace(ctx: Context) -> dict[str, Any]:
     }
 
 
+@mcp.tool()
+async def init_tmux_workspace(
+    working_dir: str,
+    open_terminal: bool = True,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """ターミナルを開いてtmuxワークスペース（グリッドレイアウト）を構築する。
+
+    ターミナルを先に起動し、その中でtmuxセッション作成・ペイン分割を行う。
+    セッションが既に存在する場合はattachのみ行う。
+
+    レイアウト:
+    ┌────────────┬────────────┬────────┬────────┬────────┐
+    │   pane 0   │   pane 1   │ pane 2 │ pane 4 │ pane 6 │
+    │  (owner)   │  (admin)   ├────────┼────────┼────────┤
+    │    25%     │    25%     │ pane 3 │ pane 5 │ pane 7 │
+    └────────────┴────────────┴────────┴────────┴────────┘
+          左半分 50%                右半分 50%
+
+    Args:
+        working_dir: 作業ディレクトリのパス
+        open_terminal: Trueでターミナルを開いて表示（デフォルト）、
+                       Falseでバックグラウンド作成
+
+    Returns:
+        初期化結果（success, session_name, message または error）
+    """
+    app_ctx: AppContext = ctx.request_context.lifespan_context
+    tmux = app_ctx.tmux
+
+    if open_terminal:
+        # ターミナルを開いてセッション作成
+        success, message = await tmux.launch_workspace_in_terminal(working_dir)
+        if success:
+            return {
+                "success": True,
+                "session_name": "main",
+                "message": message,
+            }
+        else:
+            return {
+                "success": False,
+                "error": message,
+            }
+    else:
+        # バックグラウンドで作成（従来の動作）
+        success = await tmux.create_main_session(working_dir)
+        if success:
+            return {
+                "success": True,
+                "session_name": "main",
+                "message": "メインセッションをバックグラウンドで作成しました",
+            }
+        else:
+            return {
+                "success": False,
+                "error": "メインセッションの作成に失敗しました",
+            }
+
+
 # ========== エージェント管理 Tools ==========
 
 

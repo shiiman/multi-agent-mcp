@@ -252,3 +252,124 @@ class TestTmuxManager:
             assert call_count == 1
         finally:
             await tmux_manager.kill_session(session_name)
+
+    # ========== ターミナル先行起動関連テスト ==========
+
+    def test_generate_workspace_script(self, tmux_manager):
+        """ワークスペーススクリプト生成をテスト。"""
+        script = tmux_manager._generate_workspace_script(
+            "mcp-agent-main", "/tmp/test-workspace"
+        )
+
+        # スクリプトに必要な要素が含まれているか確認
+        assert 'SESSION="mcp-agent-main"' in script
+        assert 'WD="/tmp/test-workspace"' in script
+        assert "tmux new-session -d" in script
+        assert "tmux split-window" in script
+        assert "tmux attach" in script
+        assert "set -e" in script
+
+    @pytest.mark.asyncio
+    async def test_launch_workspace_in_terminal_invalid_dir(self, tmux_manager):
+        """存在しないディレクトリでの起動失敗をテスト。"""
+        success, message = await tmux_manager.launch_workspace_in_terminal(
+            "/nonexistent/directory/path"
+        )
+
+        assert success is False
+        assert "存在しません" in message
+
+    @pytest.mark.asyncio
+    async def test_launch_workspace_in_terminal_ghostty(
+        self, tmux_manager, temp_dir, monkeypatch
+    ):
+        """launch_workspace_in_terminal の Ghostty 起動テスト（モック使用）。"""
+        import asyncio
+
+        # shutil.which をモックして ghostty が存在するようにする
+        monkeypatch.setattr(shutil, "which", lambda x: "/usr/local/bin/ghostty")
+
+        # asyncio.create_subprocess_exec をモックしてプロセス起動をシミュレート
+        class MockProcess:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            return MockProcess()
+
+        monkeypatch.setattr(
+            asyncio, "create_subprocess_exec", mock_create_subprocess_exec
+        )
+
+        success, message = await tmux_manager.launch_workspace_in_terminal(
+            str(temp_dir)
+        )
+
+        assert success is True
+        assert "Ghostty" in message
+
+    @pytest.mark.asyncio
+    async def test_launch_workspace_in_terminal_iterm2(
+        self, tmux_manager, temp_dir, monkeypatch
+    ):
+        """launch_workspace_in_terminal の iTerm2 起動テスト（モック使用）。"""
+        # _execute_script_in_ghostty を失敗させる
+        async def mock_ghostty_fail(working_dir, script):
+            return (False, "Ghostty が見つかりません")
+
+        monkeypatch.setattr(
+            tmux_manager, "_execute_script_in_ghostty", mock_ghostty_fail
+        )
+
+        # _execute_script_in_iterm2 を成功させる
+        async def mock_iterm2_success(working_dir, script):
+            return (True, "iTerm2 でワークスペースを開きました")
+
+        monkeypatch.setattr(
+            tmux_manager, "_execute_script_in_iterm2", mock_iterm2_success
+        )
+
+        success, message = await tmux_manager.launch_workspace_in_terminal(
+            str(temp_dir)
+        )
+
+        assert success is True
+        assert "iTerm2" in message
+
+    @pytest.mark.asyncio
+    async def test_launch_workspace_in_terminal_terminal_app(
+        self, tmux_manager, temp_dir, monkeypatch
+    ):
+        """launch_workspace_in_terminal の Terminal.app 起動テスト（モック使用）。"""
+        # _execute_script_in_ghostty を失敗させる
+        async def mock_ghostty_fail(working_dir, script):
+            return (False, "Ghostty が見つかりません")
+
+        monkeypatch.setattr(
+            tmux_manager, "_execute_script_in_ghostty", mock_ghostty_fail
+        )
+
+        # _execute_script_in_iterm2 を失敗させる
+        async def mock_iterm2_fail(working_dir, script):
+            return (False, "iTerm2 が見つかりません")
+
+        monkeypatch.setattr(
+            tmux_manager, "_execute_script_in_iterm2", mock_iterm2_fail
+        )
+
+        # _execute_script_in_terminal_app を成功させる
+        async def mock_terminal_success(working_dir, script):
+            return (True, "Terminal.app でワークスペースを開きました")
+
+        monkeypatch.setattr(
+            tmux_manager, "_execute_script_in_terminal_app", mock_terminal_success
+        )
+
+        success, message = await tmux_manager.launch_workspace_in_terminal(
+            str(temp_dir)
+        )
+
+        assert success is True
+        assert "Terminal.app" in message

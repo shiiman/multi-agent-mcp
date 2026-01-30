@@ -677,3 +677,240 @@ class TmuxManager:
             if w["index"] == window:
                 return w["panes"]
         return 0
+
+    # ========== ターミナル先行起動関連メソッド ==========
+
+    def _generate_workspace_script(self, session_name: str, working_dir: str) -> str:
+        """ワークスペース構築用のシェルスクリプトを生成する。
+
+        セッション作成・ペイン分割・attachを一度に行うスクリプトを生成。
+
+        Args:
+            session_name: tmuxセッション名（プレフィックス付き）
+            working_dir: 作業ディレクトリのパス
+
+        Returns:
+            シェルスクリプト文字列
+        """
+        # シェル変数でエスケープ問題を回避
+        script = f'''#!/bin/bash
+set -e
+
+SESSION="{session_name}"
+WD="{working_dir}"
+
+# セッションが存在しない場合のみ作成
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "Creating new tmux session: $SESSION"
+
+    # 1. セッション作成
+    tmux new-session -d -s "$SESSION" -c "$WD" -n main
+
+    # 2. 左右50:50に分割（右側を作成）
+    tmux split-window -h -t "$SESSION:0" -p 50
+
+    # 3. 左側を左右に分割（Owner/Admin）
+    tmux split-window -h -t "$SESSION:0.0"
+
+    # 4. 右側を3列に分割
+    # ステップ3後: 0(Owner), 2(Admin), 1(Workers右50%)
+    tmux split-window -h -t "$SESSION:0.1" -p 67
+    tmux split-window -h -t "$SESSION:0.3" -p 50
+
+    # 5. 各Worker列を上下に分割（6ペイン）
+    tmux split-window -v -t "$SESSION:0.1"
+    tmux split-window -v -t "$SESSION:0.3"
+    tmux split-window -v -t "$SESSION:0.4"
+
+    echo "Workspace layout created"
+else
+    echo "Session $SESSION already exists"
+fi
+
+# セッションにattach
+exec tmux attach -t "$SESSION"
+'''
+        return script
+
+    async def _execute_script_in_ghostty(
+        self, working_dir: str, script: str
+    ) -> tuple[bool, str]:
+        """Ghosttyで新しいウィンドウを開いてスクリプトを実行する。
+
+        Args:
+            working_dir: 作業ディレクトリのパス
+            script: 実行するシェルスクリプト
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        import shutil
+        from pathlib import Path
+
+        ghostty_path = shutil.which("ghostty")
+        if not ghostty_path:
+            macos_ghostty = Path("/Applications/Ghostty.app/Contents/MacOS/ghostty")
+            if macos_ghostty.exists():
+                ghostty_path = str(macos_ghostty)
+
+        if not ghostty_path:
+            return False, "Ghostty が見つかりません"
+
+        try:
+            # シングルクォートをエスケープ
+            escaped_script = script.replace("'", "'\"'\"'")
+            command = f"bash -c '{escaped_script}'"
+
+            proc = await asyncio.create_subprocess_exec(
+                ghostty_path,
+                f"--working-directory={working_dir}",
+                "-e",
+                command,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+
+            if proc.returncode == 0:
+                return True, "Ghostty でワークスペースを開きました"
+            else:
+                error_msg = stderr.decode().strip() if stderr else "不明なエラー"
+                return False, f"Ghostty の起動に失敗しました: {error_msg}"
+
+        except Exception as e:
+            logger.error(f"Ghostty 起動エラー: {e}")
+            return False, f"Ghostty 起動エラー: {e}"
+
+    async def _execute_script_in_iterm2(
+        self, working_dir: str, script: str
+    ) -> tuple[bool, str]:
+        """iTerm2で新しいウィンドウを開いてスクリプトを実行する。
+
+        Args:
+            working_dir: 作業ディレクトリのパス
+            script: 実行するシェルスクリプト
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        # iTerm2の存在確認
+        iterm_check = await self._run_shell(
+            "osascript -e 'application \"iTerm\" exists'"
+        )
+        if iterm_check[0] != 0:
+            return False, "iTerm2 が見つかりません"
+
+        try:
+            # AppleScript内でのエスケープ
+            escaped_path = working_dir.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_script = script.replace("\\", "\\\\").replace('"', '\\"')
+
+            applescript = f'''
+tell application "iTerm"
+    activate
+    create window with default profile
+    tell current session of current window
+        write text "cd \\"{escaped_path}\\" && bash -c \\"{escaped_script}\\""
+    end tell
+end tell
+'''
+            code, _, stderr = await self._run_shell(f"osascript -e '{applescript}'")
+
+            if code == 0:
+                return True, "iTerm2 でワークスペースを開きました"
+            else:
+                error_msg = stderr.strip() if stderr else "不明なエラー"
+                return False, f"iTerm2 の起動に失敗しました: {error_msg}"
+
+        except Exception as e:
+            logger.error(f"iTerm2 起動エラー: {e}")
+            return False, f"iTerm2 起動エラー: {e}"
+
+    async def _execute_script_in_terminal_app(
+        self, working_dir: str, script: str
+    ) -> tuple[bool, str]:
+        """macOS Terminal.appで新しいウィンドウを開いてスクリプトを実行する。
+
+        Args:
+            working_dir: 作業ディレクトリのパス
+            script: 実行するシェルスクリプト
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        try:
+            # AppleScript内でのエスケープ
+            escaped_path = working_dir.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_script = script.replace("\\", "\\\\").replace('"', '\\"')
+
+            applescript = f'''
+tell application "Terminal"
+    activate
+    do script "cd \\"{escaped_path}\\" && bash -c \\"{escaped_script}\\""
+end tell
+'''
+            code, _, stderr = await self._run_shell(f"osascript -e '{applescript}'")
+
+            if code == 0:
+                return True, "Terminal.app でワークスペースを開きました"
+            else:
+                error_msg = stderr.strip() if stderr else "不明なエラー"
+                return False, f"Terminal.app の起動に失敗しました: {error_msg}"
+
+        except Exception as e:
+            logger.error(f"Terminal.app 起動エラー: {e}")
+            return False, f"Terminal.app 起動エラー: {e}"
+
+    async def launch_workspace_in_terminal(
+        self,
+        working_dir: str,
+        terminal: TerminalApp | None = None,
+    ) -> tuple[bool, str]:
+        """ターミナルを開いてtmuxワークスペース（グリッドレイアウト）を構築する。
+
+        ターミナルを先に開き、その中でtmuxセッション作成・ペイン分割を行う。
+        セッションが既に存在する場合はattachのみ行う。
+
+        Args:
+            working_dir: 作業ディレクトリのパス
+            terminal: 使用するターミナルアプリ（Noneでデフォルト設定を使用）
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        import os
+        import shutil
+
+        # 作業ディレクトリの検証
+        if not os.path.isdir(working_dir):
+            return False, f"作業ディレクトリが存在しません: {working_dir}"
+
+        # tmuxの利用可能性確認
+        if shutil.which("tmux") is None:
+            return False, "tmux がインストールされていません"
+
+        # ターミナル設定
+        terminal = terminal or self.default_terminal
+        session_name = self._session_name(MAIN_SESSION)
+
+        # スクリプト生成
+        script = self._generate_workspace_script(session_name, working_dir)
+
+        # 指定されたターミナルを使用
+        if terminal == TerminalApp.GHOSTTY:
+            return await self._execute_script_in_ghostty(working_dir, script)
+        elif terminal == TerminalApp.ITERM2:
+            return await self._execute_script_in_iterm2(working_dir, script)
+        elif terminal == TerminalApp.TERMINAL:
+            return await self._execute_script_in_terminal_app(working_dir, script)
+
+        # auto: 優先順位で試行
+        success, msg = await self._execute_script_in_ghostty(working_dir, script)
+        if success:
+            return True, msg
+
+        success, msg = await self._execute_script_in_iterm2(working_dir, script)
+        if success:
+            return True, msg
+
+        return await self._execute_script_in_terminal_app(working_dir, script)
