@@ -104,9 +104,9 @@ uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp mu
 claude mcp list
 ```
 
-## 提供するTools
+## 提供するTools（57個）
 
-### セッション管理
+### セッション管理（5個）
 
 | Tool | 説明 |
 |------|------|
@@ -116,7 +116,7 @@ claude mcp list
 | `check_all_tasks_completed` | 全タスクの完了状態をチェック |
 | `cleanup_on_completion` | 全タスク完了時にワークスペースをクリーンアップ |
 
-### エージェント管理
+### エージェント管理（4個）
 
 | Tool | 説明 |
 |------|------|
@@ -125,13 +125,142 @@ claude mcp list
 | `get_agent_status` | 指定エージェントの詳細ステータスを取得 |
 | `terminate_agent` | エージェントを終了 |
 
-### コマンド実行
+### コマンド実行（5個）
 
 | Tool | 説明 |
 |------|------|
 | `send_command` | エージェントにコマンドを送信 |
 | `get_output` | エージェントのtmux出力を取得 |
+| `send_task` | タスク指示をファイル経由でWorkerに送信 |
+| `open_session` | エージェントのtmuxセッションをターミナルで開く |
 | `broadcast_command` | 全エージェント（または特定役割）にコマンド送信 |
+
+### Git Worktree管理（8個）
+
+| Tool | 説明 |
+|------|------|
+| `create_worktree` | 新しいgit worktreeを作成 |
+| `list_worktrees` | worktree一覧を取得 |
+| `remove_worktree` | worktreeを削除 |
+| `assign_worktree` | エージェントにworktreeを割り当て |
+| `get_worktree_status` | worktreeのgitステータスを取得 |
+| `check_gtr_available` | gtr (git-worktree-runner) の利用可否を確認 |
+| `open_worktree_with_ai` | gtr aiでworktreeをAIツールで開く |
+| `open_worktree_with_editor` | gtr editorでworktreeをエディタで開く |
+
+### IPC/メッセージング（5個）
+
+| Tool | 説明 |
+|------|------|
+| `send_message` | エージェント間でメッセージを送信 |
+| `read_messages` | エージェントのメッセージを読み取る |
+| `get_unread_count` | 未読メッセージ数を取得 |
+| `clear_messages` | メッセージをクリア |
+| `register_agent_to_ipc` | エージェントをIPCシステムに登録 |
+
+### ダッシュボード/タスク管理（9個）
+
+| Tool | 説明 |
+|------|------|
+| `create_task` | 新しいタスクを作成 |
+| `update_task_status` | タスクのステータスを更新（Admin専用） |
+| `assign_task_to_agent` | タスクをエージェントに割り当て（Admin専用） |
+| `list_tasks` | タスク一覧を取得 |
+| `report_task_completion` | WorkerがAdminにタスク完了を報告（Worker専用） |
+| `get_task` | タスクの詳細を取得 |
+| `remove_task` | タスクを削除 |
+| `get_dashboard` | ダッシュボード全体を取得 |
+| `get_dashboard_summary` | ダッシュボードのサマリーを取得 |
+
+### AI CLI（2個）
+
+| Tool | 説明 |
+|------|------|
+| `get_available_ai_clis` | 利用可能なAI CLI一覧を取得 |
+| `open_worktree_with_ai_cli` | 指定のAI CLIでworktreeを開く |
+
+### Gtrconfig（3個）
+
+| Tool | 説明 |
+|------|------|
+| `check_gtrconfig` | .gtrconfigの存在確認と内容取得 |
+| `analyze_project_for_gtrconfig` | プロジェクト構造を解析して推奨設定を提案 |
+| `generate_gtrconfig` | .gtrconfigを自動生成 |
+
+### テンプレート（2個）
+
+| Tool | 説明 |
+|------|------|
+| `list_workspace_templates` | 利用可能なテンプレート一覧を取得 |
+| `get_workspace_template` | 特定テンプレートの詳細を取得 |
+
+### スケジューラー（3個）
+
+| Tool | 説明 |
+|------|------|
+| `enqueue_task` | タスクをスケジューラーキューに追加 |
+| `auto_assign_tasks` | 空いているWorkerにタスクを自動割り当て |
+| `get_task_queue` | 現在のタスクキューを取得 |
+
+### ヘルスチェック（5個）
+
+| Tool | 説明 |
+|------|------|
+| `healthcheck_agent` | 特定エージェントのヘルスチェックを実行 |
+| `healthcheck_all` | 全エージェントのヘルスチェックを実行 |
+| `get_unhealthy_agents` | 異常なエージェント一覧を取得 |
+| `attempt_recovery` | エージェントの復旧を試みる |
+| `record_heartbeat` | ハートビートを記録 |
+
+### メトリクス（4個）
+
+| Tool | 説明 |
+|------|------|
+| `get_task_metrics` | タスクのメトリクスを取得 |
+| `get_agent_metrics` | エージェントのメトリクスを取得 |
+| `get_workspace_metrics` | ワークスペース全体のメトリクスを取得 |
+| `get_metrics_summary` | メトリクスのサマリーを取得 |
+
+### コスト管理（4個）
+
+| Tool | 説明 |
+|------|------|
+| `get_cost_estimate` | 現在のコスト推定を取得 |
+| `set_cost_warning_threshold` | コスト警告の閾値を設定 |
+| `reset_cost_counter` | コストカウンターをリセット |
+| `get_cost_summary` | コストサマリーを取得 |
+
+### ペルソナ（3個）
+
+| Tool | 説明 |
+|------|------|
+| `detect_task_type` | タスクの説明からタスクタイプを検出 |
+| `get_optimal_persona` | タスクに最適なペルソナを取得 |
+| `list_personas` | 利用可能なペルソナ一覧を取得 |
+
+### メモリ管理（19個）
+
+| Tool | 説明 |
+|------|------|
+| `save_to_memory` | 知識をプロジェクトメモリに保存 |
+| `retrieve_from_memory` | プロジェクトメモリから知識を検索 |
+| `get_memory_entry` | キーでメモリエントリを取得 |
+| `list_memory_entries` | メモリエントリ一覧を取得 |
+| `delete_memory_entry` | メモリエントリを削除 |
+| `get_memory_summary` | メモリのサマリー情報を取得 |
+| `search_memory_archive` | アーカイブされたメモリを検索 |
+| `list_memory_archive` | アーカイブエントリ一覧を取得 |
+| `restore_from_memory_archive` | アーカイブからエントリを復元 |
+| `get_memory_archive_summary` | アーカイブのサマリー情報を取得 |
+| `save_to_global_memory` | グローバルメモリに保存（全プロジェクト共通） |
+| `retrieve_from_global_memory` | グローバルメモリから検索 |
+| `list_global_memory_entries` | グローバルメモリエントリ一覧を取得 |
+| `get_global_memory_summary` | グローバルメモリのサマリーを取得 |
+| `delete_global_memory_entry` | グローバルメモリエントリを削除 |
+| `search_global_memory_archive` | グローバルアーカイブを検索 |
+| `list_global_memory_archive` | グローバルアーカイブ一覧を取得 |
+| `restore_from_global_memory_archive` | グローバルアーカイブからエントリを復元 |
+| `get_global_memory_archive_summary` | グローバルアーカイブのサマリーを取得 |
 
 ## 使用例
 
