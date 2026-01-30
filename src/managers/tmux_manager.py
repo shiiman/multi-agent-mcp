@@ -12,7 +12,23 @@ from src.config.settings import TerminalApp
 logger = logging.getLogger(__name__)
 
 # セッション名定数（単一セッション方式）
+# 注意: MAIN_SESSION は後方互換性のために残していますが、
+# 実際のセッション名はプロジェクト名を含む動的な名前になります
 MAIN_SESSION = "main"
+
+
+def get_project_name(working_dir: str) -> str:
+    """作業ディレクトリからプロジェクト名を取得する。
+
+    Args:
+        working_dir: 作業ディレクトリのパス
+
+    Returns:
+        プロジェクト名（ディレクトリ名）
+    """
+    from pathlib import Path
+
+    return Path(working_dir).name
 
 # メインウィンドウのペイン配置
 # 左半分: Owner (0) + Admin (1)
@@ -312,10 +328,12 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(MAIN_SESSION)
+        # プロジェクト名を含むセッション名を生成
+        project_name = get_project_name(working_dir)
+        session_name = self._session_name(project_name)
 
         # セッションが既に存在する場合はスキップ
-        if await self.session_exists(MAIN_SESSION):
+        if await self.session_exists(project_name):
             logger.info(f"メインセッション {session_name} は既に存在します")
             return True
 
@@ -926,7 +944,10 @@ end tell
 
         # ターミナル設定
         terminal = terminal or self.default_terminal
-        session_name = self._session_name(MAIN_SESSION)
+
+        # プロジェクト名を含むセッション名を生成
+        project_name = get_project_name(working_dir)
+        session_name = self._session_name(project_name)
 
         # スクリプト生成
         script = self._generate_workspace_script(session_name, working_dir)

@@ -29,6 +29,7 @@ from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_OWNER,
     MAIN_WINDOW_WORKER_PANES,
     TmuxManager,
+    get_project_name,
 )
 from src.managers.worktree_manager import WorktreeManager
 from src.models.agent import Agent, AgentRole, AgentStatus
@@ -483,8 +484,8 @@ async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, A
     # エージェントIDを生成
     agent_id = str(uuid.uuid4())[:8]
 
-    # ロールに応じてペイン位置を決定（全て MAIN_SESSION 内）
-    session_name = MAIN_SESSION
+    # ロールに応じてペイン位置を決定（プロジェクト固有のセッション内）
+    session_name = get_project_name(working_dir)
     if agent_role == AgentRole.OWNER:
         window_index = 0
         pane_index = MAIN_WINDOW_PANE_OWNER
@@ -493,7 +494,7 @@ async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, A
         pane_index = MAIN_WINDOW_PANE_ADMIN
     else:  # WORKER
         # 次の空きスロットを探す
-        slot = _get_next_worker_slot(agents, settings)
+        slot = _get_next_worker_slot(agents, settings, session_name)
         if slot is None:
             return {
                 "success": False,
@@ -547,7 +548,7 @@ async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, A
 
 
 def _get_next_worker_slot(
-    agents: dict[str, Agent], settings: Settings
+    agents: dict[str, Agent], settings: Settings, session_name: str
 ) -> tuple[int, int] | None:
     """次に利用可能なWorkerスロット（ウィンドウ, ペイン）を取得する。
 
@@ -558,6 +559,7 @@ def _get_next_worker_slot(
     Args:
         agents: エージェント辞書
         settings: 設定オブジェクト
+        session_name: 対象のセッション名（プロジェクト名）
 
     Returns:
         (window_index, pane_index) のタプル、空きがない場合はNone
@@ -574,7 +576,7 @@ def _get_next_worker_slot(
     for agent in agents.values():
         if (
             agent.role == AgentRole.WORKER
-            and agent.session_name == MAIN_SESSION
+            and agent.session_name == session_name
             and agent.window_index is not None
             and agent.pane_index is not None
         ):
