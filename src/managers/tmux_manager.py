@@ -744,7 +744,9 @@ exec tmux attach -t "$SESSION"
         Returns:
             (成功したかどうか, メッセージ) のタプル
         """
+        import os
         import shutil
+        import tempfile
         from pathlib import Path
 
         ghostty_path = shutil.which("ghostty")
@@ -757,15 +759,24 @@ exec tmux attach -t "$SESSION"
             return False, "Ghostty が見つかりません"
 
         try:
-            # シングルクォートをエスケープ
-            escaped_script = script.replace("'", "'\"'\"'")
-            command = f"bash -c '{escaped_script}'"
+            # スクリプトを一時ファイルに書き出す（コマンドライン長制限を回避）
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".sh",
+                prefix="mcp-workspace-",
+                delete=False,
+            ) as f:
+                f.write(script)
+                script_path = f.name
+
+            # 実行権限を付与
+            os.chmod(script_path, 0o755)
 
             proc = await asyncio.create_subprocess_exec(
                 ghostty_path,
                 f"--working-directory={working_dir}",
                 "-e",
-                command,
+                script_path,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -793,6 +804,9 @@ exec tmux attach -t "$SESSION"
         Returns:
             (成功したかどうか, メッセージ) のタプル
         """
+        import os
+        import tempfile
+
         # iTerm2の存在確認
         iterm_check = await self._run_shell(
             "osascript -e 'application \"iTerm\" exists'"
@@ -801,16 +815,25 @@ exec tmux attach -t "$SESSION"
             return False, "iTerm2 が見つかりません"
 
         try:
-            # AppleScript内でのエスケープ
-            escaped_path = working_dir.replace("\\", "\\\\").replace('"', '\\"')
-            escaped_script = script.replace("\\", "\\\\").replace('"', '\\"')
+            # スクリプトを一時ファイルに書き出す（コマンドライン長制限を回避）
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".sh",
+                prefix="mcp-workspace-",
+                delete=False,
+            ) as f:
+                f.write(script)
+                script_path = f.name
+
+            # 実行権限を付与
+            os.chmod(script_path, 0o755)
 
             applescript = f'''
 tell application "iTerm"
     activate
     create window with default profile
     tell current session of current window
-        write text "cd \\"{escaped_path}\\" && bash -c \\"{escaped_script}\\""
+        write text "{script_path}"
     end tell
 end tell
 '''
@@ -838,15 +861,27 @@ end tell
         Returns:
             (成功したかどうか, メッセージ) のタプル
         """
+        import os
+        import tempfile
+
         try:
-            # AppleScript内でのエスケープ
-            escaped_path = working_dir.replace("\\", "\\\\").replace('"', '\\"')
-            escaped_script = script.replace("\\", "\\\\").replace('"', '\\"')
+            # スクリプトを一時ファイルに書き出す（コマンドライン長制限を回避）
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".sh",
+                prefix="mcp-workspace-",
+                delete=False,
+            ) as f:
+                f.write(script)
+                script_path = f.name
+
+            # 実行権限を付与
+            os.chmod(script_path, 0o755)
 
             applescript = f'''
 tell application "Terminal"
     activate
-    do script "cd \\"{escaped_path}\\" && bash -c \\"{escaped_script}\\""
+    do script "{script_path}"
 end tell
 '''
             code, _, stderr = await self._run_shell(f"osascript -e '{applescript}'")
