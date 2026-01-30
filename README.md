@@ -113,6 +113,8 @@ claude mcp list
 | `init_workspace` | ワークスペースディレクトリを初期化 |
 | `init_tmux_workspace` | ターミナルを開いてtmuxワークスペースを構築（8ペイングリッド） |
 | `cleanup_workspace` | 全エージェントを終了しリソースを解放 |
+| `check_all_tasks_completed` | 全タスクの完了状態をチェック |
+| `cleanup_on_completion` | 全タスク完了時にワークスペースをクリーンアップ |
 
 ### エージェント管理
 
