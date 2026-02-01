@@ -10,6 +10,7 @@ from src.context import AppContext
 from src.models.agent import AgentRole, AgentStatus
 from src.tools.helpers import (
     ensure_dashboard_manager,
+    ensure_global_memory_manager,
     ensure_memory_manager,
     ensure_persona_manager,
 )
@@ -235,18 +236,36 @@ def register_tools(mcp: FastMCP) -> None:
                 "description": persona.description,
             }
 
-            # メモリから関連情報を検索
+            # メモリから関連情報を検索（プロジェクト + グローバル）
             memory_context = ""
+            memory_lines = []
+
+            # プロジェクトメモリ検索
             try:
                 memory_manager = ensure_memory_manager(app_ctx)
-                memory_results = memory_manager.search(task_content, limit=3)
-                if memory_results:
-                    memory_lines = []
-                    for entry in memory_results:
+                project_results = memory_manager.search(task_content, limit=3)
+                if project_results:
+                    memory_lines.append("**プロジェクトメモリ:**")
+                    for entry in project_results:
                         memory_lines.append(f"- **{entry.key}**: {entry.content[:200]}...")
-                    memory_context = "\n".join(memory_lines)
             except Exception:
-                memory_context = ""
+                pass
+
+            # グローバルメモリ検索
+            try:
+                global_memory = ensure_global_memory_manager()
+                global_results = global_memory.search(task_content, limit=2)
+                if global_results:
+                    if memory_lines:
+                        memory_lines.append("")  # 空行
+                    memory_lines.append("**グローバルメモリ:**")
+                    for entry in global_results:
+                        memory_lines.append(f"- **{entry.key}**: {entry.content[:200]}...")
+            except Exception:
+                pass
+
+            if memory_lines:
+                memory_context = "\n".join(memory_lines)
 
             # プロジェクト名を取得
             project_name = project_root.name

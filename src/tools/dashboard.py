@@ -11,6 +11,8 @@ from src.tools.helpers import (
     check_role_permission,
     ensure_dashboard_manager,
     ensure_ipc_manager,
+    ensure_memory_manager,
+    ensure_metrics_manager,
     find_agents_by_role,
 )
 
@@ -205,6 +207,7 @@ def register_tools(mcp: FastMCP) -> None:
         task_id: str,
         status: str,
         message: str,
+        summary: str | None = None,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -212,6 +215,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         Worker はこのツールを使って Admin に作業結果を報告します。
         Admin が受け取って dashboard を更新します。
+        自動的にメモリ保存とメトリクス更新も行います。
 
         ※ Worker のみ使用可能。
 
@@ -219,6 +223,7 @@ def register_tools(mcp: FastMCP) -> None:
             task_id: 完了したタスクのID
             status: 結果ステータス（"completed" | "failed"）
             message: 完了報告メッセージ（作業内容の要約）
+            summary: タスク結果のサマリー（メモリに保存、省略時はmessageを使用）
             caller_agent_id: 呼び出し元エージェントID（Worker のID）
 
         Returns:
@@ -272,11 +277,40 @@ def register_tools(mcp: FastMCP) -> None:
             },
         )
 
+        # 自動メモリ保存（タスク結果を記録）
+        memory_saved = False
+        try:
+            memory_manager = ensure_memory_manager(app_ctx)
+            memory_content = summary if summary else message
+            memory_manager.save(
+                key=f"task:{task_id}:result",
+                content=f"[{status}] {memory_content}",
+                tags=["task", status, task_id],
+            )
+            memory_saved = True
+        except Exception:
+            pass  # メモリ保存失敗は致命的ではない
+
+        # 自動メトリクス更新
+        metrics_updated = False
+        try:
+            metrics = ensure_metrics_manager(app_ctx)
+            metrics.record_task_completion(
+                task_id=task_id,
+                agent_id=caller_agent_id,
+                status=status,
+            )
+            metrics_updated = True
+        except Exception:
+            pass  # メトリクス更新失敗は致命的ではない
+
         return {
             "success": True,
             "message": f"Admin ({admin_id}) に報告を送信しました",
             "task_id": task_id,
             "reported_status": status,
+            "memory_saved": memory_saved,
+            "metrics_updated": metrics_updated,
         }
 
     @mcp.tool()

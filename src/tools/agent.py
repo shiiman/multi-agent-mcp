@@ -15,6 +15,7 @@ from src.managers.tmux_manager import (
     get_project_name,
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
+from src.tools.helpers import ensure_ipc_manager, ensure_metrics_manager
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ def register_tools(mcp: FastMCP) -> None:
             log_location = tmux_session
         else:
             tmux_session = None
-            log_location = "tmux なし（VSCode Claude）"
+            log_location = "tmux なし（起点 Claude Code）"
 
         # エージェント情報を登録
         now = datetime.now()
@@ -207,10 +208,22 @@ def register_tools(mcp: FastMCP) -> None:
             f"エージェント {agent_id}（{role}）を作成しました: {log_location}"
         )
 
+        # IPC マネージャーに自動登録
+        ipc = ensure_ipc_manager(app_ctx)
+        ipc.register_agent(agent_id)
+        logger.info(f"エージェント {agent_id} を IPC に登録しました")
+
+        # メトリクス記録開始
+        metrics = ensure_metrics_manager(app_ctx)
+        metrics.record_agent_start(agent_id, agent_role.value)
+        logger.info(f"エージェント {agent_id} のメトリクス記録を開始しました")
+
         return {
             "success": True,
             "agent": agent.model_dump(mode="json"),
             "message": f"エージェント {agent_id}（{role}）を作成しました",
+            "ipc_registered": True,
+            "metrics_tracking": True,
         }
 
     @mcp.tool()

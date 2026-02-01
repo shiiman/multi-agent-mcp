@@ -34,6 +34,7 @@ multi-agent-mcp/
 │   │   └── workspace.py       # WorktreeInfo
 │   ├── managers/
 │   │   ├── tmux_manager.py    # Tmux session management
+│   │   ├── agent_manager.py   # Agent lifecycle management
 │   │   ├── worktree_manager.py # Git worktree management
 │   │   ├── ai_cli_manager.py  # AI CLI selection and execution
 │   │   ├── gtrconfig_manager.py # .gtrconfig detection/generation
@@ -44,7 +45,12 @@ multi-agent-mcp/
 │   │   ├── ipc_manager.py     # Inter-process communication
 │   │   ├── dashboard_manager.py # Dashboard state management
 │   │   ├── memory_manager.py  # Persistent knowledge management
-│   │   └── persona_manager.py # Task-based persona optimization
+│   │   ├── persona_manager.py # Task-based persona optimization
+│   │   └── terminal/          # Terminal app implementations
+│   │       ├── base.py        # Abstract base class
+│   │       ├── ghostty.py     # Ghostty terminal support
+│   │       ├── iterm2.py      # iTerm2 terminal support
+│   │       └── terminal_app.py # macOS Terminal.app support
 │   └── tools/                 # MCP tool definitions (57 tools)
 │       ├── __init__.py        # register_all_tools()
 │       ├── helpers.py         # Common helper functions

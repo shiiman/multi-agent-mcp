@@ -106,7 +106,7 @@ uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp mu
 claude mcp list
 ```
 
-## 提供するTools（57個）
+## 提供するTools（81個）
 
 ### セッション管理（5個）
 

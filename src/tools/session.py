@@ -1,11 +1,15 @@
 """セッション管理ツール。"""
 
+import logging
 import os
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.context import AppContext
+from src.tools.helpers import get_gtrconfig_manager, get_worktree_manager
+
+logger = logging.getLogger(__name__)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -197,31 +201,62 @@ def register_tools(mcp: FastMCP) -> None:
     async def init_tmux_workspace(
         working_dir: str,
         open_terminal: bool = True,
+        auto_setup_gtr: bool = True,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """ターミナルを開いてtmuxワークスペース（グリッドレイアウト）を構築する。
 
         ターミナルを先に起動し、その中でtmuxセッション作成・ペイン分割を行う。
         セッションが既に存在する場合はattachのみ行う。
+        gtr が利用可能な場合、gtrconfig を自動確認・生成する。
 
         レイアウト:
-        ┌────────────┬────────────┬────────┬────────┬────────┐
-        │   pane 0   │   pane 1   │ pane 2 │ pane 4 │ pane 6 │
-        │  (owner)   │  (admin)   ├────────┼────────┼────────┤
-        │    25%     │    25%     │ pane 3 │ pane 5 │ pane 7 │
-        └────────────┴────────────┴────────┴────────┴────────┘
-              左半分 50%                右半分 50%
+        ┌─────────────┬────────┬────────┬────────┐
+        │   pane 0    │ pane 1 │ pane 3 │ pane 5 │
+        │   (Admin)   ├────────┼────────┼────────┤
+        │    (40%)    │ pane 2 │ pane 4 │ pane 6 │
+        └─────────────┴────────┴────────┴────────┘
+          左40%          右60% (Workers 1-6)
 
         Args:
             working_dir: 作業ディレクトリのパス
             open_terminal: Trueでターミナルを開いて表示（デフォルト）、
                            Falseでバックグラウンド作成
+            auto_setup_gtr: gtr利用可能時に自動でgtrconfig設定（デフォルト: True）
 
         Returns:
-            初期化結果（success, session_name, message または error）
+            初期化結果（success, session_name, gtr_status, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
         tmux = app_ctx.tmux
+
+        # gtr 自動確認・設定
+        gtr_status = {
+            "gtr_available": False,
+            "gtrconfig_exists": False,
+            "gtrconfig_generated": False,
+        }
+
+        if auto_setup_gtr:
+            try:
+                worktree = get_worktree_manager(app_ctx, working_dir)
+                gtr_available = await worktree.is_gtr_available()
+                gtr_status["gtr_available"] = gtr_available
+
+                if gtr_available:
+                    gtrconfig = get_gtrconfig_manager(app_ctx, working_dir)
+                    gtr_status["gtrconfig_exists"] = gtrconfig.exists()
+
+                    # gtrconfig が存在しない場合は自動生成
+                    if not gtrconfig.exists():
+                        success, result = gtrconfig.generate()
+                        if success:
+                            gtr_status["gtrconfig_generated"] = True
+                            logger.info(f".gtrconfig を自動生成しました: {working_dir}")
+                        else:
+                            logger.warning(f".gtrconfig 自動生成に失敗: {result}")
+            except Exception as e:
+                logger.warning(f"gtr 設定確認に失敗: {e}")
 
         if open_terminal:
             # ターミナルを開いてセッション作成
@@ -230,11 +265,13 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "session_name": "main",
+                    "gtr_status": gtr_status,
                     "message": message,
                 }
             else:
                 return {
                     "success": False,
+                    "gtr_status": gtr_status,
                     "error": message,
                 }
         else:
@@ -244,10 +281,12 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "session_name": "main",
+                    "gtr_status": gtr_status,
                     "message": "メインセッションをバックグラウンドで作成しました",
                 }
             else:
                 return {
                     "success": False,
+                    "gtr_status": gtr_status,
                     "error": "メインセッションの作成に失敗しました",
                 }
