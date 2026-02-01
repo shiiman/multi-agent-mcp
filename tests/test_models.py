@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from src.config.settings import AICli
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.models.dashboard import Dashboard, TaskInfo, TaskStatus
 from src.models.message import Message, MessageQueue, MessageType
@@ -40,6 +41,29 @@ class TestAgent:
         assert AgentStatus.BUSY.value == "busy"
         assert AgentStatus.ERROR.value == "error"
         assert AgentStatus.TERMINATED.value == "terminated"
+
+    def test_agent_with_ai_cli(self):
+        """Agent に ai_cli フィールドが設定できることをテスト。"""
+        now = datetime.now()
+        agent = Agent(
+            id="test-002",
+            role=AgentRole.WORKER,
+            ai_cli=AICli.CODEX,
+            created_at=now,
+            last_activity=now,
+        )
+        assert agent.ai_cli == AICli.CODEX
+
+    def test_agent_ai_cli_default_none(self):
+        """Agent の ai_cli がデフォルトで None であることをテスト。"""
+        now = datetime.now()
+        agent = Agent(
+            id="test-003",
+            role=AgentRole.WORKER,
+            created_at=now,
+            last_activity=now,
+        )
+        assert agent.ai_cli is None
 
 
 class TestMessage:

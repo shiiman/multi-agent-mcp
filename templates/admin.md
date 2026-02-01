@@ -99,6 +99,29 @@ Owner (1 agent)
 | `get_agent_status` | 特定エージェントの状態確認 |
 | `terminate_agent` | Worker エージェントの終了 |
 
+#### AI CLI 選択
+
+Workers を作成する際、使用する AI CLI を指定できます：
+
+| CLI | 値 | 特徴 |
+|-----|-----|------|
+| Claude Code | `claude` | デフォルト。Anthropic の Claude Code CLI |
+| OpenAI Codex | `codex` | OpenAI の Codex CLI |
+| Google Gemini | `gemini` | Google の Gemini CLI |
+
+```python
+# Claude Code を使用（デフォルト）
+create_agent(role="worker", working_dir="/path/to/worktree")
+
+# Codex を使用
+create_agent(role="worker", working_dir="/path/to/worktree", ai_cli="codex")
+
+# Gemini を使用
+create_agent(role="worker", working_dir="/path/to/worktree", ai_cli="gemini")
+```
+
+`send_task` ツールは、各エージェントに設定された AI CLI に応じてコマンドを自動生成します。
+
 #### Worktree 管理
 
 | ツール | 用途 |

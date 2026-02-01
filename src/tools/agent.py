@@ -7,7 +7,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.config.settings import Settings
+from src.config.settings import AICli, Settings
 from src.context import AppContext
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
@@ -77,7 +77,12 @@ def register_tools(mcp: FastMCP) -> None:
     """エージェント管理ツールを登録する。"""
 
     @mcp.tool()
-    async def create_agent(role: str, working_dir: str, ctx: Context) -> dict[str, Any]:
+    async def create_agent(
+        role: str,
+        working_dir: str,
+        ai_cli: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """新しいエージェントを作成する。
 
         単一セッション方式: 左右40:60分離レイアウト
@@ -89,6 +94,7 @@ def register_tools(mcp: FastMCP) -> None:
         Args:
             role: エージェントの役割（owner/admin/worker）
             working_dir: 作業ディレクトリのパス
+            ai_cli: 使用するAI CLI（claude/codex/gemini、省略でデフォルト）
 
         Returns:
             作成結果（success, agent, message または error）
@@ -106,6 +112,18 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "error": f"無効な役割です: {role}（有効: owner, admin, worker）",
             }
+
+        # AI CLIの検証
+        selected_cli: AICli | None = None
+        if ai_cli:
+            try:
+                selected_cli = AICli(ai_cli)
+            except ValueError:
+                valid_clis = [c.value for c in AICli]
+                return {
+                    "success": False,
+                    "error": f"無効なAI CLIです: {ai_cli}（有効: {valid_clis}）",
+                }
 
         # Worker数の上限チェック
         if agent_role == AgentRole.WORKER:
@@ -199,6 +217,7 @@ def register_tools(mcp: FastMCP) -> None:
             session_name=session_name,
             window_index=window_index,
             pane_index=pane_index,
+            ai_cli=selected_cli,
             created_at=now,
             last_activity=now,
         )
@@ -218,13 +237,16 @@ def register_tools(mcp: FastMCP) -> None:
         metrics.record_agent_start(agent_id, agent_role.value)
         logger.info(f"エージェント {agent_id} のメトリクス記録を開始しました")
 
-        return {
+        result = {
             "success": True,
             "agent": agent.model_dump(mode="json"),
             "message": f"エージェント {agent_id}（{role}）を作成しました",
             "ipc_registered": True,
             "metrics_tracking": True,
         }
+        if selected_cli:
+            result["ai_cli"] = selected_cli.value
+        return result
 
     @mcp.tool()
     async def list_agents(ctx: Context) -> dict[str, Any]:

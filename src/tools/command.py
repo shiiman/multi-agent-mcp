@@ -287,9 +287,14 @@ def register_tools(mcp: FastMCP) -> None:
             project_root, session_id, agent_id, final_task_content
         )
 
-        # Workerに claude < TASK.md コマンドを送信
-        # --dangerously-skip-permissions で確認プロンプトをスキップ
-        read_command = f"claude --dangerously-skip-permissions < {task_file}"
+        # WorkerにAI CLIコマンドを送信
+        # エージェントのAI CLIを取得（未設定の場合はデフォルト）
+        agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
+        read_command = app_ctx.ai_cli.build_stdin_command(
+            cli=agent_cli,
+            task_file_path=str(task_file),
+            worktree_path=agent.worktree_path,
+        )
         if (
             agent.session_name is not None
             and agent.window_index is not None

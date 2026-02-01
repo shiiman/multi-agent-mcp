@@ -59,6 +59,63 @@ class TestAiCliManager:
             assert cli in result
 
 
+class TestBuildStdinCommand:
+    """build_stdin_command のテスト。"""
+
+    def test_build_stdin_command_claude(self, ai_cli_manager):
+        """Claude Code のコマンドが正しく構築されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree"
+        )
+        assert "claude" in cmd
+        assert "--dangerously-skip-permissions" in cmd
+        assert "--directory" in cmd
+        assert "/tmp/task.md" in cmd
+
+    def test_build_stdin_command_codex(self, ai_cli_manager):
+        """Codex のコマンドが正しく構築されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX, "/tmp/task.md", "/path/to/worktree"
+        )
+        assert "cat" in cmd
+        assert "codex" in cmd
+        assert "-a never" in cmd
+        assert "--cwd" in cmd
+        assert "/tmp/task.md" in cmd
+
+    def test_build_stdin_command_gemini(self, ai_cli_manager):
+        """Gemini のコマンドが正しく構築されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.GEMINI, "/tmp/task.md", "/path/to/worktree"
+        )
+        assert "gemini" in cmd
+        assert "--yolo" in cmd
+        assert "--dir" in cmd
+        assert "/tmp/task.md" in cmd
+
+    def test_build_stdin_command_claude_without_worktree(self, ai_cli_manager):
+        """worktree なしで Claude Code コマンドが構築されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(AICli.CLAUDE, "/tmp/task.md")
+        assert "claude" in cmd
+        assert "--dangerously-skip-permissions" in cmd
+        assert "--directory" not in cmd
+
+    def test_build_stdin_command_codex_without_worktree(self, ai_cli_manager):
+        """worktree なしで Codex コマンドが構築されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(AICli.CODEX, "/tmp/task.md")
+        assert "cat" in cmd
+        assert "codex" in cmd
+        assert "-a never" in cmd
+        assert "--cwd" not in cmd
+
+    def test_build_stdin_command_gemini_without_worktree(self, ai_cli_manager):
+        """worktree なしで Gemini コマンドが構築されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(AICli.GEMINI, "/tmp/task.md")
+        assert "gemini" in cmd
+        assert "--yolo" in cmd
+        assert "--dir" not in cmd
+
+
 class TestAiCliManagerTerminal:
     """ターミナル起動機能のテスト。"""
 

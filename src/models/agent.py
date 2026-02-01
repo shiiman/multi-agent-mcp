@@ -5,6 +5,8 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.config.settings import AICli
+
 
 class AgentRole(str, Enum):
     """エージェントの役割。"""
@@ -60,3 +62,4 @@ class Agent(BaseModel):
     pane_index: int | None = Field(
         default=None, description="ウィンドウ内のペインインデックス"
     )
+    ai_cli: AICli | None = Field(default=None, description="使用するAI CLI（None=デフォルト）")

@@ -91,6 +91,50 @@ class AiCliManager:
         """
         return self.settings.default_ai_cli
 
+    def build_stdin_command(
+        self,
+        cli: AICli,
+        task_file_path: str,
+        worktree_path: str | None = None,
+    ) -> str:
+        """AI CLIでstdinからタスクを読み込むコマンドを構築する。
+
+        Args:
+            cli: AI CLI
+            task_file_path: タスクファイルのパス
+            worktree_path: 作業ディレクトリのパス（オプション）
+
+        Returns:
+            実行コマンド文字列
+        """
+        cmd = self.get_command(cli)
+
+        if cli == AICli.CLAUDE:
+            # claude --dangerously-skip-permissions --directory <path> < task.md
+            parts = [cmd, "--dangerously-skip-permissions"]
+            if worktree_path:
+                parts.extend(["--directory", shlex.quote(worktree_path)])
+            parts.append(f"< {shlex.quote(task_file_path)}")
+            return " ".join(parts)
+
+        elif cli == AICli.CODEX:
+            # cat task.md | codex -a never --cwd <path>
+            parts = ["cat", shlex.quote(task_file_path), "|", cmd, "-a", "never"]
+            if worktree_path:
+                parts.extend(["--cwd", shlex.quote(worktree_path)])
+            return " ".join(parts)
+
+        elif cli == AICli.GEMINI:
+            # gemini --yolo --dir <path> < task.md
+            parts = [cmd, "--yolo"]
+            if worktree_path:
+                parts.extend(["--dir", shlex.quote(worktree_path)])
+            parts.append(f"< {shlex.quote(task_file_path)}")
+            return " ".join(parts)
+
+        # フォールバック
+        return f"{cmd} < {shlex.quote(task_file_path)}"
+
     def _build_cli_args(
         self,
         cli: AICli,
