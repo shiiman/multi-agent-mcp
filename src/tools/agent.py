@@ -15,7 +15,12 @@ from src.managers.tmux_manager import (
     get_project_name,
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
-from src.tools.helpers import ensure_ipc_manager, ensure_metrics_manager
+from src.tools.helpers import (
+    ensure_ipc_manager,
+    ensure_metrics_manager,
+    save_agent_to_file,
+    sync_agents_from_file,
+)
 from src.tools.model_profile import get_current_profile_settings
 
 logger = logging.getLogger(__name__)
@@ -249,12 +254,18 @@ def register_tools(mcp: FastMCP) -> None:
         metrics.record_agent_start(agent_id, agent_role.value)
         logger.info(f"エージェント {agent_id} のメトリクス記録を開始しました")
 
+        # エージェント情報をファイルに保存（MCP インスタンス間で共有）
+        file_saved = save_agent_to_file(app_ctx, agent)
+        if file_saved:
+            logger.info(f"エージェント {agent_id} をファイルに保存しました")
+
         result = {
             "success": True,
             "agent": agent.model_dump(mode="json"),
             "message": f"エージェント {agent_id}（{role}）を作成しました",
             "ipc_registered": True,
             "metrics_tracking": True,
+            "file_persisted": file_saved,
         }
         if selected_cli:
             result["ai_cli"] = selected_cli.value
@@ -264,11 +275,16 @@ def register_tools(mcp: FastMCP) -> None:
     async def list_agents(ctx: Context) -> dict[str, Any]:
         """全エージェントの一覧を取得する。
 
+        ファイルに保存されたエージェント情報も含めて返す。
+
         Returns:
-            エージェント一覧（success, agents, count）
+            エージェント一覧（success, agents, count, synced_from_file）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
         agents = app_ctx.agents
+
+        # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
+        synced = sync_agents_from_file(app_ctx)
 
         agent_list = [a.model_dump(mode="json") for a in agents.values()]
 
@@ -276,6 +292,7 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "agents": agent_list,
             "count": len(agent_list),
+            "synced_from_file": synced,
         }
 
     @mcp.tool()
@@ -291,6 +308,9 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx: AppContext = ctx.request_context.lifespan_context
         tmux = app_ctx.tmux
         agents = app_ctx.agents
+
+        # ファイルからエージェント情報を同期
+        sync_agents_from_file(app_ctx)
 
         agent = agents.get(agent_id)
         if not agent:

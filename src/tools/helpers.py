@@ -1,12 +1,17 @@
 """MCPツール用共通ヘルパー関数。"""
 
+import json
+import logging
 import os
 import subprocess
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from src.context import AppContext
+
+logger = logging.getLogger(__name__)
 from src.managers.cost_manager import CostManager
 from src.managers.dashboard_manager import DashboardManager
 from src.managers.gtrconfig_manager import GtrconfigManager
@@ -245,17 +250,38 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
         # プロジェクトルートを決定
         project_root = app_ctx.project_root
 
-        # プロジェクトルートが未設定の場合、エージェントの worktree_path から取得
+        # config.json から取得（init_tmux_workspace で設定される）
         if not project_root:
+            project_root = get_project_root_from_config()
+            if project_root:
+                logger.info(f"config.json から project_root を取得: {project_root}")
+
+        # MCP_PROJECT_ROOT 環境変数をチェック（フォールバック）
+        if not project_root:
+            env_project_root = os.getenv("MCP_PROJECT_ROOT")
+            if env_project_root:
+                project_root = env_project_root
+                logger.info(f"MCP_PROJECT_ROOT 環境変数から取得: {project_root}")
+
+        # エージェントの working_dir または worktree_path から取得
+        if not project_root:
+            sync_agents_from_file(app_ctx)
             for agent in app_ctx.agents.values():
-                if agent.worktree_path:
-                    # worktree の場合はメインリポジトリのルートを使用
+                if agent.working_dir:
+                    project_root = resolve_main_repo_root(agent.working_dir)
+                    break
+                elif agent.worktree_path:
                     project_root = resolve_main_repo_root(agent.worktree_path)
                     break
 
         # それでも未設定の場合は workspace_base_dir を使用
         if not project_root:
             project_root = app_ctx.settings.workspace_base_dir
+
+        # project_root を設定（次回以降のために）
+        if project_root and not app_ctx.project_root:
+            app_ctx.project_root = project_root
+            logger.info(f"project_root を自動設定: {project_root}")
 
         # .multi-agent-mcp/memory/memory.json に保存
         memory_path = os.path.join(project_root, ".multi-agent-mcp", "memory", "memory.json")
@@ -273,3 +299,216 @@ def ensure_global_memory_manager() -> MemoryManager:
     if _global_memory_manager is None:
         _global_memory_manager = MemoryManager.from_global()
     return _global_memory_manager
+
+
+# ========== プロジェクト設定ヘルパー ==========
+
+
+def get_project_root_from_config(working_dir: str | None = None) -> str | None:
+    """config.json から project_root を取得する。
+
+    init_tmux_workspace で作成された config.json を読み取る。
+    working_dir が指定された場合、そのディレクトリの config.json を探す。
+    指定されない場合、カレントディレクトリから親方向に探索する。
+
+    Args:
+        working_dir: 探索開始ディレクトリ（オプション）
+
+    Returns:
+        project_root のパス、見つからない場合は None
+    """
+    search_dirs = []
+
+    if working_dir:
+        search_dirs.append(Path(working_dir))
+        # worktree の場合、メインリポジトリを探す
+        main_repo = resolve_main_repo_root(working_dir)
+        if main_repo != working_dir:
+            search_dirs.append(Path(main_repo))
+
+    # カレントディレクトリからも探索
+    cwd = Path.cwd()
+    search_dirs.append(cwd)
+
+    for base_dir in search_dirs:
+        config_file = base_dir / ".multi-agent-mcp" / "config.json"
+        if config_file.exists():
+            try:
+                with open(config_file, encoding="utf-8") as f:
+                    config = json.load(f)
+                project_root = config.get("project_root")
+                if project_root:
+                    logger.debug(f"config.json から project_root を取得: {project_root}")
+                    return project_root
+            except Exception as e:
+                logger.warning(f"config.json の読み込みに失敗: {e}")
+
+    return None
+
+
+# ========== エージェント永続化ヘルパー ==========
+
+
+def _get_agents_file_path(project_root: str | None) -> Path | None:
+    """エージェント情報ファイルのパスを取得する。
+
+    Args:
+        project_root: プロジェクトルートパス
+
+    Returns:
+        agents.json のパス、project_root が None の場合は None
+    """
+    if not project_root:
+        return None
+    return Path(project_root) / ".multi-agent-mcp" / "agents.json"
+
+
+def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
+    """エージェント情報をファイルに保存する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        agent: 保存するエージェント
+
+    Returns:
+        成功した場合 True
+    """
+    from src.models.agent import Agent  # 循環インポート回避
+
+    project_root = app_ctx.project_root
+    agents_file = _get_agents_file_path(project_root)
+
+    if not agents_file:
+        logger.debug("project_root が設定されていないため、エージェント情報を保存できません")
+        return False
+
+    try:
+        # 既存のエージェント情報を読み込み
+        agents_data: dict[str, Any] = {}
+        if agents_file.exists():
+            with open(agents_file, encoding="utf-8") as f:
+                agents_data = json.load(f)
+
+        # エージェント情報を追加/更新
+        agents_data[agent.id] = agent.model_dump(mode="json")
+
+        # ディレクトリ作成
+        agents_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # ファイルに保存
+        with open(agents_file, "w", encoding="utf-8") as f:
+            json.dump(agents_data, f, ensure_ascii=False, indent=2, default=str)
+
+        logger.debug(f"エージェント {agent.id} を {agents_file} に保存しました")
+        return True
+
+    except Exception as e:
+        logger.warning(f"エージェント情報の保存に失敗: {e}")
+        return False
+
+
+def load_agents_from_file(app_ctx: AppContext) -> dict[str, "Agent"]:
+    """ファイルからエージェント情報を読み込む。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+
+    Returns:
+        エージェント ID -> Agent の辞書
+    """
+    from src.models.agent import Agent  # 循環インポート回避
+
+    # project_root を決定（config.json → 環境変数 → app_ctx の順）
+    project_root = app_ctx.project_root
+    if not project_root:
+        project_root = get_project_root_from_config()
+    if not project_root:
+        project_root = os.getenv("MCP_PROJECT_ROOT")
+    agents_file = _get_agents_file_path(project_root)
+
+    if not agents_file or not agents_file.exists():
+        return {}
+
+    try:
+        with open(agents_file, encoding="utf-8") as f:
+            agents_data = json.load(f)
+
+        agents: dict[str, Agent] = {}
+        for agent_id, data in agents_data.items():
+            try:
+                # datetime 文字列を datetime オブジェクトに変換
+                if isinstance(data.get("created_at"), str):
+                    data["created_at"] = datetime.fromisoformat(data["created_at"])
+                if isinstance(data.get("last_activity"), str):
+                    data["last_activity"] = datetime.fromisoformat(data["last_activity"])
+                agents[agent_id] = Agent(**data)
+            except Exception as e:
+                logger.warning(f"エージェント {agent_id} のパースに失敗: {e}")
+
+        logger.debug(f"{len(agents)} 件のエージェント情報を {agents_file} から読み込みました")
+        return agents
+
+    except Exception as e:
+        logger.warning(f"エージェント情報の読み込みに失敗: {e}")
+        return {}
+
+
+def sync_agents_from_file(app_ctx: AppContext) -> int:
+    """ファイルからエージェント情報をメモリに同期する。
+
+    既存のエージェント情報は保持し、ファイルにのみ存在するエージェントを追加する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+
+    Returns:
+        追加されたエージェント数
+    """
+    file_agents = load_agents_from_file(app_ctx)
+    added = 0
+
+    for agent_id, agent in file_agents.items():
+        if agent_id not in app_ctx.agents:
+            app_ctx.agents[agent_id] = agent
+            added += 1
+
+    if added > 0:
+        logger.info(f"ファイルから {added} 件のエージェント情報を同期しました")
+
+    return added
+
+
+def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
+    """ファイルからエージェント情報を削除する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        agent_id: 削除するエージェントID
+
+    Returns:
+        成功した場合 True
+    """
+    project_root = app_ctx.project_root
+    agents_file = _get_agents_file_path(project_root)
+
+    if not agents_file or not agents_file.exists():
+        return False
+
+    try:
+        with open(agents_file, encoding="utf-8") as f:
+            agents_data = json.load(f)
+
+        if agent_id in agents_data:
+            del agents_data[agent_id]
+
+            with open(agents_file, "w", encoding="utf-8") as f:
+                json.dump(agents_data, f, ensure_ascii=False, indent=2, default=str)
+
+            logger.debug(f"エージェント {agent_id} を {agents_file} から削除しました")
+            return True
+
+        return False
+
+    except Exception as e:
+        logger.warning(f"エージェント情報の削除に失敗: {e}")
+        return False

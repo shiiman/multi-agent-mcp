@@ -96,6 +96,7 @@ class AiCliManager:
         cli: AICli,
         task_file_path: str,
         worktree_path: str | None = None,
+        project_root: str | None = None,
     ) -> str:
         """AI CLIでstdinからタスクを読み込むコマンドを構築する。
 
@@ -103,40 +104,46 @@ class AiCliManager:
             cli: AI CLI
             task_file_path: タスクファイルのパス
             worktree_path: 作業ディレクトリのパス（オプション）
+            project_root: プロジェクトルートパス（MCP_PROJECT_ROOT 環境変数用）
 
         Returns:
             実行コマンド文字列
         """
         cmd = self.get_command(cli)
 
+        # 環境変数設定（プロジェクトルートを MCP に伝える）
+        env_prefix = ""
+        if project_root:
+            env_prefix = f"export MCP_PROJECT_ROOT={shlex.quote(project_root)} && "
+
         if cli == AICli.CLAUDE:
-            # cd <path> && claude --dangerously-skip-permissions < task.md
+            # export MCP_PROJECT_ROOT=... && cd <path> && claude --dangerously-skip-permissions < task.md
             parts = [cmd, "--dangerously-skip-permissions"]
             parts.append(f"< {shlex.quote(task_file_path)}")
             command = " ".join(parts)
             if worktree_path:
-                return f"cd {shlex.quote(worktree_path)} && {command}"
-            return command
+                return f"{env_prefix}cd {shlex.quote(worktree_path)} && {command}"
+            return f"{env_prefix}{command}"
 
         elif cli == AICli.CODEX:
-            # cd <path> && cat task.md | codex -a never
+            # export MCP_PROJECT_ROOT=... && cd <path> && cat task.md | codex -a never
             parts = ["cat", shlex.quote(task_file_path), "|", cmd, "-a", "never"]
             command = " ".join(parts)
             if worktree_path:
-                return f"cd {shlex.quote(worktree_path)} && {command}"
-            return command
+                return f"{env_prefix}cd {shlex.quote(worktree_path)} && {command}"
+            return f"{env_prefix}{command}"
 
         elif cli == AICli.GEMINI:
-            # cd <path> && gemini --yolo < task.md
+            # export MCP_PROJECT_ROOT=... && cd <path> && gemini --yolo < task.md
             parts = [cmd, "--yolo"]
             parts.append(f"< {shlex.quote(task_file_path)}")
             command = " ".join(parts)
             if worktree_path:
-                return f"cd {shlex.quote(worktree_path)} && {command}"
-            return command
+                return f"{env_prefix}cd {shlex.quote(worktree_path)} && {command}"
+            return f"{env_prefix}{command}"
 
         # フォールバック
-        return f"{cmd} < {shlex.quote(task_file_path)}"
+        return f"{env_prefix}{cmd} < {shlex.quote(task_file_path)}"
 
     def _build_cli_args(
         self,

@@ -14,6 +14,7 @@ from src.tools.helpers import (
     ensure_memory_manager,
     ensure_persona_manager,
     resolve_main_repo_root,
+    sync_agents_from_file,
 )
 from src.tools.model_profile import get_current_profile_settings
 
@@ -85,12 +86,38 @@ def generate_admin_task(
 - `healthcheck_all` で Worker 状態確認
 - `read_messages` で Worker からの質問に対応
 
-### 5. 結果確認
+### 5. 結果確認・品質チェック
 - 全 Worker 完了後、変更内容をレビュー
 - UI タスクの場合は `read_latest_screenshot` で視覚的確認
+- **実際に動作確認**:
+  1. `git pull` で最新を取得
+  2. アプリを実行してテスト（例: `npm start`, `python main.py`）
+  3. エラーがないか、期待通りに動作するか確認
 
-### 6. 完了報告
-全 Worker 完了後、Owner に `send_message` で結果を報告
+### 6. 品質イテレーション（問題がある場合）
+
+**バグや改善点を発見した場合、修正サイクルを回す:**
+
+```
+while (品質に問題あり):
+    1. 問題を分析・リスト化
+    2. 修正タスクを create_task で登録
+    3. 新しい Worker を作成 or 既存 Worker に send_task
+    4. Worker 完了を待機
+    5. 再度品質チェック
+```
+
+**注意事項**:
+- 1回のイテレーションで1-2個の問題に絞る（過度な修正を避ける）
+- 同じ問題が3回以上繰り返される場合は Owner に相談
+- 修正内容はメモリに保存（`save_to_memory`）して学習
+
+### 7. 完了報告
+品質チェックをパスした後、Owner に `send_message` で結果を報告:
+- 完了したタスク一覧
+- 品質チェックの結果
+- イテレーション回数（もしあれば）
+- 残存する既知の問題（もしあれば）
 
 ## 🔴 RACE-001: 同一論理ファイルの編集禁止（マージ競合防止）
 
@@ -117,6 +144,10 @@ def generate_admin_task(
 - 全 Worker のタスクが completed 状態
 - 全ての変更が {branch_name} にマージ済み
 - コンフリクトがないこと
+- **品質チェックをパスしていること**:
+  - アプリが正常に起動・動作する
+  - 明らかなバグがない
+  - UI が期待通りに表示される（UI タスクの場合）
 """
 
 
@@ -228,6 +259,9 @@ def register_tools(mcp: FastMCP) -> None:
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
+        # ファイルからエージェント情報を同期
+        sync_agents_from_file(app_ctx)
+
         agent = agents.get(agent_id)
         if not agent:
             return {
@@ -273,6 +307,9 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx: AppContext = ctx.request_context.lifespan_context
         tmux = app_ctx.tmux
         agents = app_ctx.agents
+
+        # ファイルからエージェント情報を同期
+        sync_agents_from_file(app_ctx)
 
         agent = agents.get(agent_id)
         if not agent:
@@ -332,6 +369,9 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx: AppContext = ctx.request_context.lifespan_context
         tmux = app_ctx.tmux
         agents = app_ctx.agents
+
+        # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
+        sync_agents_from_file(app_ctx)
 
         # プロファイル設定から Worker 数のデフォルトを取得
         profile_settings = get_current_profile_settings(app_ctx)
@@ -443,6 +483,7 @@ def register_tools(mcp: FastMCP) -> None:
             cli=agent_cli,
             task_file_path=str(task_file),
             worktree_path=agent.worktree_path,
+            project_root=str(project_root),  # MCP_PROJECT_ROOT 環境変数用
         )
         if (
             agent.session_name is not None

@@ -14,6 +14,7 @@ from src.tools.helpers import (
     ensure_memory_manager,
     ensure_metrics_manager,
     find_agents_by_role,
+    sync_agents_from_file,
 )
 
 
@@ -142,6 +143,9 @@ def register_tools(mcp: FastMCP) -> None:
             return role_error
 
         dashboard = ensure_dashboard_manager(app_ctx)
+
+        # ファイルからエージェント情報を同期
+        sync_agents_from_file(app_ctx)
 
         # エージェントの存在確認
         if agent_id not in app_ctx.agents:
@@ -369,7 +373,10 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx: AppContext = ctx.request_context.lifespan_context
         dashboard = ensure_dashboard_manager(app_ctx)
 
-        # エージェント情報を同期
+        # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
+        sync_agents_from_file(app_ctx)
+
+        # エージェント情報を Dashboard に同期
         for agent in app_ctx.agents.values():
             dashboard.update_agent_summary(agent)
 
@@ -390,7 +397,10 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx: AppContext = ctx.request_context.lifespan_context
         dashboard = ensure_dashboard_manager(app_ctx)
 
-        # エージェント情報を同期
+        # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
+        sync_agents_from_file(app_ctx)
+
+        # エージェント情報を Dashboard に同期
         for agent in app_ctx.agents.values():
             dashboard.update_agent_summary(agent)
 

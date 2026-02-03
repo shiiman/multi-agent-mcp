@@ -26,6 +26,36 @@ def generate_env_template() -> str:
 # Worker エージェントの最大数
 MCP_MAX_WORKERS=6
 
+# ========== tmux 設定 ==========
+# tmux セッション名のプレフィックス
+MCP_TMUX_PREFIX=mcp-agent
+
+# メインウィンドウの Worker エリア設定（左右40:60分離）
+MCP_MAIN_WORKER_ROWS=2
+MCP_MAIN_WORKER_COLS=3
+MCP_WORKERS_PER_MAIN_WINDOW=6
+
+# 追加ウィンドウの設定（Worker 7 以降）
+MCP_EXTRA_WORKER_ROWS=2
+MCP_EXTRA_WORKER_COLS=6
+MCP_WORKERS_PER_EXTRA_WINDOW=12
+
+# ========== ワークスペース設定 ==========
+# ワークスペースのベースディレクトリ
+MCP_WORKSPACE_BASE_DIR=/tmp/mcp-workspaces
+
+# ========== メッセージ設定 ==========
+# メッセージの保持時間（秒）
+MCP_MESSAGE_RETENTION_SECONDS=3600
+
+# ========== AI CLI 設定 ==========
+# デフォルトで使用する AI CLI（claude / codex / gemini）
+MCP_DEFAULT_AI_CLI=claude
+
+# ========== ターミナル設定 ==========
+# デフォルトのターミナルアプリ（auto / ghostty / iterm2 / terminal）
+MCP_DEFAULT_TERMINAL=auto
+
 # ========== モデルプロファイル ==========
 # 現在のプロファイル（standard / performance）
 MCP_MODEL_PROFILE_ACTIVE=standard
@@ -62,6 +92,10 @@ MCP_ADMIN_THINKING_TOKENS=1000
 
 # Worker の思考トークン数
 MCP_WORKER_THINKING_TOKENS=10000
+
+# ========== スクリーンショット設定 ==========
+# スクリーンショットとして認識する拡張子（カンマ区切り）
+# MCP_SCREENSHOT_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp
 '''
 
 
@@ -72,8 +106,10 @@ def _setup_mcp_directories(working_dir: str) -> dict[str, Any]:
         working_dir: 作業ディレクトリのパス
 
     Returns:
-        セットアップ結果（created_dirs, env_created, env_path）
+        セットアップ結果（created_dirs, env_created, env_path, config_created）
     """
+    import json
+
     mcp_dir = Path(working_dir) / ".multi-agent-mcp"
     created_dirs = []
 
@@ -97,10 +133,34 @@ def _setup_mcp_directories(working_dir: str) -> dict[str, Any]:
         env_created = True
         logger.info(f".env テンプレートを作成しました: {env_file}")
 
+    # config.json 作成（project_root を保存、MCP インスタンス間で共有）
+    config_file = mcp_dir / "config.json"
+    config_created = False
+    config_data = {"project_root": working_dir}
+    if not config_file.exists():
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        config_created = True
+        logger.info(f"config.json を作成しました: {config_file}")
+    else:
+        # 既存の config.json を更新（project_root が変わっている場合）
+        try:
+            with open(config_file, encoding="utf-8") as f:
+                existing = json.load(f)
+            if existing.get("project_root") != working_dir:
+                existing["project_root"] = working_dir
+                with open(config_file, "w", encoding="utf-8") as f:
+                    json.dump(existing, f, ensure_ascii=False, indent=2)
+                logger.info(f"config.json の project_root を更新しました: {working_dir}")
+        except Exception as e:
+            logger.warning(f"config.json の読み込みに失敗: {e}")
+
     return {
         "created_dirs": created_dirs,
         "env_created": env_created,
         "env_path": str(env_file),
+        "config_created": config_created,
+        "config_path": str(config_file),
     }
 
 
@@ -230,6 +290,7 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def cleanup_on_completion(
         force: bool = False,
+        repo_path: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """全タスク完了時にワークスペースをクリーンアップする。
@@ -239,6 +300,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         Args:
             force: 未完了でも強制的にクリーンアップするか
+            repo_path: メインリポジトリのパス（worktree 削除に使用）
 
         Returns:
             クリーンアップ結果
@@ -273,38 +335,48 @@ def register_tools(mcp: FastMCP) -> None:
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
-        # worktree のパスを収集（削除前に取得）
-        worktree_paths = []
-        main_repo_path = None
-        for agent in agents.values():
-            if agent.worktree_path:
-                worktree_paths.append(agent.worktree_path)
-                # メインリポジトリのパスを取得（working_dir から）
-                if agent.working_dir and not main_repo_path:
-                    main_repo_path = agent.working_dir
-
         terminated_count = await tmux.cleanup_all_sessions()
         agent_count = len(agents)
         agents.clear()
 
-        # worktree を削除
+        # worktree を削除（git worktree list から取得）
         removed_worktrees = 0
-        if worktree_paths and main_repo_path:
+        worktree_errors = []
+
+        # repo_path が指定されていない場合は project_root を使用
+        main_repo_path = repo_path or app_ctx.project_root
+
+        if main_repo_path:
             try:
                 worktree_manager = get_worktree_manager(app_ctx, main_repo_path)
-                for worktree_path in worktree_paths:
-                    try:
-                        success, _ = await worktree_manager.remove_worktree(
-                            worktree_path, force=True
-                        )
-                        if success:
-                            removed_worktrees += 1
-                    except Exception as e:
-                        logger.warning(f"worktree 削除失敗: {worktree_path} - {e}")
+                worktrees = await worktree_manager.list_worktrees()
+
+                # メインリポジトリ以外の worktree を削除
+                for wt in worktrees:
+                    # メインリポジトリ自体はスキップ
+                    if wt.path == main_repo_path:
+                        continue
+
+                    # worktree ディレクトリ名に "worker" が含まれるものを削除
+                    # または -worktrees/ 配下のものを削除
+                    if "worker" in wt.path.lower() or "-worktrees/" in wt.path:
+                        try:
+                            success, msg = await worktree_manager.remove_worktree(
+                                wt.path, force=True
+                            )
+                            if success:
+                                removed_worktrees += 1
+                                logger.info(f"worktree を削除しました: {wt.path}")
+                            else:
+                                worktree_errors.append(f"{wt.path}: {msg}")
+                        except Exception as e:
+                            worktree_errors.append(f"{wt.path}: {e}")
+                            logger.warning(f"worktree 削除失敗: {wt.path} - {e}")
             except Exception as e:
                 logger.warning(f"WorktreeManager の初期化に失敗: {e}")
+                worktree_errors.append(f"初期化エラー: {e}")
 
-        return {
+        result = {
             "success": True,
             "terminated_sessions": terminated_count,
             "cleared_agents": agent_count,
@@ -317,6 +389,11 @@ def register_tools(mcp: FastMCP) -> None:
                 f"{removed_worktrees}worktree削除"
             ),
         }
+
+        if worktree_errors:
+            result["worktree_errors"] = worktree_errors
+
+        return result
 
     @mcp.tool()
     async def init_tmux_workspace(
@@ -368,12 +445,40 @@ def register_tools(mcp: FastMCP) -> None:
                     gtrconfig = get_gtrconfig_manager(app_ctx, working_dir)
                     gtr_status["gtrconfig_exists"] = gtrconfig.exists()
 
-                    # gtrconfig が存在しない場合は自動生成
+                    # gtrconfig が存在しない場合は自動生成してコミット
                     if not gtrconfig.exists():
                         success, result = gtrconfig.generate()
                         if success:
                             gtr_status["gtrconfig_generated"] = True
                             logger.info(f".gtrconfig を自動生成しました: {working_dir}")
+
+                            # .gtrconfig をコミット
+                            try:
+                                import asyncio
+
+                                proc = await asyncio.create_subprocess_exec(
+                                    "git", "add", ".gtrconfig",
+                                    cwd=working_dir,
+                                    stdout=asyncio.subprocess.PIPE,
+                                    stderr=asyncio.subprocess.PIPE,
+                                )
+                                await proc.communicate()
+
+                                if proc.returncode == 0:
+                                    proc = await asyncio.create_subprocess_exec(
+                                        "git", "commit", "-m", "chore: add .gtrconfig for gtr worktree runner",
+                                        cwd=working_dir,
+                                        stdout=asyncio.subprocess.PIPE,
+                                        stderr=asyncio.subprocess.PIPE,
+                                    )
+                                    await proc.communicate()
+                                    if proc.returncode == 0:
+                                        gtr_status["gtrconfig_committed"] = True
+                                        logger.info(".gtrconfig をコミットしました")
+                                    else:
+                                        logger.warning(".gtrconfig のコミットに失敗しました")
+                            except Exception as e:
+                                logger.warning(f".gtrconfig のコミットに失敗: {e}")
                         else:
                             logger.warning(f".gtrconfig 自動生成に失敗: {result}")
             except Exception as e:
