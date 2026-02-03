@@ -122,10 +122,6 @@ class Settings(BaseSettings):
     workers_per_extra_window: int = 12
     """追加ウィンドウのWorker数（extra_worker_rows × extra_worker_cols）"""
 
-    # AI CLI設定
-    default_ai_cli: AICli = Field(default=AICli.CLAUDE, description="デフォルトのAI CLI")
-    """デフォルトで使用するAI CLI"""
-
     # コスト設定
     cost_warning_threshold_usd: float = 10.0
     """コスト警告の閾値（USD）"""
@@ -165,9 +161,13 @@ class Settings(BaseSettings):
         default=AICli.CLAUDE,
         description="standard プロファイルで使用する AI CLI",
     )
-    model_profile_standard_model: str = Field(
+    model_profile_standard_admin_model: str = Field(
+        default="claude-opus-4-20250514",
+        description="standard プロファイルで Admin が使用するモデル",
+    )
+    model_profile_standard_worker_model: str = Field(
         default="claude-sonnet-4-20250514",
-        description="standard プロファイルで使用するモデル",
+        description="standard プロファイルで Worker が使用するモデル",
     )
     model_profile_standard_max_workers: int = Field(
         default=6,
@@ -183,9 +183,13 @@ class Settings(BaseSettings):
         default=AICli.CLAUDE,
         description="performance プロファイルで使用する AI CLI",
     )
-    model_profile_performance_model: str = Field(
+    model_profile_performance_admin_model: str = Field(
         default="claude-opus-4-20250514",
-        description="performance プロファイルで使用するモデル",
+        description="performance プロファイルで Admin が使用するモデル",
+    )
+    model_profile_performance_worker_model: str = Field(
+        default="claude-opus-4-20250514",
+        description="performance プロファイルで Worker が使用するモデル",
     )
     model_profile_performance_max_workers: int = Field(
         default=16,

@@ -48,8 +48,7 @@ claude mcp add --scope project multi-agent-mcp -- uvx --reinstall --from git+htt
         "multi-agent-mcp"
       ],
       "env": {
-        "MCP_MAX_WORKERS": "6",
-        "MCP_DEFAULT_AI_CLI": "claude"
+        "MCP_MAX_WORKERS": "6"
       }
     }
   }
@@ -70,8 +69,7 @@ claude mcp add --scope project multi-agent-mcp -- uvx --reinstall --from git+htt
         "multi-agent-mcp"
       ],
       "env": {
-        "MCP_MAX_WORKERS": "6",
-        "MCP_DEFAULT_AI_CLI": "claude"
+        "MCP_MAX_WORKERS": "6"
       }
     }
   }
@@ -316,15 +314,18 @@ cleanup_workspace()
 | `MCP_MAX_WORKERS` | 6 | Workerの最大数 |
 | `MCP_TMUX_PREFIX` | mcp-agent | tmuxセッション名のプレフィックス |
 | `MCP_WORKSPACE_BASE_DIR` | /tmp/mcp-workspaces | ワークスペースのベースディレクトリ |
-| `MCP_DEFAULT_AI_CLI` | claude | デフォルトのAI CLI（claude/codex/gemini） |
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 300 | ヘルスチェック間隔（秒） |
 | `MCP_HEARTBEAT_TIMEOUT_SECONDS` | 300 | ハートビートタイムアウト（秒） |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
-| `MCP_MODEL_PROFILE_STANDARD_MODEL` | claude-sonnet-4-20250514 | standardプロファイルのモデル |
+| `MCP_MODEL_PROFILE_STANDARD_CLI` | claude | standardプロファイルのAI CLI |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | claude-sonnet-4-20250514 | standardプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | claude-sonnet-4-20250514 | standardプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | 6 | standardプロファイルのWorker上限 |
-| `MCP_MODEL_PROFILE_PERFORMANCE_MODEL` | claude-opus-4-20250514 | performanceプロファイルのモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | claude | performanceプロファイルのAI CLI |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | claude-opus-4-20250514 | performanceプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | claude-sonnet-4-20250514 | performanceプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | 16 | performanceプロファイルのWorker上限 |
 | `MCP_PROJECT_ROOT` | - | プロジェクトルート（.env読み込み用） |
 | `MCP_OWNER_THINKING_TOKENS` | 0 | Ownerの思考トークン数 |

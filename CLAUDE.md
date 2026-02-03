@@ -173,14 +173,17 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_MAX_WORKERS` | Maximum number of worker agents | 6 |
 | `MCP_TMUX_PREFIX` | Prefix for tmux session names | mcp-agent |
 | `MCP_WORKSPACE_BASE_DIR` | Base directory for workspaces | /tmp/mcp-workspaces |
-| `MCP_DEFAULT_AI_CLI` | Default AI CLI to use | claude |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck interval | 300 |
 | `MCP_HEARTBEAT_TIMEOUT_SECONDS` | Heartbeat timeout | 300 |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
-| `MCP_MODEL_PROFILE_STANDARD_MODEL` | Standard profile model | claude-sonnet-4-20250514 |
+| `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | claude |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | claude-sonnet-4-20250514 |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | claude-sonnet-4-20250514 |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
-| `MCP_MODEL_PROFILE_PERFORMANCE_MODEL` | Performance profile model | claude-opus-4-20250514 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | claude |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | claude-opus-4-20250514 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | claude-sonnet-4-20250514 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
 | `MCP_OWNER_THINKING_TOKENS` | Owner thinking tokens | 0 |

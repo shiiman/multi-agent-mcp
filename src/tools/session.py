@@ -41,10 +41,6 @@ MCP_EXTRA_WORKER_ROWS=2
 MCP_EXTRA_WORKER_COLS=5
 MCP_WORKERS_PER_EXTRA_WINDOW=10
 
-# ========== AI CLI 設定 ==========
-# デフォルトで使用する AI CLI（claude / codex / gemini）
-MCP_DEFAULT_AI_CLI=claude
-
 # ========== ターミナル設定 ==========
 # デフォルトのターミナルアプリ（auto / ghostty / iterm2 / terminal）
 MCP_DEFAULT_TERMINAL=auto
@@ -53,15 +49,19 @@ MCP_DEFAULT_TERMINAL=auto
 # 現在のプロファイル（standard / performance）
 MCP_MODEL_PROFILE_ACTIVE=standard
 
-# standard プロファイル設定（Sonnet）
+# standard プロファイル設定（バランス重視）
+# Admin は Opus、Worker は Sonnet
 MCP_MODEL_PROFILE_STANDARD_CLI=claude
-MCP_MODEL_PROFILE_STANDARD_MODEL=claude-sonnet-4-20250514
+MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=claude-opus-4-20250514
+MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL=claude-sonnet-4-20250514
 MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS=6
 MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER=1.0
 
-# performance プロファイル設定（Opus）
+# performance プロファイル設定（性能重視）
+# Admin/Worker ともに Opus
 MCP_MODEL_PROFILE_PERFORMANCE_CLI=claude
-MCP_MODEL_PROFILE_PERFORMANCE_MODEL=claude-opus-4-20250514
+MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL=claude-opus-4-20250514
+MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL=claude-opus-4-20250514
 MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS=16
 MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER=2.0
 

@@ -24,7 +24,8 @@ def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str
         return {
             "profile": profile.value,
             "ai_cli": settings.model_profile_standard_cli.value,
-            "model": settings.model_profile_standard_model,
+            "admin_model": settings.model_profile_standard_admin_model,
+            "worker_model": settings.model_profile_standard_worker_model,
             "max_workers": settings.model_profile_standard_max_workers,
             "thinking_multiplier": settings.model_profile_standard_thinking_multiplier,
         }
@@ -32,7 +33,8 @@ def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str
         return {
             "profile": profile.value,
             "ai_cli": settings.model_profile_performance_cli.value,
-            "model": settings.model_profile_performance_model,
+            "admin_model": settings.model_profile_performance_admin_model,
+            "worker_model": settings.model_profile_performance_worker_model,
             "max_workers": settings.model_profile_performance_max_workers,
             "thinking_multiplier": settings.model_profile_performance_thinking_multiplier,
         }

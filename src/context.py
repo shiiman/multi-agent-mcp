@@ -39,3 +39,5 @@ class AppContext:
     workspace_id: str | None = None
     project_root: str | None = None
     """プロジェクトルート（.multi-agent-mcp/ の親ディレクトリ）"""
+    session_id: str | None = None
+    """セッションID（タスクディレクトリ名として使用）"""

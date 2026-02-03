@@ -201,7 +201,13 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
         # worktree の場合はメインリポジトリのパスを使用
         base_dir = resolve_main_repo_root(base_dir)
 
-        ipc_dir = os.path.join(base_dir, ".multi-agent-mcp", ".ipc")
+        # session_id がある場合はタスクディレクトリ配下に配置
+        if app_ctx.session_id:
+            ipc_dir = os.path.join(
+                base_dir, ".multi-agent-mcp", app_ctx.session_id, ".ipc"
+            )
+        else:
+            ipc_dir = os.path.join(base_dir, ".multi-agent-mcp", ".ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager
@@ -235,7 +241,13 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
         # worktree の場合はメインリポジトリのパスを使用
         base_dir = resolve_main_repo_root(base_dir)
 
-        dashboard_dir = os.path.join(base_dir, ".multi-agent-mcp", ".dashboard")
+        # session_id がある場合はタスクディレクトリ配下に配置
+        if app_ctx.session_id:
+            dashboard_dir = os.path.join(
+                base_dir, ".multi-agent-mcp", app_ctx.session_id, ".dashboard"
+            )
+        else:
+            dashboard_dir = os.path.join(base_dir, ".multi-agent-mcp", ".dashboard")
         app_ctx.dashboard_manager = DashboardManager(
             workspace_id=app_ctx.workspace_id,
             workspace_path=base_dir,
@@ -415,17 +427,23 @@ def get_project_root_from_config(working_dir: str | None = None) -> str | None:
 # ========== エージェント永続化ヘルパー ==========
 
 
-def _get_agents_file_path(project_root: str | None) -> Path | None:
+def _get_agents_file_path(
+    project_root: str | None, session_id: str | None = None
+) -> Path | None:
     """エージェント情報ファイルのパスを取得する。
 
     Args:
         project_root: プロジェクトルートパス
+        session_id: セッションID（タスクディレクトリ名）
 
     Returns:
         agents.json のパス、project_root が None の場合は None
     """
     if not project_root:
         return None
+    # session_id がある場合はタスクディレクトリ配下に配置
+    if session_id:
+        return Path(project_root) / ".multi-agent-mcp" / session_id / "agents.json"
     return Path(project_root) / ".multi-agent-mcp" / "agents.json"
 
 
@@ -459,7 +477,7 @@ def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
     if project_root:
         project_root = resolve_main_repo_root(project_root)
 
-    agents_file = _get_agents_file_path(project_root)
+    agents_file = _get_agents_file_path(project_root, app_ctx.session_id)
 
     if not agents_file:
         logger.debug("project_root が設定されていないため、エージェント情報を保存できません")
@@ -511,7 +529,7 @@ def load_agents_from_file(app_ctx: AppContext) -> dict[str, "Agent"]:
     # worktree の場合はメインリポジトリのパスを使用
     if project_root:
         project_root = resolve_main_repo_root(project_root)
-    agents_file = _get_agents_file_path(project_root)
+    agents_file = _get_agents_file_path(project_root, app_ctx.session_id)
 
     if not agents_file or not agents_file.exists():
         return {}
@@ -589,7 +607,7 @@ def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
     # worktree の場合はメインリポジトリのパスを使用
     if project_root:
         project_root = resolve_main_repo_root(project_root)
-    agents_file = _get_agents_file_path(project_root)
+    agents_file = _get_agents_file_path(project_root, app_ctx.session_id)
 
     if not agents_file or not agents_file.exists():
         return False

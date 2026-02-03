@@ -86,10 +86,17 @@ class AiCliManager:
     def get_default_cli(self) -> AICli:
         """デフォルトのAI CLIを取得する。
 
+        アクティブなモデルプロファイルの CLI 設定を返す。
+
         Returns:
             デフォルトのAI CLI
         """
-        return self.settings.default_ai_cli
+        from src.config.settings import ModelProfile
+
+        if self.settings.model_profile_active == ModelProfile.STANDARD:
+            return self.settings.model_profile_standard_cli
+        else:  # PERFORMANCE
+            return self.settings.model_profile_performance_cli
 
     def build_stdin_command(
         self,
@@ -97,6 +104,7 @@ class AiCliManager:
         task_file_path: str,
         worktree_path: str | None = None,
         project_root: str | None = None,
+        model: str | None = None,
     ) -> str:
         """AI CLIでstdinからタスクを読み込むコマンドを構築する。
 
@@ -105,6 +113,7 @@ class AiCliManager:
             task_file_path: タスクファイルのパス
             worktree_path: 作業ディレクトリのパス（オプション）
             project_root: プロジェクトルートパス（MCP_PROJECT_ROOT 環境変数用）
+            model: 使用するモデル（オプション、Claude CLI のみ対応）
 
         Returns:
             実行コマンド文字列
@@ -117,8 +126,11 @@ class AiCliManager:
             env_prefix = f"export MCP_PROJECT_ROOT={shlex.quote(project_root)} && "
 
         if cli == AICli.CLAUDE:
-            # export MCP_PROJECT_ROOT=... && cd <path> && claude --dangerously-skip-permissions < task.md
-            parts = [cmd, "--dangerously-skip-permissions"]
+            # export MCP_PROJECT_ROOT=... && cd <path> && claude --model <model> --dangerously-skip-permissions < task.md
+            parts = [cmd]
+            if model:
+                parts.extend(["--model", model])
+            parts.append("--dangerously-skip-permissions")
             parts.append(f"< {shlex.quote(task_file_path)}")
             command = " ".join(parts)
             if worktree_path:

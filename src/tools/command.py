@@ -384,6 +384,9 @@ def register_tools(mcp: FastMCP) -> None:
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
+        # session_id を AppContext に設定（ディレクトリパス決定に使用）
+        app_ctx.session_id = session_id
+
         # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
         sync_agents_from_file(app_ctx)
 
@@ -496,11 +499,19 @@ def register_tools(mcp: FastMCP) -> None:
         # WorkerにAI CLIコマンドを送信
         # エージェントのAI CLIを取得（未設定の場合はデフォルト）
         agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
+
+        # ロール別のモデルを取得
+        if agent.role == AgentRole.ADMIN.value:
+            agent_model = profile_settings.get("admin_model")
+        else:  # WORKER
+            agent_model = profile_settings.get("worker_model")
+
         read_command = app_ctx.ai_cli.build_stdin_command(
             cli=agent_cli,
             task_file_path=str(task_file),
             worktree_path=agent.worktree_path,
             project_root=str(project_root),  # MCP_PROJECT_ROOT 環境変数用
+            model=agent_model,
         )
         if (
             agent.session_name is not None

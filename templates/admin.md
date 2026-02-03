@@ -116,6 +116,20 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 - ✅ 全 Worker に同じ session_id を使用（例: `tetris-2player-battle`）
 - **理由**: session_id がディレクトリ名として使用されるため、異なる session_id を使用するとタスクファイルが分散し、Dashboard の一元管理ができなくなる
 
+### F005: Claude 内部の Task ツール（サブエージェント）を使用しない
+
+- ❌ Claude の内部 Task ツール（`Task agents`, `Running N Task agents...`）を使用
+- ❌ 内部サブエージェントでファイル作成・編集を実行
+- ✅ 必ず MCP の `create_agent(role="worker")` で Worker を作成
+- ✅ 必ず MCP の `create_task` でタスクを登録
+- ✅ 必ず MCP の `send_task` で Worker にタスクを送信
+
+**理由**:
+
+- MCP Worker を使用しないと Dashboard でタスク管理ができない
+- tmux pane に Worker が配置されず、監視・制御ができない
+- Owner が進捗を追跡できない
+
 ---
 
 ## Current State（現在の状態）
@@ -249,6 +263,46 @@ assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID
 3. `assign_worktree` でエージェントに割り当て
 4. 必要に応じて `open_worktree_with_ai` で Claude Code 起動
 
+#### 2.5 インターフェース設計（並列タスクの場合）
+
+**複数の Worker が連携するファイルを作成する場合、事前にインターフェースを定義してください。**
+
+##### なぜ必要か
+
+並列実行では各 Worker が独立して設計するため、以下の問題が発生しやすい:
+
+- クラスのコンストラクタ引数の不一致
+- メソッドシグネチャの不一致
+- データ型の不一致
+
+##### 手順
+
+1. **依存関係を特定**: どのファイルがどのファイルを import するか
+2. **インターフェースを定義**: 各クラス/関数のシグネチャを明確化
+3. **Worker への指示に含める**: インターフェース仕様を各 Worker に伝達
+
+##### 例
+
+```markdown
+## インターフェース仕様（全 Worker 共通）
+
+### Board クラス（Board.js）
+- constructor(ctx: CanvasRenderingContext2D)
+- draw(): void
+- clearLines(): number
+
+### Player クラス（Player.js）
+- constructor(ctx: CanvasRenderingContext2D, board: Board)
+- draw(): void
+- moveDown(): boolean
+
+### main.js での使用方法
+const board = new Board(ctx);
+const player = new Player(ctx, board);
+```
+
+**⚠️ このインターフェース仕様を全ての関連 Worker に送信してください。**
+
 #### 3. サブタスクの委譲
 
 1. `create_task` でサブタスク作成
@@ -263,6 +317,21 @@ assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID
 4. Workers からの進捗報告を読む
 5. ブロッカーや質問に対応
 6. 必要に応じてタスク再割り当て
+
+##### 定期的な進捗報告
+
+**品質イテレーション中は、5分ごとまたは各イテレーション完了時に Owner に進捗を報告してください。**
+
+```python
+# イテレーション完了時の進捗報告
+send_message(
+    to_agent_id=owner_id,
+    message_type="task_progress",
+    content=f"イテレーション {n}/{max} 完了。残り問題: {issues}"
+)
+```
+
+これにより、セッションが中断した場合でも Owner が状況を把握できます。
 
 **Worker 異常検出時の対応**:
 ```python
@@ -343,11 +412,37 @@ create_task(title="game.js の updateGameStatus 未定義エラーを修正", ..
 send_task(agent_id=worker_id, task_content="...", session_id="tetris-2player-battle")
 ```
 
-#### 6. 集約と報告
+#### 6. 集約と報告（必須）
+
+**⚠️ 品質チェックをパスしたら、必ず Owner に完了報告を送信してください。**
 
 1. Workers から完了報告を収集
 2. 変更をレビュー・統合
-3. `send_message` で Owner に完了報告
+3. **`send_message` で Owner に完了報告**（必須）
+
+```python
+# 完了報告の例
+send_message(
+    to_agent_id=owner_id,
+    message_type="task_complete",
+    content="""
+    ## 完了報告
+
+    ### 完了したタスク
+    - タスク A: ✅ 完了
+    - タスク B: ✅ 完了
+
+    ### 品質チェック結果
+    - アプリ起動: ✅
+    - 動作確認: ✅
+
+    ### 次のステップ
+    Owner による最終確認をお願いします。
+    """
+)
+```
+
+**注意**: 完了報告を送信しないと、Owner がタスク完了を認識できず、クリーンアップが実行されません。
 
 ### Worktree セットアップパターン
 
