@@ -272,6 +272,8 @@ class WorktreeManager:
     ) -> tuple[bool, str]:
         """通常のgit worktreeコマンドでworktreeを削除する。
 
+        gtr と同様に、worktree 削除後にブランチも削除する。
+
         Args:
             path: worktreeのパス
             force: 強制削除するか
@@ -279,6 +281,15 @@ class WorktreeManager:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
+        # worktree からブランチ名を取得（削除前に取得）
+        branch_name = None
+        worktrees = await self.list_worktrees()
+        for wt in worktrees:
+            if wt.path == path:
+                branch_name = wt.branch
+                break
+
+        # worktree を削除
         args = ["worktree", "remove"]
         if force:
             args.append("--force")
@@ -291,6 +302,20 @@ class WorktreeManager:
             return False, f"worktree削除に失敗しました: {stderr}"
 
         logger.info(f"worktreeを削除しました: {path}")
+
+        # ブランチも削除（gtr と同様の動作）
+        branch_deleted = False
+        if branch_name and branch_name.startswith("worker-"):
+            delete_args = ["branch", "-D", branch_name]
+            branch_code, _, branch_stderr = await self._run_git(*delete_args)
+            if branch_code == 0:
+                logger.info(f"ブランチを削除しました: {branch_name}")
+                branch_deleted = True
+            else:
+                logger.warning(f"ブランチ削除に失敗: {branch_name} - {branch_stderr}")
+
+        if branch_deleted:
+            return True, f"worktreeとブランチを削除しました: {path} ({branch_name})"
         return True, f"worktreeを削除しました: {path}"
 
     async def list_worktrees(self) -> list[WorktreeInfo]:

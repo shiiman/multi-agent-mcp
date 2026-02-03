@@ -377,6 +377,9 @@ def register_tools(mcp: FastMCP) -> None:
                 logger.warning(f"WorktreeManager の初期化に失敗: {e}")
                 worktree_errors.append(f"初期化エラー: {e}")
 
+        # ブランチ削除は WorktreeManager.remove_worktree が自動で行う
+        # (gtr rm または native 実装で worker- ブランチを削除)
+
         result = {
             "success": True,
             "terminated_sessions": terminated_count,
@@ -387,7 +390,7 @@ def register_tools(mcp: FastMCP) -> None:
             "message": (
                 f"クリーンアップ完了: {terminated_count}セッション終了, "
                 f"{agent_count}エージェントクリア, "
-                f"{removed_worktrees}worktree削除"
+                f"{removed_worktrees}worktree削除（ブランチ含む）"
             ),
         }
 
