@@ -1,7 +1,9 @@
 """MCPツール用共通ヘルパー関数。"""
 
 import os
+import subprocess
 import uuid
+from pathlib import Path
 from typing import Any
 
 from src.context import AppContext
@@ -16,6 +18,66 @@ from src.managers.persona_manager import PersonaManager
 from src.managers.scheduler_manager import SchedulerManager
 from src.managers.worktree_manager import WorktreeManager
 from src.models.agent import Agent, AgentRole
+
+
+# ========== Git ヘルパー ==========
+
+
+def resolve_main_repo_root(path: str | Path) -> str:
+    """パスからメインリポジトリのルートを解決する。
+
+    git worktree の場合はメインリポジトリのルートを返す。
+    通常のリポジトリの場合はそのままルートを返す。
+
+    Args:
+        path: 解決するパス（worktree またはリポジトリ内のパス）
+
+    Returns:
+        メインリポジトリのルートパス
+    """
+    path = Path(path)
+
+    try:
+        # git rev-parse --show-toplevel でリポジトリのルートを取得
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(path),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        repo_root = result.stdout.strip()
+
+        # git rev-parse --git-common-dir でメインリポジトリの .git を取得
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=str(path),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        git_common_dir = result.stdout.strip()
+
+        # .git が絶対パスでない場合は repo_root からの相対パス
+        if not os.path.isabs(git_common_dir):
+            git_common_dir = os.path.join(repo_root, git_common_dir)
+
+        # .git/worktrees/xxx の形式なら、メインリポジトリは .git の親
+        git_common_dir = os.path.normpath(git_common_dir)
+        if git_common_dir.endswith(".git"):
+            # 通常のリポジトリ（worktree ではない）
+            return os.path.dirname(git_common_dir)
+        elif "/.git/" in git_common_dir or git_common_dir.endswith("/.git"):
+            # worktree: /path/to/main-repo/.git/worktrees/xxx → /path/to/main-repo
+            git_dir_index = git_common_dir.find("/.git")
+            return git_common_dir[:git_dir_index]
+        else:
+            # フォールバック
+            return repo_root
+
+    except subprocess.CalledProcessError:
+        # git コマンドが失敗した場合はそのまま返す
+        return str(path)
 
 
 # ========== ロールチェック ヘルパー ==========
@@ -187,7 +249,8 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
         if not project_root:
             for agent in app_ctx.agents.values():
                 if agent.worktree_path:
-                    project_root = agent.worktree_path
+                    # worktree の場合はメインリポジトリのルートを使用
+                    project_root = resolve_main_repo_root(agent.worktree_path)
                     break
 
         # それでも未設定の場合は workspace_base_dir を使用

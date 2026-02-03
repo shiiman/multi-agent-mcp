@@ -215,12 +215,12 @@ class AgentManager:
         by_status = {}
 
         for agent in self.agents.values():
-            # 役割別カウント
-            role = agent.role.value
+            # 役割別カウント（use_enum_values=True のため既に文字列）
+            role = agent.role
             by_role[role] = by_role.get(role, 0) + 1
 
-            # ステータス別カウント
-            status = agent.status.value
+            # ステータス別カウント（use_enum_values=True のため既に文字列）
+            status = agent.status
             by_status[status] = by_status.get(status, 0) + 1
 
         return {

@@ -378,6 +378,17 @@ class MetricsManager:
 
         logger.info(f"タスクメトリクスをCSVエクスポートしました: {filepath}")
 
+    def record_agent_start(self, agent_id: str, role: str) -> None:
+        """エージェント開始を記録する。
+
+        Args:
+            agent_id: エージェントID
+            role: エージェントの役割
+        """
+        if agent_id not in self._agent_metrics:
+            self._agent_metrics[agent_id] = AgentMetrics(agent_id=agent_id)
+        logger.debug(f"エージェント {agent_id}（{role}）の開始を記録")
+
     def reset(self) -> None:
         """全メトリクスをリセットする。"""
         self._task_metrics.clear()

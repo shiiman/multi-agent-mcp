@@ -13,6 +13,7 @@ from src.tools.helpers import (
     ensure_global_memory_manager,
     ensure_memory_manager,
     ensure_persona_manager,
+    resolve_main_repo_root,
 )
 from src.tools.model_profile import get_current_profile_settings
 
@@ -346,18 +347,18 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         # プロジェクトルートを取得
-        # 優先順位: worktree_path > working_dir > workspace_base_dir
+        # worktree の場合はメインリポジトリのルートを使用
         if agent.worktree_path:
-            project_root = Path(agent.worktree_path)
+            project_root = Path(resolve_main_repo_root(agent.worktree_path))
         elif agent.working_dir:
-            project_root = Path(agent.working_dir)
+            project_root = Path(resolve_main_repo_root(agent.working_dir))
         else:
             project_root = Path(app_ctx.settings.workspace_base_dir)
 
         # タスク内容の処理
         final_task_content = task_content
         persona_info = None
-        is_admin = agent.role == AgentRole.ADMIN
+        is_admin = agent.role == AgentRole.ADMIN.value
 
         if auto_enhance:
             # メモリから関連情報を検索（プロジェクト + グローバル）
@@ -463,7 +464,7 @@ def register_tools(mcp: FastMCP) -> None:
         result = {
             "success": success,
             "agent_id": agent_id,
-            "agent_role": agent.role.value,
+            "agent_role": agent.role,
             "session_id": session_id,
             "task_file": str(task_file),
             "command_sent": read_command,

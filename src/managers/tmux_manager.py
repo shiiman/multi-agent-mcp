@@ -20,14 +20,40 @@ MAIN_SESSION = "main"
 def get_project_name(working_dir: str) -> str:
     """作業ディレクトリからプロジェクト名を取得する。
 
+    worktree の場合はメインリポジトリの名前を返す。
+    これにより、Worker が worktree パスで作成されても
+    メインセッションに配置される。
+
     Args:
         working_dir: 作業ディレクトリのパス
 
     Returns:
-        プロジェクト名（ディレクトリ名）
+        プロジェクト名（メインリポジトリのディレクトリ名）
     """
+    import subprocess
     from pathlib import Path
 
+    try:
+        # git リポジトリの共通ディレクトリ（メイン .git）を取得
+        # worktree の場合でもメインリポジトリの .git を指す
+        result = subprocess.run(
+            ["git", "-C", working_dir, "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            git_common_dir = Path(result.stdout.strip())
+            # .git ディレクトリの親がリポジトリルート
+            # 絶対パスに変換（相対パスの場合があるため）
+            if not git_common_dir.is_absolute():
+                git_common_dir = (Path(working_dir) / git_common_dir).resolve()
+            repo_root = git_common_dir.parent
+            return repo_root.name
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    # フォールバック: 従来の動作（ディレクトリ名を返す）
     return Path(working_dir).name
 
 # メインウィンドウのペイン配置

@@ -273,19 +273,48 @@ def register_tools(mcp: FastMCP) -> None:
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
+        # worktree のパスを収集（削除前に取得）
+        worktree_paths = []
+        main_repo_path = None
+        for agent in agents.values():
+            if agent.worktree_path:
+                worktree_paths.append(agent.worktree_path)
+                # メインリポジトリのパスを取得（working_dir から）
+                if agent.working_dir and not main_repo_path:
+                    main_repo_path = agent.working_dir
+
         terminated_count = await tmux.cleanup_all_sessions()
         agent_count = len(agents)
         agents.clear()
+
+        # worktree を削除
+        removed_worktrees = 0
+        if worktree_paths and main_repo_path:
+            try:
+                worktree_manager = get_worktree_manager(app_ctx, main_repo_path)
+                for worktree_path in worktree_paths:
+                    try:
+                        success, _ = await worktree_manager.remove_worktree(
+                            worktree_path, force=True
+                        )
+                        if success:
+                            removed_worktrees += 1
+                    except Exception as e:
+                        logger.warning(f"worktree 削除失敗: {worktree_path} - {e}")
+            except Exception as e:
+                logger.warning(f"WorktreeManager の初期化に失敗: {e}")
 
         return {
             "success": True,
             "terminated_sessions": terminated_count,
             "cleared_agents": agent_count,
+            "removed_worktrees": removed_worktrees,
             "was_forced": force and not status["is_all_completed"],
             **status,
             "message": (
                 f"クリーンアップ完了: {terminated_count}セッション終了, "
-                f"{agent_count}エージェントクリア"
+                f"{agent_count}エージェントクリア, "
+                f"{removed_worktrees}worktree削除"
             ),
         }
 
@@ -356,6 +385,10 @@ def register_tools(mcp: FastMCP) -> None:
             f"MCP ディレクトリをセットアップしました: "
             f"作成={mcp_setup['created_dirs']}, env_created={mcp_setup['env_created']}"
         )
+
+        # project_root を設定（screenshot 等で使用）
+        app_ctx.project_root = working_dir
+        logger.info(f"project_root を設定しました: {working_dir}")
 
         if open_terminal:
             # ターミナルを開いてセッション作成

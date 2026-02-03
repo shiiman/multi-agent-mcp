@@ -290,8 +290,8 @@ class DashboardManager:
 
         summary = AgentSummary(
             agent_id=agent.id,
-            role=agent.role.value,
-            status=agent.status.value,
+            role=agent.role,  # use_enum_values=True のため既に文字列
+            status=agent.status,  # use_enum_values=True のため既に文字列
             current_task_id=agent.current_task,
             worktree_path=agent.worktree_path,
             branch=None,  # 別途取得が必要

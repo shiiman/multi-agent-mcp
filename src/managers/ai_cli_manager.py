@@ -110,27 +110,30 @@ class AiCliManager:
         cmd = self.get_command(cli)
 
         if cli == AICli.CLAUDE:
-            # claude --dangerously-skip-permissions --directory <path> < task.md
+            # cd <path> && claude --dangerously-skip-permissions < task.md
             parts = [cmd, "--dangerously-skip-permissions"]
-            if worktree_path:
-                parts.extend(["--directory", shlex.quote(worktree_path)])
             parts.append(f"< {shlex.quote(task_file_path)}")
-            return " ".join(parts)
+            command = " ".join(parts)
+            if worktree_path:
+                return f"cd {shlex.quote(worktree_path)} && {command}"
+            return command
 
         elif cli == AICli.CODEX:
-            # cat task.md | codex -a never --cwd <path>
+            # cd <path> && cat task.md | codex -a never
             parts = ["cat", shlex.quote(task_file_path), "|", cmd, "-a", "never"]
+            command = " ".join(parts)
             if worktree_path:
-                parts.extend(["--cwd", shlex.quote(worktree_path)])
-            return " ".join(parts)
+                return f"cd {shlex.quote(worktree_path)} && {command}"
+            return command
 
         elif cli == AICli.GEMINI:
-            # gemini --yolo --dir <path> < task.md
+            # cd <path> && gemini --yolo < task.md
             parts = [cmd, "--yolo"]
-            if worktree_path:
-                parts.extend(["--dir", shlex.quote(worktree_path)])
             parts.append(f"< {shlex.quote(task_file_path)}")
-            return " ".join(parts)
+            command = " ".join(parts)
+            if worktree_path:
+                return f"cd {shlex.quote(worktree_path)} && {command}"
+            return command
 
         # フォールバック
         return f"{cmd} < {shlex.quote(task_file_path)}"
@@ -154,17 +157,14 @@ class AiCliManager:
         cmd = self.get_command(cli)
         args = [cmd]
 
-        # CLI固有のオプション
+        # CLI固有のオプション（worktree_path は呼び出し側で cwd として使用）
         if cli == AICli.CLAUDE:
-            args.extend(["--directory", worktree_path])
             if prompt:
                 args.extend(["--prompt", prompt])
         elif cli == AICli.CODEX:
-            args.extend(["--cwd", worktree_path])
             if prompt:
                 args.extend(["--message", prompt])
         elif cli == AICli.GEMINI:
-            args.extend(["--dir", worktree_path])
             if prompt:
                 args.extend(["--prompt", prompt])
 
@@ -195,6 +195,9 @@ class AiCliManager:
 
         args = self._build_cli_args(cli, worktree_path, prompt)
 
+        # 全 CLI で cwd を使用して作業ディレクトリを指定
+        cwd = worktree_path
+
         try:
             if detach:
                 # バックグラウンドで起動
@@ -203,6 +206,7 @@ class AiCliManager:
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                     start_new_session=True,
+                    cwd=cwd,
                 )
                 return True, f"{cli.value} を起動しました（PID: {proc.pid}）"
             else:
@@ -211,6 +215,7 @@ class AiCliManager:
                     *args,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
                 )
                 stdout, stderr = await proc.communicate()
 
