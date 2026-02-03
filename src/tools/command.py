@@ -17,6 +17,7 @@ from src.tools.helpers import (
     sync_agents_from_file,
 )
 from src.tools.model_profile import get_current_profile_settings
+from src.config.settings import Settings
 
 
 def generate_admin_task(
@@ -27,6 +28,7 @@ def generate_admin_task(
     worker_count: int,
     memory_context: str,
     project_name: str,
+    settings: Settings | None = None,
 ) -> str:
     """Admin エージェント用のタスク指示を生成する。
 
@@ -38,10 +40,16 @@ def generate_admin_task(
         worker_count: Worker 数
         memory_context: メモリから取得した関連情報
         project_name: プロジェクト名
+        settings: MCP 設定（省略時は新規作成）
 
     Returns:
         Admin 用のタスク指示（Markdown形式）
     """
+    if settings is None:
+        settings = Settings()
+
+    max_iterations = settings.quality_check_max_iterations
+    same_issue_limit = settings.quality_check_same_issue_limit
     timestamp = datetime.now().isoformat()
 
     return f"""# Admin タスク: {session_id}
@@ -99,7 +107,7 @@ def generate_admin_task(
 **バグや改善点を発見した場合、修正サイクルを回す:**
 
 ```
-while (品質に問題あり):
+while (品質に問題あり && イテレーション < {max_iterations}):
     1. 問題を分析・リスト化
     2. 修正タスクを create_task で登録
     3. 新しい Worker を作成 or 既存 Worker に send_task
@@ -109,7 +117,8 @@ while (品質に問題あり):
 
 **注意事項**:
 - 1回のイテレーションで1-2個の問題に絞る（過度な修正を避ける）
-- 同じ問題が3回以上繰り返される場合は Owner に相談
+- 同じ問題が{same_issue_limit}回以上繰り返される場合は Owner に相談
+- 最大イテレーション回数: {max_iterations}回（超えたら Owner に報告）
 - 修正内容はメモリに保存（`save_to_memory`）して学習
 
 ### 7. 完了報告

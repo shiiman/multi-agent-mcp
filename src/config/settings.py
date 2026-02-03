@@ -210,3 +210,16 @@ class Settings(BaseSettings):
         description="スクリーンショットとして認識する拡張子",
     )
     """対象とする画像拡張子"""
+
+    # 品質チェック・イテレーション設定
+    quality_check_max_iterations: int = Field(
+        default=5,
+        description="品質チェックの最大イテレーション回数",
+    )
+    """品質チェックの最大イテレーション回数（デフォルト: 5）"""
+
+    quality_check_same_issue_limit: int = Field(
+        default=3,
+        description="同一問題の繰り返し上限（超えたら Owner に相談）",
+    )
+    """同一問題の繰り返し上限（デフォルト: 3）"""
