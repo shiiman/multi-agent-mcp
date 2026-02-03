@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     """Workerエージェントの最大数（デフォルト: メインウィンドウに収まる6）"""
 
     # tmux設定
-    tmux_prefix: str = "mcp-agent"
+    tmux_prefix: str = "multi-agent-mcp"
     """tmuxセッション名のプレフィックス"""
 
     # tmux グリッド設定（メインウィンドウ: 左右50:50分離）
@@ -121,14 +121,6 @@ class Settings(BaseSettings):
 
     workers_per_extra_window: int = 12
     """追加ウィンドウのWorker数（extra_worker_rows × extra_worker_cols）"""
-
-    # ワークスペース設定
-    workspace_base_dir: str = "/tmp/mcp-workspaces"
-    """ワークスペースのベースディレクトリ"""
-
-    # メッセージ設定
-    message_retention_seconds: int = 3600
-    """メッセージの保持時間（秒）"""
 
     # AI CLI設定
     default_ai_cli: AICli = Field(default=AICli.CLAUDE, description="デフォルトのAI CLI")

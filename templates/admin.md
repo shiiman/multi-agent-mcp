@@ -210,6 +210,20 @@ assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID
 | `read_messages` | 全員からのメッセージ受信 |
 | `get_unread_count` | 新着メッセージ確認 |
 
+#### ヘルスチェック
+
+| ツール | 用途 |
+|--------|------|
+| `healthcheck_all` | 全 Worker の状態確認 |
+| `get_unhealthy_agents` | 異常な Worker 一覧取得 |
+| `attempt_recovery` | 異常な Worker の復旧試行 |
+
+#### コスト監視
+
+| ツール | 用途 |
+|--------|------|
+| `get_cost_summary` | セッションのコスト集計 |
+
 ### メッセージタイプ
 
 - `task_assign` - Worker にサブタスク割り当て
@@ -244,9 +258,35 @@ assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID
 #### 4. 進捗監視
 
 1. `get_dashboard` で全体状況確認
-2. Workers からの進捗報告を読む
-3. ブロッカーや質問に対応
-4. 必要に応じてタスク再割り当て
+2. `get_unhealthy_agents` で Worker の死活確認
+3. `get_cost_summary` でコスト確認
+4. Workers からの進捗報告を読む
+5. ブロッカーや質問に対応
+6. 必要に応じてタスク再割り当て
+
+**Worker 異常検出時の対応**:
+```python
+# 異常な Worker を検出
+unhealthy = get_unhealthy_agents()
+if unhealthy["agents"]:
+    for agent in unhealthy["agents"]:
+        # 復旧を試みる
+        attempt_recovery(agent["agent_id"])
+```
+
+**コスト閾値超過時の対応**:
+```python
+# コストを確認
+cost = get_cost_summary()
+if cost["warning"]:  # 閾値超過
+    # Owner に警告を送信
+    send_message(
+        owner_id,
+        "request",
+        f"コスト警告: 現在 ${cost['estimated_cost_usd']:.2f}（閾値超過）",
+        priority="high"
+    )
+```
 
 #### 5. 品質チェック・イテレーション
 

@@ -108,11 +108,10 @@ claude mcp list
 
 ## 提供するTools（88個）
 
-### セッション管理（5個）
+### セッション管理（4個）
 
 | Tool | 説明 |
 |------|------|
-| `init_workspace` | ワークスペースディレクトリを初期化 |
 | `init_tmux_workspace` | ターミナルを開いてtmuxワークスペースを構築（8ペイングリッド） |
 | `cleanup_workspace` | 全エージェントを終了しリソースを解放 |
 | `check_all_tasks_completed` | 全タスクの完了状態をチェック |
@@ -284,11 +283,8 @@ claude mcp list
 ## 使用例
 
 ```
-# ターミナルを開いてtmuxワークスペースを構築（推奨）
+# ターミナルを開いてtmuxワークスペースを構築
 init_tmux_workspace("/path/to/project")
-
-# または、バックグラウンドでワークスペースを初期化
-init_workspace("my-project")
 
 # Ownerエージェントを作成
 create_agent("owner", "/path/to/project")
@@ -320,7 +316,6 @@ cleanup_workspace()
 | `MCP_MAX_WORKERS` | 6 | Workerの最大数 |
 | `MCP_TMUX_PREFIX` | mcp-agent | tmuxセッション名のプレフィックス |
 | `MCP_WORKSPACE_BASE_DIR` | /tmp/mcp-workspaces | ワークスペースのベースディレクトリ |
-| `MCP_MESSAGE_RETENTION_SECONDS` | 3600 | メッセージ保持時間（秒） |
 | `MCP_DEFAULT_AI_CLI` | claude | デフォルトのAI CLI（claude/codex/gemini） |
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 300 | ヘルスチェック間隔（秒） |

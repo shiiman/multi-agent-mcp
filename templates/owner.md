@@ -77,8 +77,7 @@ Owner (You)
 
 | ツール | 用途 |
 |--------|------|
-| `init_workspace` | MCP ワークスペース初期化 |
-| `init_tmux_workspace` | tmux セッション作成 |
+| `init_tmux_workspace` | tmux ワークスペース初期化・セッション作成 |
 | `create_agent` | Owner/Admin エージェント作成 |
 | `switch_model_profile` | モデルプロファイル切替 |
 
@@ -93,7 +92,7 @@ Owner (You)
 | ツール | 用途 |
 |--------|------|
 | `get_dashboard_summary` | 進捗確認（軽量） |
-| `read_messages` | Admin からのメッセージ確認 |
+| `read_messages` | Admin からのメッセージ確認（コスト警告含む） |
 
 #### 完了フェーズ
 
@@ -108,7 +107,7 @@ Owner (You)
 
 #### Phase 1: 初期化 + Admin 起動
 
-1. **MCP 初期化**: `init_workspace`, `init_tmux_workspace`
+1. **MCP 初期化**: `init_tmux_workspace`
 2. **エージェント作成**: `create_agent(role="owner")`, `create_agent(role="admin")`
 3. **計画書送信**: `send_task(agent_id=admin_id, task_content=計画書, ...)`
 
@@ -126,10 +125,11 @@ Owner (You)
 ```
 # 進捗確認
 get_dashboard_summary()
-read_messages()
+read_messages()  # Admin からのコスト警告も受信
 ```
 
 Admin が品質チェックをパスしたら、Owner に完了報告が届きます。
+コスト閾値超過時は Admin から警告メッセージが届きます。
 
 #### Phase 5: 結果確認 + クリーンアップ
 
@@ -140,15 +140,14 @@ Admin が品質チェックをパスしたら、Owner に完了報告が届き�
 
 ```
 # Phase 1: 初期化
-1. init_workspace(workspace_path="my-project")
-2. init_tmux_workspace(working_dir="/path/to/project", open_terminal=true)
-3. create_agent(role="owner", working_dir="/path/to/project")
-4. create_agent(role="admin", working_dir="/path/to/project")
-5. send_task(agent_id=admin_id, task_content="計画書...", session_id="xxx", branch_name="feature/xxx")
+1. init_tmux_workspace(working_dir="/path/to/project", open_terminal=true)
+2. create_agent(role="owner", working_dir="/path/to/project")
+3. create_agent(role="admin", working_dir="/path/to/project")
+4. send_task(agent_id=admin_id, task_content="計画書...", session_id="xxx", branch_name="feature/xxx")
 
 # Phase 2-4: 待機
-6. get_dashboard_summary()  # 進捗確認
-7. read_messages()          # Admin からの報告待ち
+5. get_dashboard_summary()  # 進捗確認
+6. read_messages()          # Admin からの報告待ち（コスト警告含む）
 
 # Phase 5: 完了処理
 8. read_messages()  # 完了報告確認

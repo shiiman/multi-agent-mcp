@@ -407,7 +407,10 @@ def register_tools(mcp: FastMCP) -> None:
         elif agent.working_dir:
             project_root = Path(resolve_main_repo_root(agent.working_dir))
         else:
-            project_root = Path(app_ctx.settings.workspace_base_dir)
+            return {
+                "success": False,
+                "error": "エージェントに working_dir または worktree_path が設定されていません",
+            }
 
         # タスク内容の処理
         final_task_content = task_content

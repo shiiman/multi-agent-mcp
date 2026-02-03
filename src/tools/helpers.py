@@ -181,6 +181,9 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
     worktree 内で実行されている場合でも、メインリポジトリの IPC ディレクトリを使用する。
     これにより、Admin/Worker（worktree内）と Owner（メインリポジトリ）間の
     メッセージ配信が正しく機能する。
+
+    Raises:
+        ValueError: project_root が設定されていない場合
     """
     if app_ctx.ipc_manager is None:
         # project_root を決定（複数のソースから取得を試みる）
@@ -190,13 +193,13 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
         if not base_dir:
             base_dir = get_project_root_from_config()
 
-        # フォールバック: workspace_base_dir
         if not base_dir:
-            base_dir = app_ctx.settings.workspace_base_dir
+            raise ValueError(
+                "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
+            )
 
         # worktree の場合はメインリポジトリのパスを使用
-        if base_dir:
-            base_dir = resolve_main_repo_root(base_dir)
+        base_dir = resolve_main_repo_root(base_dir)
 
         ipc_dir = os.path.join(base_dir, ".multi-agent-mcp", ".ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
@@ -209,6 +212,9 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
 
     worktree 内で実行されている場合でも、メインリポジトリの Dashboard ディレクトリを使用する。
     これにより、全エージェント間で Dashboard state が正しく同期される。
+
+    Raises:
+        ValueError: project_root が設定されていない場合
     """
     if app_ctx.dashboard_manager is None:
         if app_ctx.workspace_id is None:
@@ -221,13 +227,13 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
         if not base_dir:
             base_dir = get_project_root_from_config()
 
-        # フォールバック: workspace_base_dir
         if not base_dir:
-            base_dir = app_ctx.settings.workspace_base_dir
+            raise ValueError(
+                "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
+            )
 
         # worktree の場合はメインリポジトリのパスを使用
-        if base_dir:
-            base_dir = resolve_main_repo_root(base_dir)
+        base_dir = resolve_main_repo_root(base_dir)
 
         dashboard_dir = os.path.join(base_dir, ".multi-agent-mcp", ".dashboard")
         app_ctx.dashboard_manager = DashboardManager(
@@ -259,9 +265,23 @@ def ensure_healthcheck_manager(app_ctx: AppContext) -> HealthcheckManager:
 
 
 def ensure_metrics_manager(app_ctx: AppContext) -> MetricsManager:
-    """MetricsManagerが初期化されていることを確認する。"""
+    """MetricsManagerが初期化されていることを確認する。
+
+    Raises:
+        ValueError: project_root が設定されていない場合
+    """
     if app_ctx.metrics_manager is None:
-        metrics_dir = os.path.join(app_ctx.settings.workspace_base_dir, ".metrics")
+        # project_root を決定
+        base_dir = app_ctx.project_root
+        if not base_dir:
+            base_dir = get_project_root_from_config()
+
+        if not base_dir:
+            raise ValueError(
+                "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
+            )
+
+        metrics_dir = os.path.join(base_dir, ".multi-agent-mcp", ".metrics")
         app_ctx.metrics_manager = MetricsManager(metrics_dir)
     return app_ctx.metrics_manager
 
@@ -316,13 +336,13 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
                     project_root = resolve_main_repo_root(agent.worktree_path)
                     break
 
-        # それでも未設定の場合は workspace_base_dir を使用
         if not project_root:
-            project_root = app_ctx.settings.workspace_base_dir
+            raise ValueError(
+                "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
+            )
 
         # worktree の場合はメインリポジトリのパスを使用
-        if project_root:
-            project_root = resolve_main_repo_root(project_root)
+        project_root = resolve_main_repo_root(project_root)
 
         # project_root を設定（次回以降のために）
         if project_root and not app_ctx.project_root:

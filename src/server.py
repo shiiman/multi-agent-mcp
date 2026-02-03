@@ -38,9 +38,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     tmux = TmuxManager(settings)
     ai_cli = AiCliManager(settings)
 
-    # ワークスペースディレクトリを作成
-    os.makedirs(settings.workspace_base_dir, exist_ok=True)
-
     try:
         yield AppContext(settings=settings, tmux=tmux, ai_cli=ai_cli)
     finally:

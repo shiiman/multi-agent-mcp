@@ -34,7 +34,6 @@ def settings(temp_dir):
     from src.config.settings import TerminalApp
 
     return Settings(
-        workspace_base_dir=str(temp_dir / "workspaces"),
         max_workers=3,
         tmux_prefix="test-mcp-agent",
         default_terminal=TerminalApp.AUTO,

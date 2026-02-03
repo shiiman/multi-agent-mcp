@@ -29,7 +29,7 @@ MCP_MAX_WORKERS=6
 
 # ========== tmux 設定 ==========
 # tmux セッション名のプレフィックス
-MCP_TMUX_PREFIX=mcp-agent
+MCP_TMUX_PREFIX=multi-agent-mcp
 
 # メインウィンドウの Worker エリア設定（左右40:60分離）
 MCP_MAIN_WORKER_ROWS=2
@@ -38,16 +38,8 @@ MCP_WORKERS_PER_MAIN_WINDOW=6
 
 # 追加ウィンドウの設定（Worker 7 以降）
 MCP_EXTRA_WORKER_ROWS=2
-MCP_EXTRA_WORKER_COLS=6
-MCP_WORKERS_PER_EXTRA_WINDOW=12
-
-# ========== ワークスペース設定 ==========
-# ワークスペースのベースディレクトリ
-MCP_WORKSPACE_BASE_DIR=/tmp/mcp-workspaces
-
-# ========== メッセージ設定 ==========
-# メッセージの保持時間（秒）
-MCP_MESSAGE_RETENTION_SECONDS=3600
+MCP_EXTRA_WORKER_COLS=5
+MCP_WORKERS_PER_EXTRA_WINDOW=10
 
 # ========== AI CLI 設定 ==========
 # デフォルトで使用する AI CLI（claude / codex / gemini）
@@ -96,7 +88,7 @@ MCP_WORKER_THINKING_TOKENS=10000
 
 # ========== スクリーンショット設定 ==========
 # スクリーンショットとして認識する拡張子（カンマ区切り）
-# MCP_SCREENSHOT_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp
+MCP_SCREENSHOT_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp
 '''
 
 
@@ -207,36 +199,6 @@ def register_tools(mcp: FastMCP) -> None:
             "completed_tasks": completed,
             "failed_tasks": failed,
         }
-
-    @mcp.tool()
-    async def init_workspace(workspace_path: str, ctx: Context) -> dict[str, Any]:
-        """ワークスペースを初期化する。
-
-        ディレクトリの作成と基本的な設定を行う。
-
-        Args:
-            workspace_path: ワークスペースのパス（ベースディレクトリからの相対パス）
-
-        Returns:
-            初期化結果（success, workspace_path, message または error）
-        """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-        settings = app_ctx.settings
-
-        full_path = os.path.join(settings.workspace_base_dir, workspace_path)
-
-        try:
-            os.makedirs(full_path, exist_ok=True)
-            return {
-                "success": True,
-                "workspace_path": full_path,
-                "message": f"ワークスペースを初期化しました: {full_path}",
-            }
-        except OSError as e:
-            return {
-                "success": False,
-                "error": f"ワークスペースの初期化に失敗しました: {e}",
-            }
 
     @mcp.tool()
     async def cleanup_workspace(ctx: Context) -> dict[str, Any]:

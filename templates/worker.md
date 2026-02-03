@@ -115,6 +115,12 @@ Owner (1 agent)
 | `update_task_status` | タスク進捗の更新 |
 | `get_task` | 割り当てタスクの詳細確認 |
 
+#### ヘルスチェック
+
+| ツール | 用途 |
+|--------|------|
+| `record_heartbeat` | 生存信号を記録（定期的に呼ぶ） |
+
 ### メッセージタイプ
 
 Admin にメッセージを送る際は以下を使用：
@@ -157,9 +163,11 @@ Admin にメッセージを送る際は以下を使用：
 
 ```python
 # 作業開始
+record_heartbeat(self_id)  # ハートビート記録
 update_task_status(task_id, "in_progress", progress=0)
 
 # 作業中 - 定期的に進捗報告
+record_heartbeat(self_id)  # ハートビート記録
 send_message(
     admin_id,
     "task_progress",
@@ -168,6 +176,7 @@ send_message(
 update_task_status(task_id, "in_progress", progress=50)
 
 # 完了時
+record_heartbeat(self_id)  # ハートビート記録
 update_task_status(task_id, "completed", progress=100)
 send_message(
     admin_id,
@@ -175,6 +184,8 @@ send_message(
     "タスク完了。変更は feature/xyz ブランチにコミット済み",
 )
 ```
+
+**注意**: `record_heartbeat` を定期的に呼ぶことで、Admin がエージェントの状態を監視できます。
 
 ### ブロッカー発生時の対応
 
