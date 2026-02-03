@@ -16,6 +16,90 @@ from src.tools.helpers import (
 )
 
 
+def generate_admin_task(
+    session_id: str,
+    agent_id: str,
+    plan_content: str,
+    branch_name: str,
+    worker_count: int,
+    memory_context: str,
+    project_name: str,
+) -> str:
+    """Admin エージェント用のタスク指示を生成する。
+
+    Args:
+        session_id: セッションID（Issue番号など）
+        agent_id: Admin エージェントID
+        plan_content: 計画書またはタスク説明
+        branch_name: 作業ブランチ名
+        worker_count: Worker 数
+        memory_context: メモリから取得した関連情報
+        project_name: プロジェクト名
+
+    Returns:
+        Admin 用のタスク指示（Markdown形式）
+    """
+    timestamp = datetime.now().isoformat()
+
+    return f"""# Admin タスク: {session_id}
+
+## あなたの役割
+
+あなたは **Admin エージェント** です。
+以下の計画書に基づいてタスクを分割し、Worker を管理してください。
+
+## 計画書
+
+{plan_content}
+
+## 作業情報
+
+- **プロジェクト**: {project_name}
+- **作業ブランチ**: {branch_name}
+- **Worker 数**: {worker_count}
+- **開始時刻**: {timestamp}
+
+## 実行手順
+
+### 1. タスク分割
+- 計画書から並列実行可能なサブタスクを抽出
+- 各サブタスクを Dashboard に登録（`create_task`）
+
+### 2. Worker 作成・タスク割り当て
+各 Worker に対して以下を実行：
+1. Worktree 作成（`create_worktree`）
+2. Worker エージェント作成（`create_agent(role="worker")`）
+3. Worktree 割り当て（`assign_worktree`）
+4. タスク割り当て（`assign_task_to_agent`）
+5. タスク送信（`send_task`）
+
+### 3. 進捗監視
+- `get_dashboard_summary` で進捗確認
+- `healthcheck_all` で Worker 状態確認
+- `read_messages` で Worker からの質問に対応
+
+### 4. 完了報告
+全 Worker 完了後、Owner に `send_message` で結果を報告
+
+## 関連情報（メモリから取得）
+
+{memory_context if memory_context else "（関連情報なし）"}
+
+## Self-Check（コンパクション復帰用）
+
+コンテキストが失われた場合：
+- **セッションID**: {session_id}
+- **Admin ID**: {agent_id}
+- **復帰コマンド**: `retrieve_from_memory "{session_id}"`
+
+## 完了条件
+
+- 全 Worker のタスクが completed 状態
+- 全ての変更が {branch_name} にマージ済み
+- コンフリクトがないこと
+"""
+
+
 def generate_7section_task(
     task_id: str,
     agent_id: str,
@@ -24,6 +108,8 @@ def generate_7section_task(
     persona_prompt: str,
     memory_context: str,
     project_name: str,
+    worktree_path: str | None = None,
+    branch_name: str | None = None,
 ) -> str:
     """7セクション構造のタスクファイルを生成する。
 
@@ -35,11 +121,21 @@ def generate_7section_task(
         persona_prompt: ペルソナのシステムプロンプト
         memory_context: メモリから取得した関連情報
         project_name: プロジェクト名
+        worktree_path: 作業ディレクトリパス（省略可）
+        branch_name: 作業ブランチ名（省略可）
 
     Returns:
         7セクション構造のMarkdown文字列
     """
     timestamp = datetime.now().isoformat()
+
+    # 作業環境情報
+    work_env_lines = []
+    if worktree_path:
+        work_env_lines.append(f"- **作業ディレクトリ**: `{worktree_path}`")
+    if branch_name:
+        work_env_lines.append(f"- **作業ブランチ**: `{branch_name}`")
+    work_env_section = "\n".join(work_env_lines) if work_env_lines else "（メインリポジトリで作業）"
 
     return f"""# Task: {task_id}
 
@@ -65,6 +161,10 @@ def generate_7section_task(
 - 不明点がある場合は `send_message` で Admin に質問する
 
 ## Current State（現状）
+
+### 作業環境
+
+{work_env_section}
 
 ### 関連情報（メモリから取得）
 
@@ -187,18 +287,24 @@ def register_tools(mcp: FastMCP) -> None:
         task_content: str,
         session_id: str,
         auto_enhance: bool = True,
+        worker_count: int = 6,
+        branch_name: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
-        """タスク指示をファイル経由でWorkerに送信する。
+        """タスク指示をファイル経由でエージェントに送信する。
 
-        長いマルチライン指示に対応。Workerは claude < TASK.md でタスクを実行。
-        auto_enhance=True の場合、7セクション構造・ペルソナ・メモリを自動統合。
+        長いマルチライン指示に対応。エージェントは claude < TASK.md でタスクを実行。
+        auto_enhance=True の場合:
+        - Admin: 計画書 + Worker管理手順を自動生成
+        - Worker: 7セクション構造・ペルソナ・メモリを自動統合
 
         Args:
             agent_id: エージェントID
             task_content: タスク内容（Markdown形式）
             session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
-            auto_enhance: 7セクション構造を自動生成するか（デフォルト: True）
+            auto_enhance: 自動拡張を行うか（デフォルト: True）
+            worker_count: Worker 数（Admin 用、デフォルト: 6）
+            branch_name: 作業ブランチ名（Admin 用、省略時は feature/{session_id}）
 
         Returns:
             送信結果（success, task_file, command_sent, message または error）
@@ -226,16 +332,9 @@ def register_tools(mcp: FastMCP) -> None:
         # タスク内容の処理
         final_task_content = task_content
         persona_info = None
+        is_admin = agent.role == AgentRole.ADMIN
 
         if auto_enhance:
-            # ペルソナ検出
-            persona_manager = ensure_persona_manager(app_ctx)
-            persona = persona_manager.get_optimal_persona(task_content)
-            persona_info = {
-                "name": persona.name,
-                "description": persona.description,
-            }
-
             # メモリから関連情報を検索（プロジェクト + グローバル）
             memory_context = ""
             memory_lines = []
@@ -270,16 +369,40 @@ def register_tools(mcp: FastMCP) -> None:
             # プロジェクト名を取得
             project_name = project_root.name
 
-            # 7セクション構造でタスクファイルを生成
-            final_task_content = generate_7section_task(
-                task_id=session_id,
-                agent_id=agent_id,
-                task_description=task_content,
-                persona_name=persona.name,
-                persona_prompt=persona.system_prompt_addition,
-                memory_context=memory_context,
-                project_name=project_name,
-            )
+            if is_admin:
+                # Admin 用: 計画書 + Worker管理手順
+                actual_branch = branch_name or f"feature/{session_id}"
+                final_task_content = generate_admin_task(
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    plan_content=task_content,
+                    branch_name=actual_branch,
+                    worker_count=worker_count,
+                    memory_context=memory_context,
+                    project_name=project_name,
+                )
+            else:
+                # Worker 用: 7セクション構造 + ペルソナ + 作業環境情報
+                persona_manager = ensure_persona_manager(app_ctx)
+                persona = persona_manager.get_optimal_persona(task_content)
+                persona_info = {
+                    "name": persona.name,
+                    "description": persona.description,
+                }
+                # Worker の作業環境情報を取得
+                worker_worktree = agent.worktree_path
+                worker_branch = agent.branch if hasattr(agent, "branch") else None
+                final_task_content = generate_7section_task(
+                    task_id=session_id,
+                    agent_id=agent_id,
+                    task_description=task_content,
+                    persona_name=persona.name,
+                    persona_prompt=persona.system_prompt_addition,
+                    memory_context=memory_context,
+                    project_name=project_name,
+                    worktree_path=worker_worktree,
+                    branch_name=worker_branch,
+                )
 
         # タスクファイル作成
         dashboard = ensure_dashboard_manager(app_ctx)
@@ -315,6 +438,7 @@ def register_tools(mcp: FastMCP) -> None:
         result = {
             "success": success,
             "agent_id": agent_id,
+            "agent_role": agent.role.value,
             "session_id": session_id,
             "task_file": str(task_file),
             "command_sent": read_command,
@@ -324,6 +448,10 @@ def register_tools(mcp: FastMCP) -> None:
 
         if persona_info:
             result["persona"] = persona_info
+
+        if is_admin:
+            result["worker_count"] = worker_count
+            result["branch_name"] = branch_name or f"feature/{session_id}"
 
         return result
 
