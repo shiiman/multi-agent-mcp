@@ -51,7 +51,7 @@ multi-agent-mcp/
 │   │       ├── ghostty.py     # Ghostty terminal support
 │   │       ├── iterm2.py      # iTerm2 terminal support
 │   │       └── terminal_app.py # macOS Terminal.app support
-│   └── tools/                 # MCP tool definitions (57 tools)
+│   └── tools/                 # MCP tool definitions (88 tools)
 │       ├── __init__.py        # register_all_tools()
 │       ├── helpers.py         # Common helper functions
 │       ├── session.py         # Session management (5 tools)
@@ -68,7 +68,9 @@ multi-agent-mcp/
 │       ├── metrics.py         # Metrics (4 tools)
 │       ├── cost.py            # Cost management (4 tools)
 │       ├── persona.py         # Persona (3 tools)
-│       └── memory.py          # Memory management (19 tools)
+│       ├── memory.py          # Memory management (19 tools)
+│       ├── screenshot.py      # Screenshot management (4 tools)
+│       └── model_profile.py   # Model profile (3 tools)
 ├── templates/                 # CLAUDE.md templates for agents
 ├── tests/                     # Pytest test files
 ├── pyproject.toml
@@ -175,6 +177,15 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck interval | 300 |
 | `MCP_HEARTBEAT_TIMEOUT_SECONDS` | Heartbeat timeout | 300 |
+| `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
+| `MCP_MODEL_PROFILE_STANDARD_MODEL` | Standard profile model | claude-sonnet-4-20250514 |
+| `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_MODEL` | Performance profile model | claude-opus-4-20250514 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
+| `MCP_PROJECT_ROOT` | Project root for .env loading | - |
+| `MCP_OWNER_THINKING_TOKENS` | Owner thinking tokens | 0 |
+| `MCP_ADMIN_THINKING_TOKENS` | Admin thinking tokens | 1000 |
+| `MCP_WORKER_THINKING_TOKENS` | Worker thinking tokens | 10000 |
 
 ## Common Patterns
 

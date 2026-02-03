@@ -1,0 +1,163 @@
+"""プロジェクト別 .env ファイル読み込みのテスト。"""
+
+import os
+from pathlib import Path
+
+import pytest
+
+from src.config.settings import get_project_env_file
+from src.tools.session import generate_env_template
+
+
+class TestGetProjectEnvFile:
+    """get_project_env_file 関数のテスト。"""
+
+    def test_returns_none_when_no_project_root(self, temp_dir, monkeypatch):
+        """MCP_PROJECT_ROOT 未設定時に None を返すことをテスト。"""
+        monkeypatch.delenv("MCP_PROJECT_ROOT", raising=False)
+        result = get_project_env_file()
+        assert result is None
+
+    def test_returns_none_when_env_file_not_exists(self, temp_dir, monkeypatch):
+        """.env ファイルが存在しない場合に None を返すことをテスト。"""
+        monkeypatch.setenv("MCP_PROJECT_ROOT", str(temp_dir))
+
+        # .multi-agent-mcp ディレクトリは作成するが .env は作成しない
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+
+        result = get_project_env_file()
+        assert result is None
+
+    def test_returns_path_when_env_file_exists(self, temp_dir, monkeypatch):
+        """.env ファイルが存在する場合にパスを返すことをテスト。"""
+        monkeypatch.setenv("MCP_PROJECT_ROOT", str(temp_dir))
+
+        # .env ファイルを作成
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        env_file = mcp_dir / ".env"
+        env_file.write_text("MCP_MAX_WORKERS=10")
+
+        result = get_project_env_file()
+        assert result == str(env_file)
+
+
+class TestGenerateEnvTemplate:
+    """generate_env_template 関数のテスト。"""
+
+    def test_template_contains_max_workers(self):
+        """テンプレートに MCP_MAX_WORKERS が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_MAX_WORKERS" in template
+
+    def test_template_contains_model_profile_settings(self):
+        """テンプレートにモデルプロファイル設定が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_MODEL_PROFILE_ACTIVE" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_CLI" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_MODEL" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_CLI" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_MODEL" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS" in template
+
+    def test_template_contains_thinking_tokens(self):
+        """テンプレートに Extended Thinking 設定が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_OWNER_THINKING_TOKENS" in template
+        assert "MCP_ADMIN_THINKING_TOKENS" in template
+        assert "MCP_WORKER_THINKING_TOKENS" in template
+
+    def test_template_contains_cost_settings(self):
+        """テンプレートにコスト設定が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_COST_WARNING_THRESHOLD_USD" in template
+
+    def test_template_contains_healthcheck_settings(self):
+        """テンプレートにヘルスチェック設定が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_HEALTHCHECK_INTERVAL_SECONDS" in template
+        assert "MCP_HEARTBEAT_TIMEOUT_SECONDS" in template
+
+    def test_template_has_comments(self):
+        """テンプレートにコメントが含まれることをテスト。"""
+        template = generate_env_template()
+        assert "# Multi-Agent MCP" in template
+        assert "# ========" in template  # セクション区切り
+
+    def test_template_default_values(self):
+        """テンプレートのデフォルト値が正しいことをテスト。"""
+        template = generate_env_template()
+
+        # デフォルト値の確認
+        assert "MCP_MAX_WORKERS=6" in template
+        assert "MCP_MODEL_PROFILE_ACTIVE=standard" in template
+        assert "claude-sonnet-4-20250514" in template
+        assert "claude-opus-4-20250514" in template
+
+
+class TestSetupMcpDirectories:
+    """_setup_mcp_directories 関数のテスト。"""
+
+    def test_creates_memory_directory(self, temp_dir):
+        """memory ディレクトリが作成されることをテスト。"""
+        from src.tools.session import _setup_mcp_directories
+
+        result = _setup_mcp_directories(str(temp_dir))
+
+        memory_dir = temp_dir / ".multi-agent-mcp" / "memory"
+        assert memory_dir.exists()
+        assert "memory" in result["created_dirs"]
+
+    def test_creates_screenshot_directory(self, temp_dir):
+        """screenshot ディレクトリが作成されることをテスト。"""
+        from src.tools.session import _setup_mcp_directories
+
+        result = _setup_mcp_directories(str(temp_dir))
+
+        screenshot_dir = temp_dir / ".multi-agent-mcp" / "screenshot"
+        assert screenshot_dir.exists()
+        assert "screenshot" in result["created_dirs"]
+
+    def test_creates_env_file(self, temp_dir):
+        """.env ファイルが作成されることをテスト。"""
+        from src.tools.session import _setup_mcp_directories
+
+        result = _setup_mcp_directories(str(temp_dir))
+
+        env_file = temp_dir / ".multi-agent-mcp" / ".env"
+        assert env_file.exists()
+        assert result["env_created"] is True
+        assert result["env_path"] == str(env_file)
+
+    def test_does_not_overwrite_existing_env_file(self, temp_dir):
+        """既存の .env ファイルを上書きしないことをテスト。"""
+        from src.tools.session import _setup_mcp_directories
+
+        # 事前に .env ファイルを作成
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        env_file = mcp_dir / ".env"
+        env_file.write_text("CUSTOM_SETTING=value")
+
+        result = _setup_mcp_directories(str(temp_dir))
+
+        # 上書きされていないことを確認
+        assert env_file.read_text() == "CUSTOM_SETTING=value"
+        assert result["env_created"] is False
+
+    def test_does_not_recreate_existing_directories(self, temp_dir):
+        """既存のディレクトリを再作成しないことをテスト。"""
+        from src.tools.session import _setup_mcp_directories
+
+        # 事前にディレクトリを作成
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        (mcp_dir / "memory").mkdir(parents=True, exist_ok=True)
+        (mcp_dir / "screenshot").mkdir(parents=True, exist_ok=True)
+        (mcp_dir / ".env").write_text("test")
+
+        result = _setup_mcp_directories(str(temp_dir))
+
+        assert result["created_dirs"] == []
+        assert result["env_created"] is False

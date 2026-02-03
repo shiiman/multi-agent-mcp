@@ -1,9 +1,28 @@
 """設定管理モジュール。"""
 
+import os
 from enum import Enum
+from pathlib import Path
 
 from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
+
+
+def get_project_env_file() -> str | None:
+    """プロジェクト別 .env ファイルのパスを取得。
+
+    MCP_PROJECT_ROOT 環境変数が設定されている場合、
+    {project_root}/.multi-agent-mcp/.env を返す。
+
+    Returns:
+        .env ファイルのパス（存在する場合）、または None
+    """
+    project_root = os.getenv("MCP_PROJECT_ROOT")
+    if project_root:
+        env_file = Path(project_root) / ".multi-agent-mcp" / ".env"
+        if env_file.exists():
+            return str(env_file)
+    return None
 
 
 class AICli(str, Enum):
@@ -35,6 +54,19 @@ class TerminalApp(str, Enum):
     """macOS Terminal.app"""
 
 
+class ModelProfile(str, Enum):
+    """モデルプロファイル。
+
+    タスクの重要度に応じてモデルやリソースを切り替える。
+    """
+
+    STANDARD = "standard"
+    """標準プロファイル - コスト重視、Sonnet"""
+
+    PERFORMANCE = "performance"
+    """高性能プロファイル - 性能重視、Opus"""
+
+
 # AI CLI のデフォルトコマンドマッピング
 DEFAULT_AI_CLI_COMMANDS: dict[str, str] = {
     AICli.CLAUDE: "claude",
@@ -48,9 +80,19 @@ class Settings(BaseSettings):
 
     環境変数で上書き可能。プレフィックスは MCP_。
     例: MCP_MAX_WORKERS=10
+
+    優先順位:
+    1. 環境変数（最優先）
+    2. プロジェクト別 .env ファイル（{project}/.multi-agent-mcp/.env）
+    3. デフォルト値
     """
 
-    model_config = ConfigDict(env_prefix="MCP_")
+    model_config = ConfigDict(
+        env_prefix="MCP_",
+        env_file=get_project_env_file(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # エージェント設定
     max_workers: int = 6
@@ -118,3 +160,53 @@ class Settings(BaseSettings):
 
     worker_thinking_tokens: int = 10000
     """Worker の思考トークン数（深い思考が可能）"""
+
+    # モデルプロファイル設定
+    model_profile_active: ModelProfile = Field(
+        default=ModelProfile.STANDARD,
+        description="現在のモデルプロファイル",
+    )
+    """現在アクティブなモデルプロファイル"""
+
+    # standard プロファイル設定
+    model_profile_standard_cli: AICli = Field(
+        default=AICli.CLAUDE,
+        description="standard プロファイルで使用する AI CLI",
+    )
+    model_profile_standard_model: str = Field(
+        default="claude-sonnet-4-20250514",
+        description="standard プロファイルで使用するモデル",
+    )
+    model_profile_standard_max_workers: int = Field(
+        default=6,
+        description="standard プロファイルの Worker 数上限",
+    )
+    model_profile_standard_thinking_multiplier: float = Field(
+        default=1.0,
+        description="standard プロファイルの思考トークン倍率",
+    )
+
+    # performance プロファイル設定
+    model_profile_performance_cli: AICli = Field(
+        default=AICli.CLAUDE,
+        description="performance プロファイルで使用する AI CLI",
+    )
+    model_profile_performance_model: str = Field(
+        default="claude-opus-4-20250514",
+        description="performance プロファイルで使用するモデル",
+    )
+    model_profile_performance_max_workers: int = Field(
+        default=16,
+        description="performance プロファイルの Worker 数上限",
+    )
+    model_profile_performance_thinking_multiplier: float = Field(
+        default=2.0,
+        description="performance プロファイルの思考トークン倍率",
+    )
+
+    # スクリーンショット設定
+    screenshot_extensions: list[str] = Field(
+        default=[".png", ".jpg", ".jpeg", ".gif", ".webp"],
+        description="スクリーンショットとして認識する拡張子",
+    )
+    """対象とする画像拡張子"""

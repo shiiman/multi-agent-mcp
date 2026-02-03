@@ -106,7 +106,7 @@ uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp mu
 claude mcp list
 ```
 
-## 提供するTools（81個）
+## 提供するTools（88個）
 
 ### セッション管理（5個）
 
@@ -264,6 +264,23 @@ claude mcp list
 | `restore_from_global_memory_archive` | グローバルアーカイブからエントリを復元 |
 | `get_global_memory_archive_summary` | グローバルアーカイブのサマリーを取得 |
 
+### スクリーンショット（4個）
+
+| Tool | 説明 |
+|------|------|
+| `get_screenshot_dir` | スクリーンショットディレクトリを取得 |
+| `list_screenshots` | スクリーンショット一覧（最新N件） |
+| `read_screenshot` | 指定ファイルを読み取り（Base64） |
+| `read_latest_screenshot` | 最新のスクリーンショットを読み取り |
+
+### モデルプロファイル（3個）
+
+| Tool | 説明 |
+|------|------|
+| `get_model_profile` | 現在のプロファイルを取得 |
+| `switch_model_profile` | プロファイルを切り替え（standard/performance） |
+| `get_model_profile_settings` | プロファイルの設定詳細を取得 |
+
 ## 使用例
 
 ```
@@ -309,6 +326,39 @@ cleanup_workspace()
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 300 | ヘルスチェック間隔（秒） |
 | `MCP_HEARTBEAT_TIMEOUT_SECONDS` | 300 | ハートビートタイムアウト（秒） |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
+| `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
+| `MCP_MODEL_PROFILE_STANDARD_MODEL` | claude-sonnet-4-20250514 | standardプロファイルのモデル |
+| `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | 6 | standardプロファイルのWorker上限 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_MODEL` | claude-opus-4-20250514 | performanceプロファイルのモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | 16 | performanceプロファイルのWorker上限 |
+| `MCP_PROJECT_ROOT` | - | プロジェクトルート（.env読み込み用） |
+| `MCP_OWNER_THINKING_TOKENS` | 0 | Ownerの思考トークン数 |
+| `MCP_ADMIN_THINKING_TOKENS` | 1000 | Adminの思考トークン数 |
+| `MCP_WORKER_THINKING_TOKENS` | 10000 | Workerの思考トークン数 |
+
+## ディレクトリ構造
+
+`init_tmux_workspace` 実行時に以下のディレクトリと `.env` ファイルが自動作成されます：
+
+```
+{project_root}/.multi-agent-mcp/
+├── .env                    # プロジェクト設定（テンプレート付き）
+├── memory/                 # プロジェクトメモリ
+├── screenshot/             # スクリーンショット保存先
+└── {session_id}/           # セッション別
+    ├── dashboard/          # ダッシュボード
+    └── tasks/              # タスクファイル
+```
+
+### プロジェクト別設定
+
+プロジェクトごとに設定を変更する場合、`.multi-agent-mcp/.env` ファイルを編集してください。
+`init_tmux_workspace` 実行時に、設定可能な全変数がコメント付きで自動生成されます。
+
+**設定の優先順位**:
+1. 環境変数（最優先）
+2. `.multi-agent-mcp/.env` ファイル
+3. デフォルト値
 
 ## gitignore 推奨
 

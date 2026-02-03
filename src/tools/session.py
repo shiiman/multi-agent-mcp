@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -10,6 +11,97 @@ from src.context import AppContext
 from src.tools.helpers import get_gtrconfig_manager, get_worktree_manager
 
 logger = logging.getLogger(__name__)
+
+
+def generate_env_template() -> str:
+    """設定可能な変数とデフォルト値を含む .env テンプレートを生成する。
+
+    Returns:
+        .env ファイルの内容
+    """
+    return '''# Multi-Agent MCP プロジェクト設定
+# 環境変数で上書きされます（環境変数 > .env > デフォルト）
+
+# ========== エージェント設定 ==========
+# Worker エージェントの最大数
+MCP_MAX_WORKERS=6
+
+# ========== モデルプロファイル ==========
+# 現在のプロファイル（standard / performance）
+MCP_MODEL_PROFILE_ACTIVE=standard
+
+# standard プロファイル設定（Sonnet）
+MCP_MODEL_PROFILE_STANDARD_CLI=claude
+MCP_MODEL_PROFILE_STANDARD_MODEL=claude-sonnet-4-20250514
+MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS=6
+MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER=1.0
+
+# performance プロファイル設定（Opus）
+MCP_MODEL_PROFILE_PERFORMANCE_CLI=claude
+MCP_MODEL_PROFILE_PERFORMANCE_MODEL=claude-opus-4-20250514
+MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS=16
+MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER=2.0
+
+# ========== コスト設定 ==========
+# コスト警告の閾値（USD）
+MCP_COST_WARNING_THRESHOLD_USD=10.0
+
+# ========== ヘルスチェック設定 ==========
+# ヘルスチェックの間隔（秒）
+MCP_HEALTHCHECK_INTERVAL_SECONDS=300
+
+# ハートビートタイムアウト（秒）
+MCP_HEARTBEAT_TIMEOUT_SECONDS=300
+
+# ========== Extended Thinking 設定 ==========
+# Owner の思考トークン数（0 = 即断即決モード）
+MCP_OWNER_THINKING_TOKENS=0
+
+# Admin の思考トークン数
+MCP_ADMIN_THINKING_TOKENS=1000
+
+# Worker の思考トークン数
+MCP_WORKER_THINKING_TOKENS=10000
+'''
+
+
+def _setup_mcp_directories(working_dir: str) -> dict[str, Any]:
+    """MCP ディレクトリと .env ファイルをセットアップする。
+
+    Args:
+        working_dir: 作業ディレクトリのパス
+
+    Returns:
+        セットアップ結果（created_dirs, env_created, env_path）
+    """
+    mcp_dir = Path(working_dir) / ".multi-agent-mcp"
+    created_dirs = []
+
+    # memory ディレクトリ作成
+    memory_dir = mcp_dir / "memory"
+    if not memory_dir.exists():
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        created_dirs.append("memory")
+
+    # screenshot ディレクトリ作成
+    screenshot_dir = mcp_dir / "screenshot"
+    if not screenshot_dir.exists():
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        created_dirs.append("screenshot")
+
+    # .env ファイル作成（存在しない場合のみ）
+    env_file = mcp_dir / ".env"
+    env_created = False
+    if not env_file.exists():
+        env_file.write_text(generate_env_template())
+        env_created = True
+        logger.info(f".env テンプレートを作成しました: {env_file}")
+
+    return {
+        "created_dirs": created_dirs,
+        "env_created": env_created,
+        "env_path": str(env_file),
+    }
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -257,6 +349,13 @@ def register_tools(mcp: FastMCP) -> None:
                             logger.warning(f".gtrconfig 自動生成に失敗: {result}")
             except Exception as e:
                 logger.warning(f"gtr 設定確認に失敗: {e}")
+
+        # MCP ディレクトリと .env ファイルのセットアップ
+        mcp_setup = _setup_mcp_directories(working_dir)
+        logger.info(
+            f"MCP ディレクトリをセットアップしました: "
+            f"作成={mcp_setup['created_dirs']}, env_created={mcp_setup['env_created']}"
+        )
 
         if open_terminal:
             # ターミナルを開いてセッション作成

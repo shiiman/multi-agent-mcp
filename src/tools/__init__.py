@@ -13,8 +13,10 @@ from src.tools import (
     ipc,
     memory,
     metrics,
+    model_profile,
     persona,
     scheduler,
+    screenshot,
     session,
     template,
     worktree,
@@ -71,3 +73,9 @@ def register_all_tools(mcp: FastMCP) -> None:
 
     # メモリ
     memory.register_tools(mcp)
+
+    # スクリーンショット
+    screenshot.register_tools(mcp)
+
+    # モデルプロファイル
+    model_profile.register_tools(mcp)

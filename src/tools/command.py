@@ -14,6 +14,7 @@ from src.tools.helpers import (
     ensure_memory_manager,
     ensure_persona_manager,
 )
+from src.tools.model_profile import get_current_profile_settings
 
 
 def generate_admin_task(
@@ -61,11 +62,16 @@ def generate_admin_task(
 
 ## 実行手順
 
-### 1. タスク分割
+### 1. スクリーンショット確認（UI タスクの場合）
+- `list_screenshots` でスクリーンショットの有無を確認
+- UI 関連タスクの場合は `read_latest_screenshot` で視覚的問題を分析
+- 分析結果をタスク分割に反映
+
+### 2. タスク分割
 - 計画書から並列実行可能なサブタスクを抽出
 - 各サブタスクを Dashboard に登録（`create_task`）
 
-### 2. Worker 作成・タスク割り当て
+### 3. Worker 作成・タスク割り当て
 各 Worker に対して以下を実行：
 1. Worktree 作成（`create_worktree`）
 2. Worker エージェント作成（`create_agent(role="worker")`）
@@ -73,13 +79,26 @@ def generate_admin_task(
 4. タスク割り当て（`assign_task_to_agent`）
 5. タスク送信（`send_task`）
 
-### 3. 進捗監視
+### 4. 進捗監視
 - `get_dashboard_summary` で進捗確認
 - `healthcheck_all` で Worker 状態確認
 - `read_messages` で Worker からの質問に対応
 
-### 4. 完了報告
+### 5. 結果確認
+- 全 Worker 完了後、変更内容をレビュー
+- UI タスクの場合は `read_latest_screenshot` で視覚的確認
+
+### 6. 完了報告
 全 Worker 完了後、Owner に `send_message` で結果を報告
+
+## 🔴 RACE-001: 同一論理ファイルの編集禁止（マージ競合防止）
+
+**複数の Worker が同じ論理ファイルを編集すると、マージ時に conflict が発生します。**
+
+- ❌ Worker 1 が src/utils.ts 編集 / Worker 2 も src/utils.ts 編集 → マージ時 conflict
+- ✅ Worker 1 が src/utils-a.ts 編集 / Worker 2 が src/utils-b.ts 編集 → OK
+
+タスク分割時に編集対象ファイルが重複しないか確認してください。
 
 ## 関連情報（メモリから取得）
 
@@ -287,7 +306,7 @@ def register_tools(mcp: FastMCP) -> None:
         task_content: str,
         session_id: str,
         auto_enhance: bool = True,
-        worker_count: int = 6,
+        worker_count: int | None = None,
         branch_name: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -303,7 +322,7 @@ def register_tools(mcp: FastMCP) -> None:
             task_content: タスク内容（Markdown形式）
             session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
             auto_enhance: 自動拡張を行うか（デフォルト: True）
-            worker_count: Worker 数（Admin 用、デフォルト: 6）
+            worker_count: Worker 数（Admin 用、省略時はプロファイル設定を使用）
             branch_name: 作業ブランチ名（Admin 用、省略時は feature/{session_id}）
 
         Returns:
@@ -312,6 +331,12 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx: AppContext = ctx.request_context.lifespan_context
         tmux = app_ctx.tmux
         agents = app_ctx.agents
+
+        # プロファイル設定から Worker 数のデフォルトを取得
+        profile_settings = get_current_profile_settings(app_ctx)
+        effective_worker_count = (
+            worker_count if worker_count is not None else profile_settings["max_workers"]
+        )
 
         agent = agents.get(agent_id)
         if not agent:
@@ -377,7 +402,7 @@ def register_tools(mcp: FastMCP) -> None:
                     agent_id=agent_id,
                     plan_content=task_content,
                     branch_name=actual_branch,
-                    worker_count=worker_count,
+                    worker_count=effective_worker_count,
                     memory_context=memory_context,
                     project_name=project_name,
                 )
@@ -450,8 +475,9 @@ def register_tools(mcp: FastMCP) -> None:
             result["persona"] = persona_info
 
         if is_admin:
-            result["worker_count"] = worker_count
+            result["worker_count"] = effective_worker_count
             result["branch_name"] = branch_name or f"feature/{session_id}"
+            result["model_profile"] = profile_settings["profile"]
 
         return result
 

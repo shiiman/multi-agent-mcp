@@ -16,12 +16,16 @@ from src.managers.tmux_manager import (
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.helpers import ensure_ipc_manager, ensure_metrics_manager
+from src.tools.model_profile import get_current_profile_settings
 
 logger = logging.getLogger(__name__)
 
 
 def _get_next_worker_slot(
-    agents: dict[str, Agent], settings: Settings, session_name: str
+    agents: dict[str, Agent],
+    settings: Settings,
+    session_name: str,
+    max_workers: int | None = None,
 ) -> tuple[int, int] | None:
     """次に利用可能なWorkerスロット（ウィンドウ, ペイン）を取得する。
 
@@ -33,15 +37,19 @@ def _get_next_worker_slot(
         agents: エージェント辞書
         settings: 設定オブジェクト
         session_name: 対象のセッション名（プロジェクト名）
+        max_workers: Worker 上限（省略時は settings.max_workers を使用）
 
     Returns:
         (window_index, pane_index) のタプル、空きがない場合はNone
     """
+    # プロファイル設定の max_workers を優先
+    effective_max_workers = max_workers if max_workers is not None else settings.max_workers
+
     # 最大Worker数チェック
     total_workers = len(
         [a for a in agents.values() if a.role == AgentRole.WORKER]
     )
-    if total_workers >= settings.max_workers:
+    if total_workers >= effective_max_workers:
         return None
 
     # 現在のWorkerペイン割り当て状況を取得
@@ -63,7 +71,7 @@ def _get_next_worker_slot(
     # 追加ウィンドウの空きを探す
     panes_per_extra = settings.workers_per_extra_window
     extra_worker_index = 0
-    while total_workers + extra_worker_index < settings.max_workers:
+    while total_workers + extra_worker_index < effective_max_workers:
         window_index = 1 + (extra_worker_index // panes_per_extra)
         pane_index = extra_worker_index % panes_per_extra
         if (window_index, pane_index) not in used_slots:
@@ -104,6 +112,10 @@ def register_tools(mcp: FastMCP) -> None:
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
+        # 現在のプロファイル設定を取得
+        profile_settings = get_current_profile_settings(app_ctx)
+        profile_max_workers = profile_settings["max_workers"]
+
         # 役割の検証
         try:
             agent_role = AgentRole(role)
@@ -125,13 +137,13 @@ def register_tools(mcp: FastMCP) -> None:
                     "error": f"無効なAI CLIです: {ai_cli}（有効: {valid_clis}）",
                 }
 
-        # Worker数の上限チェック
+        # Worker数の上限チェック（プロファイル設定を使用）
         if agent_role == AgentRole.WORKER:
             worker_count = sum(1 for a in agents.values() if a.role == AgentRole.WORKER)
-            if worker_count >= settings.max_workers:
+            if worker_count >= profile_max_workers:
                 return {
                     "success": False,
-                    "error": f"Worker数が上限（{settings.max_workers}）に達しています",
+                    "error": f"Worker数が上限（{profile_max_workers}）に達しています",
                 }
 
         # Owner/Adminの重複チェック
@@ -172,8 +184,8 @@ def register_tools(mcp: FastMCP) -> None:
                 }
             session_name = project_name
 
-            # 次の空きスロットを探す
-            slot = _get_next_worker_slot(agents, settings, project_name)
+            # 次の空きスロットを探す（プロファイル設定の max_workers を使用）
+            slot = _get_next_worker_slot(agents, settings, project_name, profile_max_workers)
             if slot is None:
                 return {
                     "success": False,
