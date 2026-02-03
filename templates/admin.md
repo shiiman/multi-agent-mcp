@@ -110,6 +110,12 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 - ✅ 重要な判断は Owner に報告・相談する
 - ✅ 方針変更が必要な場合は Owner の承認を得る
 
+### F004: Worker への send_task で異なる session_id を使用しない
+
+- ❌ Worker ごとに異なる session_id を指定（例: `tetris-worker-1`, `tetris-worker-2`）
+- ✅ 全 Worker に同じ session_id を使用（例: `tetris-2player-battle`）
+- **理由**: session_id がディレクトリ名として使用されるため、異なる session_id を使用するとタスクファイルが分散し、Dashboard の一元管理ができなくなる
+
 ---
 
 ## Current State（現在の状態）
@@ -176,10 +182,25 @@ create_agent(role="worker", working_dir="/path/to/worktree", ai_cli="gemini")
 | ツール | 用途 |
 |--------|------|
 | `create_task` | Worker 用サブタスク作成 |
-| `assign_task_to_agent` | Worker にタスク割り当て |
-| `update_task_status` | タスク進捗更新 |
+| `assign_task_to_agent` | Worker にタスク割り当て（**要 caller_agent_id**） |
+| `update_task_status` | タスク進捗更新（**要 caller_agent_id**） |
 | `list_tasks` | 全タスク一覧 |
 | `get_dashboard` | 完全なダッシュボード取得 |
+
+**⚠️ 重要: caller_agent_id の指定**
+
+一部のツールはロール制限があり、`caller_agent_id` パラメータが必須です：
+
+```python
+# ❌ エラー: caller_agent_id が必要です
+assign_task_to_agent(task_id="xxx", agent_id="yyy")
+
+# ✅ 正しい使い方（自分の Admin ID を指定）
+assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID")
+```
+
+- `caller_agent_id` には **自分（Admin）の ID** を指定してください
+- 自分の ID は `Self-Check` セクションで確認できます
 
 #### 通信
 
@@ -260,13 +281,26 @@ Worker の作業が完了したら、品質チェックを実施します。
 
 ##### 問題発見時のフロー
 
+**⚠️ 重要: Admin は問題を特定するのみ。修正コードは絶対に書かない！**
+
 ```
 while (品質に問題あり && イテレーション < MAX_ITERATIONS):
-    1. 問題を分析・リスト化
+    1. 問題を分析・リスト化（コードは読むが書かない）
     2. create_task で修正タスク登録
-    3. Worker に send_task で修正依頼
+    3. 空いている Worker または新規 Worker に send_task で修正依頼
+       - session_id は元のタスクと同じものを使用（F004 参照）
     4. Worker 完了を待機
     5. 再度品質チェック
+```
+
+**修正例**:
+```python
+# ❌ Admin が直接修正
+# Update(test/tetris/game.js)  # 禁止！
+
+# ✅ Worker に修正を依頼
+create_task(title="game.js の updateGameStatus 未定義エラーを修正", ...)
+send_task(agent_id=worker_id, task_content="...", session_id="tetris-2player-battle")
 ```
 
 #### 6. 集約と報告

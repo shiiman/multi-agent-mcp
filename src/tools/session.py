@@ -8,6 +8,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.context import AppContext
+from src.managers.tmux_manager import get_project_name
 from src.tools.helpers import get_gtrconfig_manager, get_worktree_manager
 
 logger = logging.getLogger(__name__)
@@ -495,13 +496,17 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx.project_root = working_dir
         logger.info(f"project_root を設定しました: {working_dir}")
 
+        # セッション名を計算（mcp-agent-{project_name} 形式）
+        project_name = get_project_name(working_dir)
+        session_name = f"{tmux.prefix}-{project_name}"
+
         if open_terminal:
             # ターミナルを開いてセッション作成
             success, message = await tmux.launch_workspace_in_terminal(working_dir)
             if success:
                 return {
                     "success": True,
-                    "session_name": "main",
+                    "session_name": session_name,
                     "gtr_status": gtr_status,
                     "message": message,
                 }
@@ -517,7 +522,7 @@ def register_tools(mcp: FastMCP) -> None:
             if success:
                 return {
                     "success": True,
-                    "session_name": "main",
+                    "session_name": session_name,
                     "gtr_status": gtr_status,
                     "message": "メインセッションをバックグラウンドで作成しました",
                 }

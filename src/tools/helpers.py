@@ -176,25 +176,63 @@ def get_gtrconfig_manager(app_ctx: AppContext, project_path: str) -> GtrconfigMa
 
 
 def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
-    """IPCManagerが初期化されていることを確認する。"""
+    """IPCManagerが初期化されていることを確認する。
+
+    worktree 内で実行されている場合でも、メインリポジトリの IPC ディレクトリを使用する。
+    これにより、Admin/Worker（worktree内）と Owner（メインリポジトリ）間の
+    メッセージ配信が正しく機能する。
+    """
     if app_ctx.ipc_manager is None:
-        ipc_dir = os.path.join(app_ctx.settings.workspace_base_dir, ".ipc")
+        # project_root を決定（複数のソースから取得を試みる）
+        base_dir = app_ctx.project_root
+
+        # config.json から取得（init_tmux_workspace で設定される）
+        if not base_dir:
+            base_dir = get_project_root_from_config()
+
+        # フォールバック: workspace_base_dir
+        if not base_dir:
+            base_dir = app_ctx.settings.workspace_base_dir
+
+        # worktree の場合はメインリポジトリのパスを使用
+        if base_dir:
+            base_dir = resolve_main_repo_root(base_dir)
+
+        ipc_dir = os.path.join(base_dir, ".multi-agent-mcp", ".ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager
 
 
 def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
-    """DashboardManagerが初期化されていることを確認する。"""
+    """DashboardManagerが初期化されていることを確認する。
+
+    worktree 内で実行されている場合でも、メインリポジトリの Dashboard ディレクトリを使用する。
+    これにより、全エージェント間で Dashboard state が正しく同期される。
+    """
     if app_ctx.dashboard_manager is None:
         if app_ctx.workspace_id is None:
             app_ctx.workspace_id = str(uuid.uuid4())[:8]
-        dashboard_dir = os.path.join(
-            app_ctx.settings.workspace_base_dir, ".dashboard"
-        )
+
+        # project_root を決定（複数のソースから取得を試みる）
+        base_dir = app_ctx.project_root
+
+        # config.json から取得（init_tmux_workspace で設定される）
+        if not base_dir:
+            base_dir = get_project_root_from_config()
+
+        # フォールバック: workspace_base_dir
+        if not base_dir:
+            base_dir = app_ctx.settings.workspace_base_dir
+
+        # worktree の場合はメインリポジトリのパスを使用
+        if base_dir:
+            base_dir = resolve_main_repo_root(base_dir)
+
+        dashboard_dir = os.path.join(base_dir, ".multi-agent-mcp", ".dashboard")
         app_ctx.dashboard_manager = DashboardManager(
             workspace_id=app_ctx.workspace_id,
-            workspace_path=app_ctx.settings.workspace_base_dir,
+            workspace_path=base_dir,
             dashboard_dir=dashboard_dir,
         )
         app_ctx.dashboard_manager.initialize()
@@ -245,7 +283,11 @@ def ensure_persona_manager(app_ctx: AppContext) -> PersonaManager:
 
 
 def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
-    """MemoryManagerが初期化されていることを確認する。"""
+    """MemoryManagerが初期化されていることを確認する。
+
+    worktree 内で実行されている場合でも、メインリポジトリの memory ディレクトリを使用する。
+    これにより、全エージェントの完了報告が同じ memory.json に保存される。
+    """
     if app_ctx.memory_manager is None:
         # プロジェクトルートを決定
         project_root = app_ctx.project_root
@@ -277,6 +319,10 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
         # それでも未設定の場合は workspace_base_dir を使用
         if not project_root:
             project_root = app_ctx.settings.workspace_base_dir
+
+        # worktree の場合はメインリポジトリのパスを使用
+        if project_root:
+            project_root = resolve_main_repo_root(project_root)
 
         # project_root を設定（次回以降のために）
         if project_root and not app_ctx.project_root:
@@ -366,6 +412,9 @@ def _get_agents_file_path(project_root: str | None) -> Path | None:
 def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
     """エージェント情報をファイルに保存する。
 
+    worktree 内で実行されている場合でも、メインリポジトリの agents.json に保存する。
+    これにより、全エージェント（Owner/Admin/Workers）が同じファイルに記録される。
+
     Args:
         app_ctx: アプリケーションコンテキスト
         agent: 保存するエージェント
@@ -375,7 +424,21 @@ def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
     """
     from src.models.agent import Agent  # 循環インポート回避
 
+    # project_root を決定（複数のソースから取得を試みる）
     project_root = app_ctx.project_root
+
+    # config.json から取得（init_tmux_workspace で設定される）
+    if not project_root:
+        project_root = get_project_root_from_config()
+
+    # エージェントの working_dir から取得
+    if not project_root and agent.working_dir:
+        project_root = agent.working_dir
+
+    # worktree の場合はメインリポジトリのパスを使用
+    if project_root:
+        project_root = resolve_main_repo_root(project_root)
+
     agents_file = _get_agents_file_path(project_root)
 
     if not agents_file:
@@ -424,6 +487,10 @@ def load_agents_from_file(app_ctx: AppContext) -> dict[str, "Agent"]:
         project_root = get_project_root_from_config()
     if not project_root:
         project_root = os.getenv("MCP_PROJECT_ROOT")
+
+    # worktree の場合はメインリポジトリのパスを使用
+    if project_root:
+        project_root = resolve_main_repo_root(project_root)
     agents_file = _get_agents_file_path(project_root)
 
     if not agents_file or not agents_file.exists():
@@ -488,7 +555,20 @@ def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
     Returns:
         成功した場合 True
     """
+    # project_root を決定（複数のソースから取得を試みる）
     project_root = app_ctx.project_root
+
+    # config.json から取得（init_tmux_workspace で設定される）
+    if not project_root:
+        project_root = get_project_root_from_config()
+
+    # 環境変数から取得
+    if not project_root:
+        project_root = os.getenv("MCP_PROJECT_ROOT")
+
+    # worktree の場合はメインリポジトリのパスを使用
+    if project_root:
+        project_root = resolve_main_repo_root(project_root)
     agents_file = _get_agents_file_path(project_root)
 
     if not agents_file or not agents_file.exists():
