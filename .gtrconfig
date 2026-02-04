@@ -1,0 +1,22 @@
+[copy]
+include = [
+    "CLAUDE.md",
+    "*.md",
+]
+exclude = [
+    "**/vendor/**",
+    "**/.venv/**",
+    "**/target/**",
+    "**/__pycache__/**",
+    "**/node_modules/**",
+    "**/venv/**",
+    "**/.env",
+    "**/.env.*.local",
+    "**/.env.local",
+    "**/.git/**",
+]
+
+[hooks]
+postCreate = [
+    "uv sync",
+]
