@@ -135,7 +135,7 @@ def scheduler_manager(dashboard_manager, sample_agents):
 @pytest.fixture
 def healthcheck_manager(tmux_manager, sample_agents):
     """HealthcheckManagerインスタンスを作成する。"""
-    return HealthcheckManager(tmux_manager, sample_agents, heartbeat_timeout_seconds=60)
+    return HealthcheckManager(tmux_manager, sample_agents, healthcheck_interval_seconds=60)
 
 
 @pytest.fixture

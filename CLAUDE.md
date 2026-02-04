@@ -179,8 +179,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_TMUX_PREFIX` | Prefix for tmux session names | mcp-agent |
 | `MCP_WORKSPACE_BASE_DIR` | Base directory for workspaces | /tmp/mcp-workspaces |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
-| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck interval | 300 |
-| `MCP_HEARTBEAT_TIMEOUT_SECONDS` | Heartbeat timeout | 300 |
+| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck interval (no response = unhealthy) | 60 |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | claude |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | claude-sonnet-4-20250514 |

@@ -54,6 +54,7 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
     "assign_task_to_agent": ["admin"],
     "update_task_status": ["admin", "worker"],
     "remove_task": ["owner", "admin"],
+    "report_task_progress": ["worker"],
     "report_task_completion": ["worker"],
     # ========== タスクキュー ==========
     "enqueue_task": ["owner", "admin"],

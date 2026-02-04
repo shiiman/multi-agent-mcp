@@ -128,12 +128,32 @@ send_message(admin_id, "task_progress", "完了しました", caller_agent_id="�
 | `read_messages` | Admin からの指示受信 |
 | `get_unread_count` | 新着メッセージ確認 |
 
-#### ステータス更新
+#### 進捗報告（重要）
 
 | ツール | 用途 |
 |--------|------|
-| `update_task_status` | タスク進捗の更新 |
+| `report_task_progress` | **10% ごとに進捗を報告**（Dashboard + Admin に通知） |
+| `report_task_completion` | タスク完了時に報告 |
 | `get_task` | 割り当てタスクの詳細確認 |
+
+**⚠️ 進捗報告ルール**:
+- **10% ごとに `report_task_progress` を呼び出してください**
+- Admin と Owner がリアルタイムで進捗を把握できます
+- 進捗報告は Dashboard に反映されます
+
+```python
+# 例: ファイル作成後（20%）
+report_task_progress(task_id="xxx", progress=20, message="HTML ファイル作成完了", caller_agent_id="自分のID")
+
+# 例: CSS 実装後（50%）
+report_task_progress(task_id="xxx", progress=50, message="スタイル実装完了", caller_agent_id="自分のID")
+
+# 例: テスト完了後（90%）
+report_task_progress(task_id="xxx", progress=90, message="動作確認完了", caller_agent_id="自分のID")
+
+# 例: 完了
+report_task_completion(task_id="xxx", status="completed", message="タスク完了", caller_agent_id="自分のID")
+```
 
 #### ヘルスチェック
 

@@ -226,6 +226,88 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
+    async def report_task_progress(
+        task_id: str,
+        progress: int,
+        message: str | None = None,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """Worker がタスクの進捗を報告する。
+
+        Worker は 10% ごとに進捗を報告することで、Admin と Owner が
+        リアルタイムで作業状況を把握できます。
+
+        ※ Worker のみ使用可能。
+
+        Args:
+            task_id: タスクID
+            progress: 進捗率（0-100、10% 単位で報告推奨）
+            message: 進捗メッセージ（現在の作業内容など）
+            caller_agent_id: 呼び出し元エージェントID（Worker のID）
+
+        Returns:
+            報告結果（success, task_id, progress, message または error）
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "report_task_progress", caller_agent_id)
+        if role_error:
+            return role_error
+
+        # progress の検証
+        if not (0 <= progress <= 100):
+            return {
+                "success": False,
+                "error": f"無効な進捗率です: {progress}（有効: 0-100）",
+            }
+
+        # Dashboard を更新
+        try:
+            dashboard = ensure_dashboard_manager(app_ctx)
+            success, update_msg = dashboard.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.IN_PROGRESS,
+                progress=progress,
+            )
+            if not success:
+                logger.warning(f"Dashboard の進捗更新に失敗: {update_msg}")
+        except Exception as e:
+            logger.warning(f"Dashboard の進捗更新に失敗: {e}")
+
+        # Admin にも進捗を通知（IPC メッセージ）
+        admin_notified = False
+        try:
+            admin_ids = find_agents_by_role(app_ctx, "admin")
+            if admin_ids:
+                ipc = ensure_ipc_manager(app_ctx)
+                ipc.send_message(
+                    sender_id=caller_agent_id,
+                    receiver_id=admin_ids[0],
+                    message_type=MessageType.TASK_PROGRESS,
+                    subject=f"進捗報告: {task_id} ({progress}%)",
+                    content=message or f"タスク {task_id} の進捗: {progress}%",
+                    priority=MessagePriority.NORMAL,
+                    metadata={
+                        "task_id": task_id,
+                        "progress": progress,
+                        "reporter": caller_agent_id,
+                    },
+                )
+                admin_notified = True
+        except Exception as e:
+            logger.warning(f"Admin への進捗通知に失敗: {e}")
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "progress": progress,
+            "admin_notified": admin_notified,
+            "message": f"進捗 {progress}% を報告しました",
+        }
+
+    @mcp.tool()
     async def report_task_completion(
         task_id: str,
         status: str,
@@ -277,6 +359,21 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効なステータスです: {status}（有効: completed, failed）",
             }
 
+        # Dashboard を直接更新（Worker からでも更新可能にする）
+        dashboard_updated = False
+        try:
+            dashboard = ensure_dashboard_manager(app_ctx)
+            task_status = TaskStatus.COMPLETED if status == "completed" else TaskStatus.FAILED
+            dashboard.update_task_status(
+                task_id=task_id,
+                status=task_status,
+                error_message=message if status == "failed" else None,
+            )
+            dashboard_updated = True
+            logger.info(f"タスク {task_id} のステータスを {status} に更新しました")
+        except Exception as e:
+            logger.warning(f"Dashboard の更新に失敗: {e}")
+
         # IPC マネージャーを取得（自動初期化）
         ipc = ensure_ipc_manager(app_ctx)
 
@@ -327,6 +424,7 @@ def register_tools(mcp: FastMCP) -> None:
             "message": f"Admin ({admin_id}) に報告を送信しました",
             "task_id": task_id,
             "reported_status": status,
+            "dashboard_updated": dashboard_updated,
             "memory_saved": memory_saved,
             "metrics_updated": metrics_updated,
         }

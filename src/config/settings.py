@@ -148,11 +148,9 @@ class Settings(BaseSettings):
     """コスト警告の閾値（USD）"""
 
     # ヘルスチェック設定
-    healthcheck_interval_seconds: int = 300
-    """ヘルスチェックの間隔（秒）"""
-
-    heartbeat_timeout_seconds: int = 300
-    """ハートビートタイムアウト（秒）"""
+    healthcheck_interval_seconds: int = 60
+    """ヘルスチェックの間隔（秒）- Admin が Worker の状態を確認する間隔。
+    応答がなければ即座に異常と判断する。"""
 
     # ターミナル設定
     default_terminal: TerminalApp = Field(

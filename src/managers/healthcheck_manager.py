@@ -61,18 +61,18 @@ class HealthcheckManager:
         self,
         tmux_manager: "TmuxManager",
         agents: dict[str, "Agent"],
-        heartbeat_timeout_seconds: int = 300,
+        healthcheck_interval_seconds: int = 60,
     ) -> None:
         """HealthcheckManagerを初期化する。
 
         Args:
             tmux_manager: tmuxマネージャー
             agents: エージェントの辞書（agent_id -> Agent）
-            heartbeat_timeout_seconds: ハートビートタイムアウト（秒）
+            healthcheck_interval_seconds: ヘルスチェック間隔（秒）。応答がなければ異常と判断。
         """
         self.tmux_manager = tmux_manager
         self.agents = agents
-        self.heartbeat_timeout = timedelta(seconds=heartbeat_timeout_seconds)
+        self.healthcheck_interval = timedelta(seconds=healthcheck_interval_seconds)
         self._last_heartbeats: dict[str, datetime] = {}
 
     def record_heartbeat(self, agent_id: str) -> bool:
@@ -129,11 +129,11 @@ class HealthcheckManager:
         last_hb = self._last_heartbeats.get(agent_id)
         hb_timeout = False
         if last_hb:
-            hb_timeout = datetime.now() - last_hb > self.heartbeat_timeout
+            hb_timeout = datetime.now() - last_hb > self.healthcheck_interval
         else:
             # ハートビートが一度も記録されていない場合
             # 作成からタイムアウト時間が経過していればタイムアウトとする
-            if datetime.now() - agent.created_at > self.heartbeat_timeout:
+            if datetime.now() - agent.created_at > self.healthcheck_interval:
                 hb_timeout = True
 
         is_healthy = tmux_alive and not hb_timeout
@@ -257,7 +257,7 @@ class HealthcheckManager:
         return {
             "total_agents": len(self.agents),
             "agents_with_heartbeat": len(self._last_heartbeats),
-            "heartbeat_timeout_seconds": self.heartbeat_timeout.total_seconds(),
+            "healthcheck_interval_seconds": self.healthcheck_interval.total_seconds(),
         }
 
     def clear_heartbeat(self, agent_id: str) -> bool:

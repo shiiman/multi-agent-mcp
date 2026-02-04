@@ -71,11 +71,9 @@ MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER=2.0
 MCP_COST_WARNING_THRESHOLD_USD=10.0
 
 # ========== ヘルスチェック設定 ==========
-# ヘルスチェックの間隔（秒）
-MCP_HEALTHCHECK_INTERVAL_SECONDS=300
-
-# ハートビートタイムアウト（秒）
-MCP_HEARTBEAT_TIMEOUT_SECONDS=300
+# ヘルスチェックの間隔（秒）- Admin が Worker の状態を確認する間隔
+# 応答がなければ即座に異常と判断
+MCP_HEALTHCHECK_INTERVAL_SECONDS=60
 
 # ========== Extended Thinking 設定 ==========
 # Owner の思考トークン数（0 = 即断即決モード）
@@ -134,16 +132,16 @@ def _setup_mcp_directories(
         env_created = True
         logger.info(f".env テンプレートを作成しました: {env_file}")
 
-    # config.json 作成（project_root, mcp_tool_prefix, session_id を保存、MCP インスタンス間で共有）
+    # config.json 作成（mcp_tool_prefix, session_id を保存、MCP インスタンス間で共有）
+    # 注意: project_root はグローバルレジストリ (~/.multi-agent-mcp/agents/) で管理
     config_file = mcp_dir / "config.json"
     config_created = False
     # MCP ツールの完全名プレフィックス（Claude Code が MCP ツールを呼び出す際に使用）
     mcp_tool_prefix = "mcp__multi-agent-mcp__"
     config_data = {
-        "project_root": working_dir,
         "mcp_tool_prefix": mcp_tool_prefix,
     }
-    # session_id が指定されている場合は保存
+    # session_id が指定されている場合は保存（必須）
     if session_id:
         config_data["session_id"] = session_id
     if not config_file.exists():
@@ -152,13 +150,14 @@ def _setup_mcp_directories(
         config_created = True
         logger.info(f"config.json を作成しました: {config_file}")
     else:
-        # 既存の config.json を更新（project_root, mcp_tool_prefix, session_id が変わっている場合）
+        # 既存の config.json を更新（mcp_tool_prefix, session_id が変わっている場合）
         try:
             with open(config_file, encoding="utf-8") as f:
                 existing = json.load(f)
             updated = False
-            if existing.get("project_root") != working_dir:
-                existing["project_root"] = working_dir
+            # project_root が残っていたら削除（グローバルレジストリに移行済み）
+            if "project_root" in existing:
+                del existing["project_root"]
                 updated = True
             if existing.get("mcp_tool_prefix") != mcp_tool_prefix:
                 existing["mcp_tool_prefix"] = mcp_tool_prefix

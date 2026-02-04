@@ -294,7 +294,9 @@ def register_tools(mcp: FastMCP) -> None:
             owner_id = owner_agent.id if owner_agent else agent_id
 
         if app_ctx.project_root:
-            save_agent_to_registry(agent_id, owner_id, app_ctx.project_root)
+            save_agent_to_registry(
+                agent_id, owner_id, app_ctx.project_root, app_ctx.session_id
+            )
             logger.info(f"エージェント {agent_id} をグローバルレジストリに登録しました")
 
         result = {

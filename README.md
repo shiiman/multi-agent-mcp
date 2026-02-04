@@ -307,8 +307,7 @@ cleanup_workspace()
 | `MCP_TMUX_PREFIX` | mcp-agent | tmuxセッション名のプレフィックス |
 | `MCP_WORKSPACE_BASE_DIR` | /tmp/mcp-workspaces | ワークスペースのベースディレクトリ |
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
-| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 300 | ヘルスチェック間隔（秒） |
-| `MCP_HEARTBEAT_TIMEOUT_SECONDS` | 300 | ハートビートタイムアウト（秒） |
+| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 60 | ヘルスチェック間隔（秒）- 応答なしで異常判断 |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | claude | standardプロファイルのAI CLI |

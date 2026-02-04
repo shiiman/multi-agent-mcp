@@ -94,7 +94,7 @@ class TestHealthcheckManager:
         summary = healthcheck_manager.get_summary()
         assert "total_agents" in summary
         assert "agents_with_heartbeat" in summary
-        assert "heartbeat_timeout_seconds" in summary
+        assert "healthcheck_interval_seconds" in summary
 
     def test_clear_heartbeat(self, healthcheck_manager, sample_agents):
         """ハートビートをクリアできることをテスト。"""

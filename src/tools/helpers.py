@@ -147,25 +147,33 @@ def resolve_project_root(
 def ensure_project_root_from_caller(
     app_ctx: AppContext, caller_agent_id: str | None
 ) -> None:
-    """caller_agent_id からレジストリを検索し、app_ctx.project_root を設定する。
+    """caller_agent_id からレジストリを検索し、app_ctx.project_root と session_id を設定する。
 
     各ツールの最初で呼び出すことで、Admin/Worker の MCP インスタンスでも
-    正しい project_root を使用できるようにする。
+    正しい project_root と session_id を使用できるようにする。
 
     Args:
         app_ctx: アプリケーションコンテキスト
         caller_agent_id: 呼び出し元エージェントID
     """
-    if app_ctx.project_root:
-        return  # 既に設定済み
-
     if caller_agent_id:
-        project_root = get_project_root_from_registry(caller_agent_id)
-        if project_root:
-            app_ctx.project_root = project_root
-            logger.debug(
-                f"caller_agent_id {caller_agent_id} から project_root を設定: {project_root}"
-            )
+        # project_root が未設定の場合、レジストリから取得
+        if not app_ctx.project_root:
+            project_root = get_project_root_from_registry(caller_agent_id)
+            if project_root:
+                app_ctx.project_root = project_root
+                logger.debug(
+                    f"caller_agent_id {caller_agent_id} から project_root を設定: {project_root}"
+                )
+
+        # session_id が未設定の場合、レジストリから取得
+        if not app_ctx.session_id:
+            session_id = get_session_id_from_registry(caller_agent_id)
+            if session_id:
+                app_ctx.session_id = session_id
+                logger.debug(
+                    f"caller_agent_id {caller_agent_id} から session_id を設定: {session_id}"
+                )
 
 
 def get_agent_role(app_ctx: AppContext, agent_id: str) -> AgentRole | None:
@@ -331,12 +339,13 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
     """
     if app_ctx.ipc_manager is None:
         base_dir = resolve_project_root(app_ctx)
-        # session_id を確保（config.json から読み取り）
+        # session_id を確保（必須）
         session_id = ensure_session_id(app_ctx)
-        if session_id:
-            ipc_dir = os.path.join(base_dir, get_mcp_dir(), session_id, ".ipc")
-        else:
-            ipc_dir = os.path.join(base_dir, get_mcp_dir(), ".ipc")
+        if not session_id:
+            raise ValueError(
+                "session_id が設定されていません。init_tmux_workspace で session_id を指定してください。"
+            )
+        ipc_dir = os.path.join(base_dir, get_mcp_dir(), session_id, ".ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager
@@ -348,18 +357,20 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
     worktree 内で実行されている場合でも、メインリポジトリの Dashboard ディレクトリを使用する。
 
     Raises:
-        ValueError: project_root が設定されていない場合
+        ValueError: project_root または session_id が設定されていない場合
     """
     if app_ctx.dashboard_manager is None:
-        if app_ctx.workspace_id is None:
-            app_ctx.workspace_id = str(uuid.uuid4())[:8]
         base_dir = resolve_project_root(app_ctx)
-        # session_id を確保（config.json から読み取り）
+        # session_id を確保（必須）
         session_id = ensure_session_id(app_ctx)
-        if session_id:
-            dashboard_dir = os.path.join(base_dir, get_mcp_dir(), session_id, ".dashboard")
-        else:
-            dashboard_dir = os.path.join(base_dir, get_mcp_dir(), ".dashboard")
+        if not session_id:
+            raise ValueError(
+                "session_id が設定されていません。init_tmux_workspace で session_id を指定してください。"
+            )
+        # workspace_id は session_id を使用（同一タスク = 同一ダッシュボード）
+        if app_ctx.workspace_id is None:
+            app_ctx.workspace_id = session_id
+        dashboard_dir = os.path.join(base_dir, get_mcp_dir(), session_id, ".dashboard")
         app_ctx.dashboard_manager = DashboardManager(
             workspace_id=app_ctx.workspace_id,
             workspace_path=base_dir,
@@ -383,7 +394,7 @@ def ensure_healthcheck_manager(app_ctx: AppContext) -> HealthcheckManager:
         app_ctx.healthcheck_manager = HealthcheckManager(
             app_ctx.tmux,
             app_ctx.agents,
-            app_ctx.settings.heartbeat_timeout_seconds,
+            app_ctx.settings.healthcheck_interval_seconds,
         )
     return app_ctx.healthcheck_manager
 
@@ -468,7 +479,10 @@ def _get_agent_registry_dir() -> Path:
 
 
 def save_agent_to_registry(
-    agent_id: str, owner_id: str, project_root: str
+    agent_id: str,
+    owner_id: str,
+    project_root: str,
+    session_id: str | None = None,
 ) -> None:
     """エージェント情報をグローバルレジストリに保存する。
 
@@ -476,6 +490,7 @@ def save_agent_to_registry(
         agent_id: エージェントID
         owner_id: オーナーエージェントID（自分自身の場合は同じID）
         project_root: プロジェクトルートパス
+        session_id: セッションID（タスクディレクトリ名）
     """
     registry_dir = _get_agent_registry_dir()
     registry_dir.mkdir(parents=True, exist_ok=True)
@@ -485,9 +500,11 @@ def save_agent_to_registry(
         "owner_id": owner_id,
         "project_root": project_root,
     }
+    if session_id:
+        data["session_id"] = session_id
     with open(agent_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    logger.debug(f"エージェントをレジストリに保存: {agent_id} -> {project_root}")
+    logger.debug(f"エージェントをレジストリに保存: {agent_id} -> {project_root} (session: {session_id})")
 
 
 def get_project_root_from_registry(agent_id: str) -> str | None:
@@ -509,6 +526,30 @@ def get_project_root_from_registry(agent_id: str) -> str | None:
         if project_root:
             logger.debug(f"レジストリから project_root を取得: {agent_id} -> {project_root}")
         return project_root
+    except Exception as e:
+        logger.warning(f"レジストリファイルの読み込みに失敗: {agent_file}: {e}")
+        return None
+
+
+def get_session_id_from_registry(agent_id: str) -> str | None:
+    """レジストリからエージェントの session_id を取得する。
+
+    Args:
+        agent_id: エージェントID
+
+    Returns:
+        session_id、見つからない場合は None
+    """
+    agent_file = _get_agent_registry_dir() / f"{agent_id}.json"
+    if not agent_file.exists():
+        return None
+    try:
+        with open(agent_file, encoding="utf-8") as f:
+            data = json.load(f)
+        session_id = data.get("session_id")
+        if session_id:
+            logger.debug(f"レジストリから session_id を取得: {agent_id} -> {session_id}")
+        return session_id
     except Exception as e:
         logger.warning(f"レジストリファイルの読み込みに失敗: {agent_file}: {e}")
         return None
@@ -727,17 +768,18 @@ def _get_agents_file_path(
 
     Args:
         project_root: プロジェクトルートパス
-        session_id: セッションID（タスクディレクトリ名）
+        session_id: セッションID（タスクディレクトリ名、必須）
 
     Returns:
-        agents.json のパス、project_root が None の場合は None
+        agents.json のパス、project_root または session_id が None の場合は None
     """
     if not project_root:
         return None
-    # session_id がある場合はタスクディレクトリ配下に配置
-    if session_id:
-        return Path(project_root) / get_mcp_dir() / session_id / "agents.json"
-    return Path(project_root) / get_mcp_dir() / "agents.json"
+    if not session_id:
+        logger.warning("session_id が指定されていません。agents.json のパスを取得できません。")
+        return None
+    # タスクディレクトリ配下に配置（session_id 必須）
+    return Path(project_root) / get_mcp_dir() / session_id / "agents.json"
 
 
 def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
