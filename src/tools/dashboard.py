@@ -1,8 +1,11 @@
 """ダッシュボード/タスク管理ツール。"""
 
+import logging
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
+
+logger = logging.getLogger(__name__)
 
 from src.context import AppContext
 from src.models.dashboard import TaskStatus
