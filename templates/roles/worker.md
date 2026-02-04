@@ -192,12 +192,32 @@ Admin にメッセージを送る際は以下を使用：
 2. `update_task_status` で進捗パーセンテージを更新
 3. ブロッカーは即座に報告
 
-#### 4. タスク完了
+#### 4. タスク完了（必須手順）
+
+**⚠️ 以下の 3 ステップを必ず実行してください。Admin は IPC メッセージで完了を検知します。**
 
 1. すべての要件が満たされていることを確認
-2. ブランチに変更をコミット
-3. タスクステータスを `completed` に更新
-4. Admin に完了報告を送信
+2. ブランチに変更をコミット・プッシュ
+3. **report_task_completion を呼び出す**（Dashboard 更新）
+4. **send_message で Admin に完了報告**（IPC 通知 - 必須）
+
+```python
+# ステップ 3: Dashboard 更新
+report_task_completion(
+    task_id=task_id,
+    status="completed",
+    message="タスク完了",
+    caller_agent_id=self_id
+)
+
+# ステップ 4: Admin に IPC 通知（必須！これがないと Admin が完了を検知できない）
+send_message(
+    receiver_id=admin_id,
+    message_type="task_complete",  # ← 必ずこのタイプを使用
+    content="タスク完了: {タスク内容の要約}",
+    caller_agent_id=self_id
+)
+```
 
 ### 進捗報告パターン
 
@@ -209,23 +229,36 @@ update_task_status(task_id, "in_progress", progress=0)
 # 作業中 - 定期的に進捗報告
 record_heartbeat(self_id)  # ハートビート記録
 send_message(
-    admin_id,
-    "task_progress",
-    "データベーススキーマ完了、マイグレーション作業中",
+    receiver_id=admin_id,
+    message_type="task_progress",
+    content="データベーススキーマ完了、マイグレーション作業中",
+    caller_agent_id=self_id
 )
 update_task_status(task_id, "in_progress", progress=50)
 
-# 完了時
-record_heartbeat(self_id)  # ハートビート記録
-update_task_status(task_id, "completed", progress=100)
+# 完了時 - 必ず 2 ステップ実行
+record_heartbeat(self_id)
+
+# ステップ 1: Dashboard 更新
+report_task_completion(
+    task_id=task_id,
+    status="completed",
+    message="タスク完了",
+    caller_agent_id=self_id
+)
+
+# ステップ 2: Admin に IPC 通知（必須！）
 send_message(
-    admin_id,
-    "task_complete",
-    "タスク完了。変更は feature/xyz ブランチにコミット済み",
+    receiver_id=admin_id,
+    message_type="task_complete",  # ← 必ずこのタイプ
+    content="タスク完了。変更は feature/xyz ブランチにコミット・プッシュ済み",
+    caller_agent_id=self_id
 )
 ```
 
-**注意**: `record_heartbeat` を定期的に呼ぶことで、Admin がエージェントの状態を監視できます。
+**注意**:
+- `record_heartbeat` を定期的に呼ぶことで、Admin がエージェントの状態を監視できます
+- **完了時は `report_task_completion` と `send_message` の両方が必須です**
 
 ### ブロッカー発生時の対応
 

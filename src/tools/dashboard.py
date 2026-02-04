@@ -302,11 +302,24 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception as e:
             logger.warning(f"Admin への進捗通知に失敗: {e}")
 
+        # Markdown ダッシュボードも更新
+        markdown_updated = False
+        if app_ctx.session_id and app_ctx.project_root:
+            try:
+                dashboard = ensure_dashboard_manager(app_ctx)
+                dashboard.save_markdown_dashboard(
+                    app_ctx.project_root, app_ctx.session_id
+                )
+                markdown_updated = True
+            except Exception as e:
+                logger.warning(f"Markdown ダッシュボード更新に失敗: {e}")
+
         return {
             "success": True,
             "task_id": task_id,
             "progress": progress,
             "admin_notified": admin_notified,
+            "markdown_updated": markdown_updated,
             "message": f"進捗 {progress}% を報告しました",
         }
 
@@ -422,12 +435,25 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception:
             pass  # メトリクス更新失敗は致命的ではない
 
+        # Markdown ダッシュボードも更新
+        markdown_updated = False
+        if app_ctx.session_id and app_ctx.project_root:
+            try:
+                dashboard = ensure_dashboard_manager(app_ctx)
+                dashboard.save_markdown_dashboard(
+                    app_ctx.project_root, app_ctx.session_id
+                )
+                markdown_updated = True
+            except Exception as e:
+                logger.warning(f"Markdown ダッシュボード更新に失敗: {e}")
+
         return {
             "success": True,
             "message": f"Admin ({admin_id}) に報告を送信しました",
             "task_id": task_id,
             "reported_status": status,
             "dashboard_updated": dashboard_updated,
+            "markdown_updated": markdown_updated,
             "memory_saved": memory_saved,
             "metrics_updated": metrics_updated,
         }

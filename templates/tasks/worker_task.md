@@ -65,9 +65,11 @@ git push origin {branch_name}
 
 **⚠️ コミット・プッシュしないと、Admin が変更をマージできません。**
 
-## 完了報告（必須）
+## 完了報告（必須 - 2ステップ）
 
-**作業が完了したら必ず `report_task_completion` を呼び出してください。**
+**作業が完了したら、以下の 2 つを必ず実行してください。**
+
+### ステップ 1: Dashboard 更新
 
 ```
 mcp__multi-agent-mcp__report_task_completion(
@@ -79,4 +81,24 @@ mcp__multi-agent-mcp__report_task_completion(
 )
 ```
 
-これを呼び出さないと Admin がタスク完了を検知できません。
+### ステップ 2: Admin に IPC 通知（必須！）
+
+**⚠️ これがないと Admin が完了を検知できません。**
+
+```
+mcp__multi-agent-mcp__send_message(
+    receiver_id="{admin_id}",
+    message_type="task_complete",
+    content="タスク完了: {作業内容の要約}",
+    caller_agent_id="{agent_id}"
+)
+```
+
+### なぜ 2 ステップ必要か
+
+| ステップ | 役割 |
+|----------|------|
+| `report_task_completion` | Dashboard のタスク状態を更新 |
+| `send_message` | Admin に IPC で通知（Admin はこれを待っている） |
+
+**両方を実行しないと、Admin が完了を検知できず、ワークフローが停止します。**

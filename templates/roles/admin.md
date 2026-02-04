@@ -20,6 +20,84 @@ Admin は Owner と Workers の間の「橋渡し役」です。
 Owner の高レベルな要件を、Workers が実行可能な具体的なタスクに変換し、
 複数の Workers を効率的に調整して並列開発を実現します。
 
+---
+
+## 🔴 AUTONOMOUS-001: 自律行動ルール（最重要）
+
+**Admin は全タスク完了 + クリーンアップ完了まで自律的に行動し続けます。Owner の指示待ちになってはいけません。**
+
+### 自律行動ループ
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Admin 自律行動ループ                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. タスク分割・Worker 作成・タスク割り当て                  │
+│         ↓                                                   │
+│  2. Worker の完了を監視（ポーリング or メッセージ待ち）      │
+│         ↓                                                   │
+│  3. 全 Worker 完了？ ─No→ 2 に戻る                          │
+│         ↓ Yes                                               │
+│  4. 品質チェック（idle Worker を再利用）                    │
+│         ↓                                                   │
+│  5. 問題あり？ ─Yes→ 修正タスク作成 → 2 に戻る              │
+│         ↓ No                                                │
+│  6. クリーンアップ（Worker 終了、worktree 削除）            │
+│         ↓                                                   │
+│  7. Owner に完了報告（send_message で task_complete）       │
+│         ↓                                                   │
+│  8. 終了                                                    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### ❌ 禁止パターン（途中で停止）
+
+```python
+# タスク割り当て後に停止
+send_task(worker_id, "タスク内容", ...)
+# ここで終了 → ❌ Worker の完了を待たずに停止
+```
+
+### ✅ 正しいパターン（最後まで自律行動）
+
+```python
+# 1. タスク割り当て
+send_task(worker_id, "タスク内容", ...)
+
+# 2. Worker 完了を監視（ポーリング）
+while True:
+    dashboard = get_dashboard(caller_agent_id=admin_id)
+    pending_tasks = [t for t in dashboard["tasks"] if t["status"] != "completed"]
+    if not pending_tasks:
+        break
+    # Worker からのメッセージも確認
+    messages = read_messages(caller_agent_id=admin_id, unread_only=True)
+    # ... 適切に処理
+    time.sleep(30)  # 30秒間隔でポーリング
+
+# 3. 品質チェック
+# 4. クリーンアップ
+# 5. Owner に完了報告
+send_message(
+    receiver_id=owner_id,
+    message_type="task_complete",
+    content="全タスク完了、クリーンアップ完了",
+    caller_agent_id=admin_id
+)
+```
+
+### 監視方法
+
+| 方法 | 説明 |
+|------|------|
+| `get_dashboard()` | 全タスクの状態を一覧で確認 |
+| `read_messages(unread_only=True)` | Worker からの完了報告を受信 |
+| `list_tasks()` | タスク一覧を取得 |
+
+**Worker は `send_message(message_type="task_complete")` で完了を通知するので、それを待ち受けてください。**
+
 ## Who（誰が担当か）
 
 ### 階層構造
@@ -44,6 +122,52 @@ Owner (1 agent)
 2. **各 Worker に固有の worktree**: 作業領域の分離
 3. **Owner への定期報告**: 進捗を proactive に共有
 4. **ブロッカーの即時報告**: 問題発生時は Owner に即報告
+5. **idle Worker の再利用**: 新規 Worker 作成前に、必ず idle 状態の既存 Worker を確認・再利用する
+
+---
+
+## 🔴 REUSE-001: idle Worker の再利用（Worker 上限対策）
+
+**新しいタスク（品質チェック、修正タスク等）が発生した場合、新規 Worker を作成せず、idle 状態の既存 Worker を再利用してください。**
+
+### なぜ必要か
+
+- Worker 数には上限がある（デフォルト: 6）
+- 作業完了した Worker は idle 状態になる
+- 新規作成しようとすると「Worker 数が上限に達しています」エラーになる
+
+### 手順
+
+```python
+# 1. まず idle Worker を探す
+agents = list_agents(caller_agent_id=admin_id)
+idle_workers = [a for a in agents["agents"] if a["role"] == "worker" and a["status"] == "idle"]
+
+# 2. idle Worker がいれば再利用
+if idle_workers:
+    worker_id = idle_workers[0]["agent_id"]
+    # 既存 Worker にタスクを送信
+    send_task(agent_id=worker_id, task_content="...", session_id=session_id, caller_agent_id=admin_id)
+else:
+    # 3. idle Worker がいない場合のみ新規作成
+    create_agent(role="worker", working_dir=worktree_path, caller_agent_id=admin_id)
+```
+
+### ❌ 禁止パターン
+
+```python
+# idle Worker がいるのに新規作成しようとする
+create_agent(role="worker", ...)  # → エラー: Worker 数が上限に達しています
+```
+
+### ✅ 正しいパターン
+
+```python
+# 品質チェックタスク発生時
+idle_workers = [a for a in agents if a["status"] == "idle"]
+if idle_workers:
+    send_task(agent_id=idle_workers[0]["agent_id"], task_content="品質チェック", ...)
+```
 
 ---
 
@@ -282,13 +406,32 @@ get_dashboard(caller_agent_id="自分のID")
 |--------|------|
 | `get_cost_summary` | セッションのコスト集計 |
 
-### メッセージタイプ
+### メッセージタイプ（send_message で使用）
 
-- `task_assign` - Worker にサブタスク割り当て
-- `task_complete` - Owner に完了報告
-- `task_progress` - Owner に進捗報告
-- `request` - Owner/Worker に情報リクエスト
-- `broadcast` - 全 Workers に一斉送信
+**⚠️ 以下の値のみ有効です。それ以外はエラーになります。**
+
+| タイプ | 値 | 用途 |
+|--------|-----|------|
+| タスク割り当て | `task_assign` | Worker にサブタスク割り当て |
+| タスク完了 | `task_complete` | Owner に完了報告 |
+| タスク失敗 | `task_failed` | 失敗・エラー報告 |
+| 進捗報告 | `task_progress` | Owner/Worker に進捗報告 |
+| ステータス更新 | `status_update` | ステータス変更通知 |
+| リクエスト | `request` | 情報リクエスト |
+| レスポンス | `response` | リクエストへの返答 |
+| ブロードキャスト | `broadcast` | 全 Workers に一斉送信 |
+| システム | `system` | システムメッセージ |
+| エラー | `error` | エラー通知 |
+
+```python
+# ❌ 無効（エラーになる）
+send_message(..., message_type="progress_report")  # 存在しない
+send_message(..., message_type="completion")       # 存在しない
+
+# ✅ 有効
+send_message(..., message_type="task_progress")    # 進捗報告
+send_message(..., message_type="task_complete")    # 完了報告
+```
 
 ## Notes（備考）
 
@@ -602,16 +745,19 @@ send_message(
 check_gtr_available(repo_path)
 
 # 2. feature ブランチで worktree 作成
-create_worktree(
+result = create_worktree(
     repo_path="/path/to/repo",
-    worktree_path="/path/to/worktrees/feature-x",
+    worktree_path="/path/to/worktrees/feature-x",  # 希望パス（gtr使用時は無視される）
     branch="feature/task-123",
     base_branch="main"
 )
 
-# 3. Worker 作成と割り当て
-create_agent(role="worker", working_dir="/path/to/worktrees/feature-x")
-assign_worktree(agent_id, worktree_path, branch)
+# ⚠️ 重要: 必ず戻り値の worktree_path を使用する（gtr使用時は別パスになる）
+actual_worktree_path = result["worktree_path"]
+
+# 3. Worker 作成と割り当て（必ず actual_worktree_path を使用）
+create_agent(role="worker", working_dir=actual_worktree_path)  # ❌ 元のパスを使わない
+assign_worktree(agent_id, actual_worktree_path, branch)
 
 # 4. Claude Code で開く（gtr 利用可能時）
 open_worktree_with_ai(repo_path, "feature/task-123")

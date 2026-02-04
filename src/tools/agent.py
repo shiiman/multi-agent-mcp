@@ -312,6 +312,22 @@ def register_tools(mcp: FastMCP) -> None:
             )
             logger.info(f"エージェント {agent_id} をグローバルレジストリに登録しました")
 
+        # ダッシュボードにエージェント情報を追加
+        dashboard_updated = False
+        if app_ctx.session_id and app_ctx.project_root:
+            try:
+                from src.tools.helpers import ensure_dashboard_manager
+                dashboard = ensure_dashboard_manager(app_ctx)
+                dashboard.update_agent_summary(agent)
+                # Markdown ダッシュボードも更新
+                dashboard.save_markdown_dashboard(
+                    app_ctx.project_root, app_ctx.session_id
+                )
+                dashboard_updated = True
+                logger.info(f"エージェント {agent_id} をダッシュボードに追加しました")
+            except Exception as e:
+                logger.warning(f"ダッシュボード更新に失敗: {e}")
+
         result = {
             "success": True,
             "agent": agent.model_dump(mode="json"),
@@ -319,6 +335,7 @@ def register_tools(mcp: FastMCP) -> None:
             "ipc_registered": ipc_registered,
             "metrics_tracking": metrics_tracking,
             "file_persisted": file_saved,
+            "dashboard_updated": dashboard_updated,
         }
         if selected_cli:
             result["ai_cli"] = selected_cli.value
