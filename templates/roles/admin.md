@@ -273,7 +273,8 @@ get_dashboard(caller_agent_id="自分のID")
 |--------|------|
 | `healthcheck_all` | 全 Worker の状態確認 |
 | `get_unhealthy_agents` | 異常な Worker 一覧取得 |
-| `attempt_recovery` | 異常な Worker の復旧試行 |
+| `attempt_recovery` | 異常な Worker の軽量復旧（tmux セッション再作成のみ） |
+| `full_recovery` | 異常な Worker の完全復旧（worktree/agent 再作成 + タスク再割り当て） |
 
 #### コスト監視
 
@@ -377,14 +378,28 @@ send_message(
 これにより、セッションが中断した場合でも Owner が状況を把握できます。
 
 **Worker 異常検出時の対応**:
+
 ```python
 # 異常な Worker を検出
 unhealthy = get_unhealthy_agents()
-if unhealthy["agents"]:
-    for agent in unhealthy["agents"]:
-        # 復旧を試みる
-        attempt_recovery(agent["agent_id"])
+if unhealthy["unhealthy_agents"]:
+    for agent in unhealthy["unhealthy_agents"]:
+        agent_id = agent["agent_id"]
+        # まず軽量復旧を試みる（tmux セッション再作成）
+        result = attempt_recovery(agent_id)
+        if not result["success"]:
+            # 軽量復旧に失敗した場合は完全復旧を実行
+            # （worktree/agent 再作成 + タスク再割り当て）
+            full_recovery(agent_id)
 ```
+
+**full_recovery の動作**:
+
+1. 古い agent を terminate
+2. 古い worktree を削除
+3. 新しい worktree を作成（同じブランチで）
+4. 新しい agent を作成
+5. 未完了タスクを新しい agent に再割り当て
 
 **コスト閾値超過時の対応**:
 ```python

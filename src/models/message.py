@@ -17,7 +17,6 @@ class MessageType(str, Enum):
 
     # 状態関連
     STATUS_UPDATE = "status_update"  # ステータス更新
-    HEARTBEAT = "heartbeat"  # 生存確認
 
     # 通信関連
     REQUEST = "request"  # リクエスト

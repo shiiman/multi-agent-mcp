@@ -32,9 +32,9 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
     "healthcheck_all": ["owner", "admin"],
     "get_unhealthy_agents": ["owner", "admin"],
     "attempt_recovery": ["owner", "admin"],
+    "full_recovery": ["admin"],
     "initialize_agent": ["owner", "admin"],
     "register_agent_to_ipc": ["owner", "admin"],
-    "record_heartbeat": ["owner", "admin", "worker"],
     # ========== Worktree 管理 ==========
     "create_worktree": ["owner", "admin"],
     "list_worktrees": ["owner", "admin", "worker"],

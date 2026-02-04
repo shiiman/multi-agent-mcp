@@ -84,50 +84,15 @@ class TestResolveProjectRoot:
 class TestGetProjectRootFromConfig:
     """get_project_root_from_config 関数のテスト。"""
 
-    def test_returns_none_when_no_config(self, temp_dir, monkeypatch):
-        """config.json が存在しない場合に None を返すことをテスト。"""
-        monkeypatch.chdir(temp_dir)
+    def test_returns_none_when_no_caller_agent_id(self):
+        """caller_agent_id がない場合に None を返すことをテスト。"""
         result = get_project_root_from_config()
         assert result is None
 
-    def test_returns_project_root_from_config(self, temp_dir, monkeypatch):
-        """config.json から project_root を取得できることをテスト。"""
-        monkeypatch.chdir(temp_dir)
-
-        # config.json を作成
-        mcp_dir = temp_dir / ".multi-agent-mcp"
-        mcp_dir.mkdir(parents=True, exist_ok=True)
-        config_file = mcp_dir / "config.json"
-        config_file.write_text(json.dumps({"project_root": "/some/path"}))
-
-        result = get_project_root_from_config()
-        assert result == "/some/path"
-
-    def test_returns_none_when_project_root_missing_in_config(self, temp_dir, monkeypatch):
-        """config.json に project_root がない場合に None を返すことをテスト。"""
-        monkeypatch.chdir(temp_dir)
-
-        # project_root なしの config.json を作成
-        mcp_dir = temp_dir / ".multi-agent-mcp"
-        mcp_dir.mkdir(parents=True, exist_ok=True)
-        config_file = mcp_dir / "config.json"
-        config_file.write_text(json.dumps({"other_key": "value"}))
-
-        result = get_project_root_from_config()
+    def test_returns_none_when_agent_not_in_registry(self):
+        """レジストリにエージェントがない場合に None を返すことをテスト。"""
+        result = get_project_root_from_config(caller_agent_id="nonexistent-agent")
         assert result is None
-
-    def test_uses_working_dir_parameter(self, git_repo):
-        """working_dir パラメータを使用できることをテスト。"""
-        # working_dir 内に config.json を作成
-        mcp_dir = git_repo / ".multi-agent-mcp"
-        mcp_dir.mkdir(parents=True, exist_ok=True)
-        config_file = mcp_dir / "config.json"
-        # シンボリックリンク解決後のパスを使用
-        resolved_path = str(git_repo.resolve())
-        config_file.write_text(json.dumps({"project_root": resolved_path}))
-
-        result = get_project_root_from_config(working_dir=str(git_repo))
-        assert result == resolved_path
 
 
 class TestGetMcpToolPrefixFromConfig:

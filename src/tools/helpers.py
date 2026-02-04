@@ -129,6 +129,13 @@ def resolve_project_root(
                 project_root = resolve_main_repo_root(agent.worktree_path)
                 break
 
+    # 環境変数 MCP_PROJECT_ROOT からのフォールバック（オプション）
+    if not project_root and allow_env_fallback:
+        import os
+        env_project_root = os.environ.get("MCP_PROJECT_ROOT")
+        if env_project_root:
+            project_root = env_project_root
+
     if not project_root:
         raise ValueError(
             "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
@@ -601,52 +608,18 @@ def remove_agents_by_owner(owner_id: str) -> int:
 
 
 def get_project_root_from_config(
-    working_dir: str | None = None,
     caller_agent_id: str | None = None,
 ) -> str | None:
-    """project_root を取得する。
-
-    以下の優先順位で探索:
-    1. caller_agent_id からグローバルレジストリを検索
-    2. working_dir から config.json を探索
-    3. working_dir の worktree 解決先から config.json を探索
+    """project_root をグローバルレジストリから取得する。
 
     Args:
-        working_dir: 探索開始ディレクトリ（オプション）
         caller_agent_id: 呼び出し元エージェントID（オプション）
 
     Returns:
         project_root のパス、見つからない場合は None
     """
-    # 1. caller_agent_id からレジストリを検索（最優先）
     if caller_agent_id:
-        project_root = get_project_root_from_registry(caller_agent_id)
-        if project_root:
-            return project_root
-
-    # 2. working_dir から config.json を探索
-    search_dirs = []
-
-    if working_dir:
-        search_dirs.append(Path(working_dir))
-        # worktree の場合、メインリポジトリを探す
-        main_repo = resolve_main_repo_root(working_dir)
-        if main_repo != working_dir:
-            search_dirs.append(Path(main_repo))
-
-    for base_dir in search_dirs:
-        config_file = base_dir / get_mcp_dir() / "config.json"
-        if config_file.exists():
-            try:
-                with open(config_file, encoding="utf-8") as f:
-                    config = json.load(f)
-                project_root = config.get("project_root")
-                if project_root:
-                    logger.debug(f"config.json から project_root を取得: {project_root}")
-                    return project_root
-            except Exception as e:
-                logger.warning(f"config.json の読み込みに失敗: {e}")
-
+        return get_project_root_from_registry(caller_agent_id)
     return None
 
 
