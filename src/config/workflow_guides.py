@@ -45,7 +45,7 @@ def _load_template(role: str) -> str | None:
     Returns:
         テンプレート内容、ファイルが存在しない場合 None
     """
-    template_path = _get_templates_dir() / f"{role}.md"
+    template_path = _get_templates_dir() / "roles" / f"{role}.md"
     if template_path.exists():
         return template_path.read_text(encoding="utf-8")
     return None
@@ -62,7 +62,7 @@ ROLE_DESCRIPTIONS = {
 def get_role_guide(role: str) -> RoleGuide | None:
     """ロールガイドを名前で取得する。
 
-    templates/{role}.md からテンプレートを読み込む。
+    templates/roles/{role}.md からテンプレートを読み込む。
 
     Args:
         role: ロール名（owner, admin, worker）
@@ -86,13 +86,13 @@ def get_role_guide(role: str) -> RoleGuide | None:
 def list_role_guides() -> list[str]:
     """利用可能なロールガイド名の一覧を取得する。
 
-    templates/ ディレクトリ内の .md ファイルを検索する。
+    templates/roles/ ディレクトリ内の .md ファイルを検索する。
 
     Returns:
         ロール名のリスト
     """
-    templates_dir = _get_templates_dir()
-    if not templates_dir.exists():
+    roles_dir = _get_templates_dir() / "roles"
+    if not roles_dir.exists():
         return []
 
-    return [f.stem for f in templates_dir.glob("*.md")]
+    return [f.stem for f in roles_dir.glob("*.md")]
