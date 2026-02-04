@@ -470,37 +470,130 @@ create_task(title="game.js の updateGameStatus 未定義エラーを修正", ..
 send_task(agent_id=worker_id, task_content="...", session_id="tetris-2player-battle")
 ```
 
-#### 6. 集約と報告（必須）
+#### 6. 集約と統合（必須）
 
-**⚠️ 品質チェックをパスしたら、必ず Owner に完了報告を送信してください。**
+**⚠️ 全 Worker の作業完了後、以下の手順で統合してください。**
 
-1. Workers から完了報告を収集
-2. 変更をレビュー・統合
-3. **`send_message` で Owner に完了報告**（必須）
+##### 6.1 Worker の完了を確認
 
 ```python
-# 完了報告の例
+# 各 Worker の完了報告を確認
+read_messages(agent_id=admin_id, unread_only=True)
+
+# Worker の出力を確認（report_task_completion が失敗した場合のフォールバック）
+for worker_id in worker_ids:
+    get_output(agent_id=worker_id, lines=50)
+```
+
+##### 6.2 Worker のブランチをベースブランチにマージ
+
+各 Worker がコミット・プッシュした変更をベースブランチにマージします。
+
+```bash
+# ベースブランチに移動
+cd {repo_path}
+git checkout {base_branch}
+git pull origin {base_branch}
+
+# 各 Worker のブランチをマージ
+git merge origin/{worker_branch_1} --no-edit
+git merge origin/{worker_branch_2} --no-edit
+# ... 全 Worker ブランチをマージ
+
+# マージ結果をプッシュ
+git push origin {base_branch}
+```
+
+**コンフリクトが発生した場合**: Worker に修正タスクを投げるか、Owner に報告してください。
+
+##### 6.3 テスト・品質チェック用 Worker を作成
+
+**⚠️ 統合後、必ずテストを実行してから Owner に報告してください。**
+
+```python
+# テスト用 worktree 作成（ベースブランチから）
+create_worktree(
+    repo_path=repo_path,
+    worktree_path=f"{worktree_base}/test-runner",
+    branch=f"{base_branch}-test",
+    base_branch=base_branch
+)
+
+# テスト用 Worker 作成
+test_worker = create_agent(role="worker", working_dir=f"{worktree_base}/test-runner")
+
+# テストタスクを投げる
+send_task(
+    agent_id=test_worker["agent"]["id"],
+    task_content="""
+    # 品質チェック・テスト実行
+
+    ## 実行するタスク
+    1. アプリの起動確認（ブラウザで動作確認）
+    2. 基本機能の動作テスト
+    3. エラーがないか確認
+    4. UI が正しく表示されるか確認
+
+    ## 報告内容
+    - 動作確認結果（OK / NG）
+    - 発見した問題点（あれば）
+    - スクリーンショット（UI の場合）
+    """,
+    session_id=session_id
+)
+```
+
+##### 6.4 テスト結果に応じた対応
+
+| テスト結果 | 対応 |
+|------------|------|
+| ✅ 全てパス | 6.5 に進む |
+| ❌ 問題あり | 修正タスクを Worker に投げる → 再テスト |
+
+##### 6.5 クリーンアップと Owner 報告
+
+**⚠️ テストがパスしたら、クリーンアップしてから Owner に報告してください。**
+
+```python
+# 1. 全 Worker を終了
+for worker_id in worker_ids:
+    terminate_agent(agent_id=worker_id)
+
+# 2. Worktree を削除
+for worktree in worktrees:
+    remove_worktree(repo_path=repo_path, worktree_path=worktree)
+
+# 3. Owner に完了報告（最後に必ず送信）
 send_message(
-    to_agent_id=owner_id,
+    sender_id=admin_id,
+    receiver_id=owner_id,
     message_type="task_complete",
     content="""
-    ## 完了報告
+    ## ✅ タスク完了報告
 
     ### 完了したタスク
-    - タスク A: ✅ 完了
-    - タスク B: ✅ 完了
+    - 全 {n} タスクが完了
 
     ### 品質チェック結果
     - アプリ起動: ✅
     - 動作確認: ✅
+    - テスト: ✅
+
+    ### 統合状況
+    - 全ての変更が {base_branch} にマージ済み
+    - Worktree クリーンアップ完了
 
     ### 次のステップ
     Owner による最終確認をお願いします。
-    """
+    """,
+    priority="high"
 )
 ```
 
-**注意**: 完了報告を送信しないと、Owner がタスク完了を認識できず、クリーンアップが実行されません。
+**重要**:
+- テストを実行せずに完了報告を送信しないでください
+- クリーンアップせずに完了報告を送信しないでください
+- 完了報告を送信しないと Owner がクリーンアップを実行できません
 
 ### Worktree セットアップパターン
 

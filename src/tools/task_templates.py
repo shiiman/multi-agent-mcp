@@ -118,5 +118,6 @@ def generate_7section_task(
         memory_context=memory_context_display,
         project_name=project_name,
         work_env_section=work_env_section,
+        branch_name=branch_name if branch_name else "HEAD",
         timestamp=timestamp,
     )
