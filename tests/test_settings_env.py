@@ -56,10 +56,12 @@ class TestGenerateEnvTemplate:
         template = generate_env_template()
         assert "MCP_MODEL_PROFILE_ACTIVE" in template
         assert "MCP_MODEL_PROFILE_STANDARD_CLI" in template
-        assert "MCP_MODEL_PROFILE_STANDARD_MODEL" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL" in template
         assert "MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS" in template
         assert "MCP_MODEL_PROFILE_PERFORMANCE_CLI" in template
-        assert "MCP_MODEL_PROFILE_PERFORMANCE_MODEL" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL" in template
         assert "MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS" in template
 
     def test_template_contains_thinking_tokens(self):

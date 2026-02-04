@@ -3,8 +3,8 @@
 プロジェクトレベル / グローバルレベルの永続的な学習・知識を管理する。
 
 保存先:
-- Layer 2 (グローバル): ~/.multi-agent-mcp/memory/memory.json
-- Layer 3 (プロジェクト): {project_root}/.multi-agent-mcp/memory/memory.json
+- Layer 2 (グローバル): ~/{mcp_dir}/memory/memory.json
+- Layer 3 (プロジェクト): {project_root}/{mcp_dir}/memory/memory.json
 
 アーカイブ:
 - prune 時に削除ではなくアーカイブファイルに移動
@@ -19,11 +19,24 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from src.config.settings import Settings
+
 logger = logging.getLogger(__name__)
 
-# デフォルト設定
-DEFAULT_MAX_ENTRIES = 1000
-DEFAULT_TTL_DAYS = 90
+
+def _get_mcp_dir() -> str:
+    """Settings から MCP ディレクトリ名を取得する。"""
+    return Settings().mcp_dir
+
+
+def _get_default_max_entries() -> int:
+    """Settings からデフォルトの最大エントリ数を取得する。"""
+    return Settings().memory_max_entries
+
+
+def _get_default_ttl_days() -> int:
+    """Settings からデフォルトの TTL（日数）を取得する。"""
+    return Settings().memory_ttl_days
 
 
 @dataclass
@@ -59,21 +72,21 @@ class MemoryManager:
     def __init__(
         self,
         storage_path: str | Path | None = None,
-        max_entries: int = DEFAULT_MAX_ENTRIES,
-        ttl_days: int = DEFAULT_TTL_DAYS,
+        max_entries: int | None = None,
+        ttl_days: int | None = None,
         auto_prune: bool = True,
     ) -> None:
         """MemoryManagerを初期化する。
 
         Args:
             storage_path: メモリストレージのパス（オプション）
-            max_entries: 最大エントリ数（デフォルト: 1000）
-            ttl_days: エントリの有効期限（日数、デフォルト: 90）
+            max_entries: 最大エントリ数（デフォルト: Settings から取得）
+            ttl_days: エントリの有効期限（日数、デフォルト: Settings から取得）
             auto_prune: 保存時に自動でクリーンアップするか（デフォルト: True）
         """
         self.storage_path = Path(storage_path) if storage_path else None
-        self.max_entries = max_entries
-        self.ttl_days = ttl_days
+        self.max_entries = max_entries if max_entries is not None else _get_default_max_entries()
+        self.ttl_days = ttl_days if ttl_days is not None else _get_default_ttl_days()
         self.auto_prune = auto_prune
         self.entries: dict[str, MemoryEntry] = {}
 
@@ -91,41 +104,41 @@ class MemoryManager:
     def from_project_root(
         cls,
         project_root: str | Path,
-        max_entries: int = DEFAULT_MAX_ENTRIES,
-        ttl_days: int = DEFAULT_TTL_DAYS,
+        max_entries: int | None = None,
+        ttl_days: int | None = None,
     ) -> "MemoryManager":
         """プロジェクトルートからMemoryManagerを作成する (Layer 3)。
 
         Args:
             project_root: プロジェクトのルートディレクトリ
-            max_entries: 最大エントリ数
-            ttl_days: エントリの有効期限（日数）
+            max_entries: 最大エントリ数（デフォルト: Settings から取得）
+            ttl_days: エントリの有効期限（日数、デフォルト: Settings から取得）
 
         Returns:
             MemoryManager インスタンス
         """
-        storage_path = Path(project_root) / ".multi-agent-mcp" / "memory" / "memory.json"
+        storage_path = Path(project_root) / _get_mcp_dir() / "memory" / "memory.json"
         return cls(storage_path, max_entries=max_entries, ttl_days=ttl_days)
 
     @classmethod
     def from_global(
         cls,
-        max_entries: int = DEFAULT_MAX_ENTRIES,
-        ttl_days: int = DEFAULT_TTL_DAYS,
+        max_entries: int | None = None,
+        ttl_days: int | None = None,
     ) -> "MemoryManager":
         """グローバルMemoryManagerを作成する (Layer 2)。
 
-        保存先: ~/.multi-agent-mcp/memory/memory.json
+        保存先: ~/{mcp_dir}/memory/memory.json
 
         Args:
-            max_entries: 最大エントリ数
-            ttl_days: エントリの有効期限（日数）
+            max_entries: 最大エントリ数（デフォルト: Settings から取得）
+            ttl_days: エントリの有効期限（日数、デフォルト: Settings から取得）
 
         Returns:
             MemoryManager インスタンス
         """
         home_dir = Path(os.path.expanduser("~"))
-        storage_path = home_dir / ".multi-agent-mcp" / "memory" / "memory.json"
+        storage_path = home_dir / _get_mcp_dir() / "memory" / "memory.json"
         return cls(storage_path, max_entries=max_entries, ttl_days=ttl_days)
 
     def _load_from_file(self) -> None:

@@ -67,6 +67,17 @@ class ModelProfile(str, Enum):
     """高性能プロファイル - 性能重視、Opus"""
 
 
+# モデル定数（重複を避けるため一元管理）
+class ModelDefaults:
+    """デフォルトモデル名の定数。"""
+
+    OPUS = "claude-opus-4-20250514"
+    """Claude Opus 4 モデル"""
+
+    SONNET = "claude-sonnet-4-20250514"
+    """Claude Sonnet 4 モデル"""
+
+
 # AI CLI のデフォルトコマンドマッピング
 DEFAULT_AI_CLI_COMMANDS: dict[str, str] = {
     AICli.CLAUDE: "claude",
@@ -94,6 +105,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # MCP ディレクトリ設定
+    mcp_dir: str = ".multi-agent-mcp"
+    """MCP 設定ディレクトリ名（デフォルト: .multi-agent-mcp）"""
+
     # エージェント設定
     max_workers: int = 6
     """Workerエージェントの最大数（デフォルト: メインウィンドウに収まる6）"""
@@ -101,6 +116,12 @@ class Settings(BaseSettings):
     # tmux設定
     tmux_prefix: str = "multi-agent-mcp"
     """tmuxセッション名のプレフィックス"""
+
+    window_name_main: str = "main"
+    """メインウィンドウ名（Admin + Worker 1-6）"""
+
+    window_name_worker_prefix: str = "workers-"
+    """追加 Worker ウィンドウ名のプレフィックス（workers-2, workers-3, ...）"""
 
     # tmux グリッド設定（メインウィンドウ: 左右50:50分離）
     main_worker_rows: int = 2
@@ -162,11 +183,11 @@ class Settings(BaseSettings):
         description="standard プロファイルで使用する AI CLI",
     )
     model_profile_standard_admin_model: str = Field(
-        default="claude-opus-4-20250514",
+        default=ModelDefaults.OPUS,
         description="standard プロファイルで Admin が使用するモデル",
     )
     model_profile_standard_worker_model: str = Field(
-        default="claude-sonnet-4-20250514",
+        default=ModelDefaults.SONNET,
         description="standard プロファイルで Worker が使用するモデル",
     )
     model_profile_standard_max_workers: int = Field(
@@ -184,11 +205,11 @@ class Settings(BaseSettings):
         description="performance プロファイルで使用する AI CLI",
     )
     model_profile_performance_admin_model: str = Field(
-        default="claude-opus-4-20250514",
+        default=ModelDefaults.OPUS,
         description="performance プロファイルで Admin が使用するモデル",
     )
     model_profile_performance_worker_model: str = Field(
-        default="claude-opus-4-20250514",
+        default=ModelDefaults.OPUS,
         description="performance プロファイルで Worker が使用するモデル",
     )
     model_profile_performance_max_workers: int = Field(
@@ -219,3 +240,16 @@ class Settings(BaseSettings):
         description="同一問題の繰り返し上限（超えたら Owner に相談）",
     )
     """同一問題の繰り返し上限（デフォルト: 3）"""
+
+    # メモリ設定
+    memory_max_entries: int = Field(
+        default=1000,
+        description="メモリの最大エントリ数",
+    )
+    """メモリの最大エントリ数（デフォルト: 1000）"""
+
+    memory_ttl_days: int = Field(
+        default=90,
+        description="メモリエントリの保持期間（日）",
+    )
+    """メモリエントリの保持期間（デフォルト: 90日）"""

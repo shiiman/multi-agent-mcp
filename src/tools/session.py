@@ -7,6 +7,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from src.config.settings import Settings
 from src.context import AppContext
 from src.managers.tmux_manager import get_project_name
 from src.tools.helpers import get_gtrconfig_manager, get_worktree_manager
@@ -92,18 +93,24 @@ MCP_SCREENSHOT_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp
 '''
 
 
-def _setup_mcp_directories(working_dir: str) -> dict[str, Any]:
+def _setup_mcp_directories(
+    working_dir: str, settings: Settings | None = None
+) -> dict[str, Any]:
     """MCP ディレクトリと .env ファイルをセットアップする。
 
     Args:
         working_dir: 作業ディレクトリのパス
+        settings: MCP 設定（省略時は新規作成）
 
     Returns:
         セットアップ結果（created_dirs, env_created, env_path, config_created）
     """
     import json
 
-    mcp_dir = Path(working_dir) / ".multi-agent-mcp"
+    if settings is None:
+        settings = Settings()
+
+    mcp_dir = Path(working_dir) / settings.mcp_dir
     created_dirs = []
 
     # memory ディレクトリ作成
@@ -126,25 +133,36 @@ def _setup_mcp_directories(working_dir: str) -> dict[str, Any]:
         env_created = True
         logger.info(f".env テンプレートを作成しました: {env_file}")
 
-    # config.json 作成（project_root を保存、MCP インスタンス間で共有）
+    # config.json 作成（project_root, mcp_tool_prefix を保存、MCP インスタンス間で共有）
     config_file = mcp_dir / "config.json"
     config_created = False
-    config_data = {"project_root": working_dir}
+    # MCP ツールの完全名プレフィックス（Claude Code が MCP ツールを呼び出す際に使用）
+    mcp_tool_prefix = "mcp__multi-agent-mcp__"
+    config_data = {
+        "project_root": working_dir,
+        "mcp_tool_prefix": mcp_tool_prefix,
+    }
     if not config_file.exists():
         with open(config_file, "w", encoding="utf-8") as f:
             json.dump(config_data, f, ensure_ascii=False, indent=2)
         config_created = True
         logger.info(f"config.json を作成しました: {config_file}")
     else:
-        # 既存の config.json を更新（project_root が変わっている場合）
+        # 既存の config.json を更新（project_root, mcp_tool_prefix が変わっている場合）
         try:
             with open(config_file, encoding="utf-8") as f:
                 existing = json.load(f)
+            updated = False
             if existing.get("project_root") != working_dir:
                 existing["project_root"] = working_dir
+                updated = True
+            if existing.get("mcp_tool_prefix") != mcp_tool_prefix:
+                existing["mcp_tool_prefix"] = mcp_tool_prefix
+                updated = True
+            if updated:
                 with open(config_file, "w", encoding="utf-8") as f:
                     json.dump(existing, f, ensure_ascii=False, indent=2)
-                logger.info(f"config.json の project_root を更新しました: {working_dir}")
+                logger.info(f"config.json を更新しました: {config_file}")
         except Exception as e:
             logger.warning(f"config.json の読み込みに失敗: {e}")
 
@@ -366,6 +384,7 @@ def register_tools(mcp: FastMCP) -> None:
         working_dir: str,
         open_terminal: bool = True,
         auto_setup_gtr: bool = True,
+        session_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """ターミナルを開いてtmuxワークスペース（グリッドレイアウト）を構築する。
@@ -387,12 +406,17 @@ def register_tools(mcp: FastMCP) -> None:
             open_terminal: Trueでターミナルを開いて表示（デフォルト）、
                            Falseでバックグラウンド作成
             auto_setup_gtr: gtr利用可能時に自動でgtrconfig設定（デフォルト: True）
+            session_id: セッションID（省略時は None、指定時はディレクトリ構造に使用）
 
         Returns:
             初期化結果（success, session_name, gtr_status, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
         tmux = app_ctx.tmux
+
+        # session_id を設定（後続の create_agent 等で使用）
+        if session_id:
+            app_ctx.session_id = session_id
 
         # gtr 自動確認・設定
         gtr_status = {
@@ -472,6 +496,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "session_name": session_name,
+                    "session_id": session_id,
                     "gtr_status": gtr_status,
                     "message": message,
                 }
@@ -488,6 +513,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "session_name": session_name,
+                    "session_id": session_id,
                     "gtr_status": gtr_status,
                     "message": "メインセッションをバックグラウンドで作成しました",
                 }

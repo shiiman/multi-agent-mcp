@@ -9,9 +9,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.config.settings import Settings
 from src.context import AppContext
 
 logger = logging.getLogger(__name__)
+
+# Settings から MCP ディレクトリ名を取得するヘルパー
+def _get_mcp_dir() -> str:
+    """Settings から MCP ディレクトリ名を取得する。"""
+    return Settings().mcp_dir
 from src.managers.cost_manager import CostManager
 from src.managers.dashboard_manager import DashboardManager
 from src.managers.gtrconfig_manager import GtrconfigManager
@@ -204,10 +210,10 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
         # session_id がある場合はタスクディレクトリ配下に配置
         if app_ctx.session_id:
             ipc_dir = os.path.join(
-                base_dir, ".multi-agent-mcp", app_ctx.session_id, ".ipc"
+                base_dir, _get_mcp_dir(), app_ctx.session_id, ".ipc"
             )
         else:
-            ipc_dir = os.path.join(base_dir, ".multi-agent-mcp", ".ipc")
+            ipc_dir = os.path.join(base_dir, _get_mcp_dir(), ".ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager
@@ -244,10 +250,10 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
         # session_id がある場合はタスクディレクトリ配下に配置
         if app_ctx.session_id:
             dashboard_dir = os.path.join(
-                base_dir, ".multi-agent-mcp", app_ctx.session_id, ".dashboard"
+                base_dir, _get_mcp_dir(), app_ctx.session_id, ".dashboard"
             )
         else:
-            dashboard_dir = os.path.join(base_dir, ".multi-agent-mcp", ".dashboard")
+            dashboard_dir = os.path.join(base_dir, _get_mcp_dir(), ".dashboard")
         app_ctx.dashboard_manager = DashboardManager(
             workspace_id=app_ctx.workspace_id,
             workspace_path=base_dir,
@@ -293,7 +299,7 @@ def ensure_metrics_manager(app_ctx: AppContext) -> MetricsManager:
                 "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
             )
 
-        metrics_dir = os.path.join(base_dir, ".multi-agent-mcp", ".metrics")
+        metrics_dir = os.path.join(base_dir, _get_mcp_dir(), ".metrics")
         app_ctx.metrics_manager = MetricsManager(metrics_dir)
     return app_ctx.metrics_manager
 
@@ -361,8 +367,8 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
             app_ctx.project_root = project_root
             logger.info(f"project_root を自動設定: {project_root}")
 
-        # .multi-agent-mcp/memory/memory.json に保存
-        memory_path = os.path.join(project_root, ".multi-agent-mcp", "memory", "memory.json")
+        # {project_dir}/memory/memory.json に保存
+        memory_path = os.path.join(project_root, _get_mcp_dir(), "memory", "memory.json")
         app_ctx.memory_manager = MemoryManager(storage_path=memory_path)
     return app_ctx.memory_manager
 
@@ -409,7 +415,7 @@ def get_project_root_from_config(working_dir: str | None = None) -> str | None:
     search_dirs.append(cwd)
 
     for base_dir in search_dirs:
-        config_file = base_dir / ".multi-agent-mcp" / "config.json"
+        config_file = base_dir / _get_mcp_dir() / "config.json"
         if config_file.exists():
             try:
                 with open(config_file, encoding="utf-8") as f:
@@ -422,6 +428,48 @@ def get_project_root_from_config(working_dir: str | None = None) -> str | None:
                 logger.warning(f"config.json の読み込みに失敗: {e}")
 
     return None
+
+
+def get_mcp_tool_prefix_from_config(working_dir: str | None = None) -> str:
+    """config.json から mcp_tool_prefix を取得する。
+
+    init_tmux_workspace で作成された config.json を読み取る。
+    見つからない場合はデフォルト値を返す。
+
+    Args:
+        working_dir: 探索開始ディレクトリ（オプション）
+
+    Returns:
+        MCP ツールの完全名プレフィックス
+    """
+    default_prefix = "mcp__multi-agent-mcp__"
+    search_dirs = []
+
+    if working_dir:
+        search_dirs.append(Path(working_dir))
+        # worktree の場合、メインリポジトリを探す
+        main_repo = resolve_main_repo_root(working_dir)
+        if main_repo != working_dir:
+            search_dirs.append(Path(main_repo))
+
+    # カレントディレクトリからも探索
+    cwd = Path.cwd()
+    search_dirs.append(cwd)
+
+    for base_dir in search_dirs:
+        config_file = base_dir / _get_mcp_dir() / "config.json"
+        if config_file.exists():
+            try:
+                with open(config_file, encoding="utf-8") as f:
+                    config = json.load(f)
+                prefix = config.get("mcp_tool_prefix")
+                if prefix:
+                    logger.debug(f"config.json から mcp_tool_prefix を取得: {prefix}")
+                    return prefix
+            except Exception as e:
+                logger.warning(f"config.json の読み込みに失敗: {e}")
+
+    return default_prefix
 
 
 # ========== エージェント永続化ヘルパー ==========
@@ -443,8 +491,8 @@ def _get_agents_file_path(
         return None
     # session_id がある場合はタスクディレクトリ配下に配置
     if session_id:
-        return Path(project_root) / ".multi-agent-mcp" / session_id / "agents.json"
-    return Path(project_root) / ".multi-agent-mcp" / "agents.json"
+        return Path(project_root) / _get_mcp_dir() / session_id / "agents.json"
+    return Path(project_root) / _get_mcp_dir() / "agents.json"
 
 
 def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:

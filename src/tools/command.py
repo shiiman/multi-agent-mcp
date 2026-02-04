@@ -13,6 +13,7 @@ from src.tools.helpers import (
     ensure_global_memory_manager,
     ensure_memory_manager,
     ensure_persona_manager,
+    get_mcp_tool_prefix_from_config,
     resolve_main_repo_root,
     sync_agents_from_file,
 )
@@ -28,6 +29,7 @@ def generate_admin_task(
     worker_count: int,
     memory_context: str,
     project_name: str,
+    mcp_tool_prefix: str = "mcp__multi-agent-mcp__",
     settings: Settings | None = None,
 ) -> str:
     """Admin エージェント用のタスク指示を生成する。
@@ -40,6 +42,7 @@ def generate_admin_task(
         worker_count: Worker 数
         memory_context: メモリから取得した関連情報
         project_name: プロジェクト名
+        mcp_tool_prefix: MCP ツールの完全名プレフィックス
         settings: MCP 設定（省略時は新規作成）
 
     Returns:
@@ -59,6 +62,50 @@ def generate_admin_task(
 あなたは **Admin エージェント** です。
 以下の計画書に基づいてタスクを分割し、Worker を管理してください。
 
+## 🚨 最重要ルール（絶対厳守）
+
+**Admin は絶対にコードを書いてはいけません。**
+
+- ❌ ファイルの作成・編集・削除（Write, Edit ツール使用禁止）
+- ❌ コードの実装・修正
+- ✅ MCP ツールのみ使用（create_task, create_worktree, create_agent, send_task 等）
+- ✅ Worker にタスクを割り当てて実装させる
+
+**違反した場合は F001 違反となり、タスクは失敗とみなされます。**
+
+## ⚠️ MCP ツールの呼び出し方法
+
+**MCP ツールは以下の完全名で呼び出してください:**
+
+```
+{mcp_tool_prefix}{{ツール名}}
+```
+
+**主要ツール一覧:**
+
+| 短縮名 | 完全名 |
+|--------|--------|
+| `create_task` | `{mcp_tool_prefix}create_task` |
+| `create_agent` | `{mcp_tool_prefix}create_agent` |
+| `create_worktree` | `{mcp_tool_prefix}create_worktree` |
+| `assign_worktree` | `{mcp_tool_prefix}assign_worktree` |
+| `assign_task_to_agent` | `{mcp_tool_prefix}assign_task_to_agent` |
+| `send_task` | `{mcp_tool_prefix}send_task` |
+| `send_message` | `{mcp_tool_prefix}send_message` |
+| `get_dashboard` | `{mcp_tool_prefix}get_dashboard` |
+| `get_dashboard_summary` | `{mcp_tool_prefix}get_dashboard_summary` |
+| `list_tasks` | `{mcp_tool_prefix}list_tasks` |
+| `list_agents` | `{mcp_tool_prefix}list_agents` |
+| `read_messages` | `{mcp_tool_prefix}read_messages` |
+| `healthcheck_all` | `{mcp_tool_prefix}healthcheck_all` |
+
+**呼び出し例:**
+```
+{mcp_tool_prefix}create_task(title="タスク名", description="説明")
+{mcp_tool_prefix}create_agent(role="worker", working_dir="/path/to/worktree")
+{mcp_tool_prefix}send_task(agent_id="xxx", task_content="内容", session_id="{session_id}")
+```
+
 ## 計画書
 
 {plan_content}
@@ -72,12 +119,14 @@ def generate_admin_task(
 
 ## 実行手順
 
+**⚠️ 実行前の確認**: Admin は MCP ツールのみ使用し、コードは一切書きません。実装は全て Worker に委譲します。
+
 ### 1. スクリーンショット確認（UI タスクの場合）
 - `list_screenshots` でスクリーンショットの有無を確認
 - UI 関連タスクの場合は `read_latest_screenshot` で視覚的問題を分析
 - 分析結果をタスク分割に反映
 
-### 2. タスク分割
+### 2. タスク分割（MCP ツールで登録のみ）
 - 計画書から並列実行可能なサブタスクを抽出
 - 各サブタスクを Dashboard に登録（`create_task`）
 
@@ -458,6 +507,8 @@ def register_tools(mcp: FastMCP) -> None:
             if is_admin:
                 # Admin 用: 計画書 + Worker管理手順
                 actual_branch = branch_name or f"feature/{session_id}"
+                # config.json から MCP ツールプレフィックスを取得
+                mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
                 final_task_content = generate_admin_task(
                     session_id=session_id,
                     agent_id=agent_id,
@@ -466,6 +517,7 @@ def register_tools(mcp: FastMCP) -> None:
                     worker_count=effective_worker_count,
                     memory_context=memory_context,
                     project_name=project_name,
+                    mcp_tool_prefix=mcp_prefix,
                 )
             else:
                 # Worker 用: 7セクション構造 + ペルソナ + 作業環境情報

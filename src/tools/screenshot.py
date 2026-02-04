@@ -6,7 +6,13 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from src.config.settings import Settings
 from src.context import AppContext
+
+
+def _get_mcp_dir() -> str:
+    """Settings から MCP ディレクトリ名を取得する。"""
+    return Settings().mcp_dir
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -27,7 +33,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": "project_root が設定されていません",
             }
 
-        screenshot_dir = Path(app_ctx.project_root) / ".multi-agent-mcp" / "screenshot"
+        screenshot_dir = Path(app_ctx.project_root) / _get_mcp_dir() / "screenshot"
 
         return {
             "success": True,
@@ -57,7 +63,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": "project_root が設定されていません",
             }
 
-        screenshot_dir = Path(app_ctx.project_root) / ".multi-agent-mcp" / "screenshot"
+        screenshot_dir = Path(app_ctx.project_root) / _get_mcp_dir() / "screenshot"
         if not screenshot_dir.exists():
             return {
                 "success": False,
@@ -112,7 +118,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": "project_root が設定されていません",
             }
 
-        screenshot_dir = Path(app_ctx.project_root) / ".multi-agent-mcp" / "screenshot"
+        screenshot_dir = Path(app_ctx.project_root) / _get_mcp_dir() / "screenshot"
         file_path = screenshot_dir / filename
 
         if not file_path.exists():
@@ -161,7 +167,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": "project_root が設定されていません",
             }
 
-        screenshot_dir = Path(app_ctx.project_root) / ".multi-agent-mcp" / "screenshot"
+        screenshot_dir = Path(app_ctx.project_root) / _get_mcp_dir() / "screenshot"
         if not screenshot_dir.exists():
             return {
                 "success": False,

@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 # セッション名定数（単一セッション方式）
 # 注意: MAIN_SESSION は後方互換性のために残していますが、
 # 実際のセッション名はプロジェクト名を含む動的な名前になります
-MAIN_SESSION = "main"
+# デフォルト値は Settings.window_name_main で設定可能
+MAIN_SESSION = "main"  # デフォルト値、Settings.window_name_main で上書き可能
 
 
 def get_project_name(working_dir: str) -> str:
@@ -122,11 +123,11 @@ class TmuxManager:
             window_index: ウィンドウインデックス（0 = メイン、1+ = 追加）
 
         Returns:
-            ウィンドウ名（"main" または "workers-N"）
+            ウィンドウ名（settings.window_name_main または settings.window_name_worker_prefix + N）
         """
         if window_index == 0:
-            return "main"
-        return f"workers-{window_index}"
+            return self.settings.window_name_main
+        return f"{self.settings.window_name_worker_prefix}{window_index}"
 
     async def create_session(self, name: str, working_dir: str) -> bool:
         """新しいtmuxセッションを作成する。
@@ -383,9 +384,9 @@ class TmuxManager:
             logger.info(f"メインセッション {session_name} は既に存在します")
             return True
 
-        # 1. セッション作成（ウィンドウ名: main）
+        # 1. セッション作成（ウィンドウ名: settings.window_name_main）
         code, _, stderr = await self._run(
-            "new-session", "-d", "-s", session_name, "-c", working_dir, "-n", "main"
+            "new-session", "-d", "-s", session_name, "-c", working_dir, "-n", self.settings.window_name_main
         )
         if code != 0:
             logger.error(f"メインセッション作成エラー: {stderr}")
@@ -606,11 +607,9 @@ class TmuxManager:
                 return MAIN_SESSION, 0, pane_index
             else:
                 # Worker 7以降は追加ウィンドウ
-                # 追加ウィンドウは12ペイン/ウィンドウ
+                # 追加ウィンドウは settings.workers_per_extra_window ペイン/ウィンドウ
                 extra_worker_index = worker_index - 6
-                workers_per_extra = 12  # デフォルト
-                if settings:
-                    workers_per_extra = settings.workers_per_extra_window
+                workers_per_extra = self.settings.workers_per_extra_window
 
                 window_index = 1 + (extra_worker_index // workers_per_extra)
                 pane_index = extra_worker_index % workers_per_extra
