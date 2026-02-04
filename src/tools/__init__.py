@@ -4,7 +4,6 @@ from mcp.server.fastmcp import FastMCP
 
 from src.tools import (
     agent,
-    ai_cli,
     command,
     cost,
     dashboard,
@@ -46,9 +45,6 @@ def register_all_tools(mcp: FastMCP) -> None:
 
     # ダッシュボード/タスク管理
     dashboard.register_tools(mcp)
-
-    # AI CLI
-    ai_cli.register_tools(mcp)
 
     # Gtrconfig
     gtrconfig.register_tools(mcp)

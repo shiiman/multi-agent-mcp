@@ -134,7 +134,7 @@ claude mcp list
 | `open_session` | エージェントのtmuxセッションをターミナルで開く |
 | `broadcast_command` | 全エージェント（または特定役割）にコマンド送信 |
 
-### Git Worktree管理（8個）
+### Git Worktree管理（7個）
 
 | Tool | 説明 |
 |------|------|
@@ -145,7 +145,6 @@ claude mcp list
 | `get_worktree_status` | worktreeのgitステータスを取得 |
 | `check_gtr_available` | gtr (git-worktree-runner) の利用可否を確認 |
 | `open_worktree_with_ai` | gtr aiでworktreeをAIツールで開く |
-| `open_worktree_with_editor` | gtr editorでworktreeをエディタで開く |
 
 ### IPC/メッセージング（5個）
 
@@ -170,13 +169,6 @@ claude mcp list
 | `remove_task` | タスクを削除 |
 | `get_dashboard` | ダッシュボード全体を取得 |
 | `get_dashboard_summary` | ダッシュボードのサマリーを取得 |
-
-### AI CLI（2個）
-
-| Tool | 説明 |
-|------|------|
-| `get_available_ai_clis` | 利用可能なAI CLI一覧を取得 |
-| `open_worktree_with_ai_cli` | 指定のAI CLIでworktreeを開く |
 
 ### Gtrconfig（3個）
 

@@ -53,16 +53,15 @@ multi-agent-mcp/
 │   │       ├── ghostty.py     # Ghostty terminal support
 │   │       ├── iterm2.py      # iTerm2 terminal support
 │   │       └── terminal_app.py # macOS Terminal.app support
-│   └── tools/                 # MCP tool definitions (88 tools)
+│   └── tools/                 # MCP tool definitions (86 tools)
 │       ├── __init__.py        # register_all_tools()
 │       ├── helpers.py         # Common helper functions
 │       ├── session.py         # Session management (5 tools)
-│       ├── agent.py           # Agent management (4 tools)
+│       ├── agent.py           # Agent management (5 tools)
 │       ├── command.py         # Command execution (5 tools)
-│       ├── worktree.py        # Git worktree (8 tools)
+│       ├── worktree.py        # Git worktree (7 tools)
 │       ├── ipc.py             # IPC/messaging (5 tools)
 │       ├── dashboard.py       # Dashboard/task management (9 tools)
-│       ├── ai_cli.py          # AI CLI (2 tools)
 │       ├── gtrconfig.py       # Gtrconfig (3 tools)
 │       ├── template.py        # Templates (2 tools)
 │       ├── scheduler.py       # Scheduler (3 tools)

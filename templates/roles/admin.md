@@ -517,6 +517,14 @@ open_worktree_with_ai(repo_path, "feature/task-123")
 
 コンパクション（コンテキスト圧縮）後、以下を確認してください：
 
+**まず `get_role_guide` でロール情報を再取得してください：**
+
+```python
+get_role_guide(role="admin")
+```
+
+このテンプレートの内容を再確認し、禁止事項（F001-F005）や RACE-001 を思い出してください。
+
 ### 0. 正データと二次データの区別（重要）
 
 | 種別 | データ | 説明 |

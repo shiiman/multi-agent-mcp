@@ -259,39 +259,3 @@ def register_tools(mcp: FastMCP) -> None:
             "message": message,
         }
 
-    @mcp.tool()
-    async def open_worktree_with_editor(
-        repo_path: str,
-        branch: str,
-        ctx: Context = None,
-    ) -> dict[str, Any]:
-        """gtr editor コマンドでworktreeをエディタで開く。
-
-        gtr がインストールされている場合のみ使用可能。
-
-        Args:
-            repo_path: リポジトリのパス
-            branch: ブランチ名
-
-        Returns:
-            実行結果（success, branch, message または error）
-        """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-        worktree = get_worktree_manager(app_ctx, repo_path)
-
-        if not await worktree.is_git_repo():
-            return {
-                "success": False,
-                "error": f"有効なgitリポジトリではありません: {repo_path}",
-            }
-
-        success, message = await worktree.open_with_editor(branch)
-
-        if success:
-            logger.info(f"エディタでworktreeを開きました: {branch}")
-
-        return {
-            "success": success,
-            "branch": branch if success else None,
-            "message": message,
-        }
