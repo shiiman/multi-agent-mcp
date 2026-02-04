@@ -264,15 +264,28 @@ def register_tools(mcp: FastMCP) -> None:
             f"エージェント {agent_id}（{role}）を作成しました: {log_location}"
         )
 
-        # IPC マネージャーに自動登録
-        ipc = ensure_ipc_manager(app_ctx)
-        ipc.register_agent(agent_id)
-        logger.info(f"エージェント {agent_id} を IPC に登録しました")
+        # IPC マネージャーに自動登録（session_id が必要、Owner は init_tmux_workspace 後に登録）
+        ipc_registered = False
+        metrics_tracking = False
+        if app_ctx.session_id:
+            try:
+                ipc = ensure_ipc_manager(app_ctx)
+                ipc.register_agent(agent_id)
+                ipc_registered = True
+                logger.info(f"エージェント {agent_id} を IPC に登録しました")
 
-        # メトリクス記録開始
-        metrics = ensure_metrics_manager(app_ctx)
-        metrics.record_agent_start(agent_id, agent_role.value)
-        logger.info(f"エージェント {agent_id} のメトリクス記録を開始しました")
+                # メトリクス記録開始
+                metrics = ensure_metrics_manager(app_ctx)
+                metrics.record_agent_start(agent_id, agent_role.value)
+                metrics_tracking = True
+                logger.info(f"エージェント {agent_id} のメトリクス記録を開始しました")
+            except ValueError as e:
+                logger.warning(f"IPC/メトリクス登録をスキップ（session_id 未設定）: {e}")
+        else:
+            logger.info(
+                f"エージェント {agent_id} の IPC/メトリクス登録をスキップしました"
+                "（session_id 未設定、後で init_tmux_workspace で設定）"
+            )
 
         # エージェント情報をファイルに保存（MCP インスタンス間で共有）
         file_saved = save_agent_to_file(app_ctx, agent)
@@ -303,8 +316,8 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "agent": agent.model_dump(mode="json"),
             "message": f"エージェント {agent_id}（{role}）を作成しました",
-            "ipc_registered": True,
-            "metrics_tracking": True,
+            "ipc_registered": ipc_registered,
+            "metrics_tracking": metrics_tracking,
             "file_persisted": file_saved,
         }
         if selected_cli:

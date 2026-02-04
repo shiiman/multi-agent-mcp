@@ -239,6 +239,11 @@ def check_role_permission(
     return None
 
 
+# 初期化フェーズで caller_agent_id なしで呼び出し可能なツール
+# （Owner 作成前に実行する必要があるため）
+BOOTSTRAP_TOOLS = {"init_tmux_workspace", "create_agent"}
+
+
 def check_tool_permission(
     app_ctx: AppContext,
     tool_name: str,
@@ -252,12 +257,17 @@ def check_tool_permission(
     Args:
         app_ctx: アプリケーションコンテキスト
         tool_name: ツール名
-        caller_agent_id: 呼び出し元エージェントID（必須）
+        caller_agent_id: 呼び出し元エージェントID（必須、ただし初期化ツールは例外）
 
     Returns:
         権限エラーの場合はエラー dict、許可されている場合は None
     """
     from src.config.role_permissions import get_allowed_roles, get_role_error_message
+
+    # 初期化ツールは caller_agent_id なしで許可（Owner 作成前に実行）
+    if caller_agent_id is None and tool_name in BOOTSTRAP_TOOLS:
+        logger.info(f"初期化ツール '{tool_name}' を caller_agent_id なしで許可します")
+        return None
 
     # caller_agent_id は必須
     if caller_agent_id is None:
