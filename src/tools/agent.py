@@ -129,6 +129,13 @@ def register_tools(mcp: FastMCP) -> None:
             role_error = check_tool_permission(app_ctx, "create_agent", caller_agent_id)
             if role_error:
                 return role_error
+        else:
+            # Owner 作成時は working_dir から project_root を自動設定
+            # （init_tmux_workspace より前に create_agent(owner) が呼ばれるため）
+            if not app_ctx.project_root and working_dir:
+                from src.tools.helpers import resolve_main_repo_root
+                app_ctx.project_root = resolve_main_repo_root(working_dir)
+                logger.info(f"Owner 作成時に project_root を自動設定: {app_ctx.project_root}")
 
         # 現在のプロファイル設定を取得
         profile_settings = get_current_profile_settings(app_ctx)
@@ -271,6 +278,24 @@ def register_tools(mcp: FastMCP) -> None:
         file_saved = save_agent_to_file(app_ctx, agent)
         if file_saved:
             logger.info(f"エージェント {agent_id} をファイルに保存しました")
+
+        # グローバルレジストリに登録（MCP cwd 問題の解決）
+        from src.tools.helpers import save_agent_to_registry
+
+        if agent_role == AgentRole.OWNER:
+            # Owner は自分自身が owner_id
+            owner_id = agent_id
+        else:
+            # Admin/Worker は既存の Owner を探す
+            owner_agent = next(
+                (a for a in agents.values() if a.role == AgentRole.OWNER),
+                None,
+            )
+            owner_id = owner_agent.id if owner_agent else agent_id
+
+        if app_ctx.project_root:
+            save_agent_to_registry(agent_id, owner_id, app_ctx.project_root)
+            logger.info(f"エージェント {agent_id} をグローバルレジストリに登録しました")
 
         result = {
             "success": True,

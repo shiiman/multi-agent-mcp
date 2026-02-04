@@ -364,6 +364,20 @@ def register_tools(mcp: FastMCP) -> None:
 
         terminated_count = await tmux.cleanup_all_sessions()
         agent_count = len(agents)
+
+        # グローバルレジストリからエージェント情報を削除
+        from src.tools.helpers import remove_agents_by_owner
+        from src.models.agent import AgentRole
+
+        owner_agent = next(
+            (a for a in agents.values() if a.role == AgentRole.OWNER),
+            None,
+        )
+        registry_removed = 0
+        if owner_agent:
+            registry_removed = remove_agents_by_owner(owner_agent.id)
+            logger.info(f"レジストリから {registry_removed} エージェントを削除しました")
+
         agents.clear()
 
         # worktree を削除（git worktree list から取得）
@@ -411,12 +425,14 @@ def register_tools(mcp: FastMCP) -> None:
             "terminated_sessions": terminated_count,
             "cleared_agents": agent_count,
             "removed_worktrees": removed_worktrees,
+            "registry_removed": registry_removed,
             "was_forced": force and not status["is_all_completed"],
             **status,
             "message": (
                 f"クリーンアップ完了: {terminated_count}セッション終了, "
                 f"{agent_count}エージェントクリア, "
-                f"{removed_worktrees}worktree削除（ブランチ含む）"
+                f"{removed_worktrees}worktree削除, "
+                f"{registry_removed}レジストリ削除"
             ),
         }
 

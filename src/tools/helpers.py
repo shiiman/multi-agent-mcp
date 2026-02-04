@@ -91,6 +91,7 @@ def resolve_project_root(
     allow_env_fallback: bool = False,
     allow_agent_fallback: bool = False,
     require_worktree_resolution: bool = True,
+    caller_agent_id: str | None = None,
 ) -> str:
     """project_root を解決する共通ロジック。
 
@@ -102,6 +103,7 @@ def resolve_project_root(
         allow_env_fallback: MCP_PROJECT_ROOT 環境変数からの取得を許可
         allow_agent_fallback: エージェントの working_dir からの取得を許可
         require_worktree_resolution: worktree の場合にメインリポジトリを返す
+        caller_agent_id: 呼び出し元エージェントID（レジストリ検索用）
 
     Returns:
         project_root のパス
@@ -109,18 +111,12 @@ def resolve_project_root(
     Raises:
         ValueError: project_root が解決できない場合
     """
+    # app_ctx.project_root から取得
     project_root = app_ctx.project_root
 
-    # config.json から取得（init_tmux_workspace で設定される）
+    # グローバルレジストリ / config.json から取得
     if not project_root:
-        project_root = get_project_root_from_config()
-
-    # MCP_PROJECT_ROOT 環境変数をチェック（オプション）
-    if not project_root and allow_env_fallback:
-        env_root = os.getenv("MCP_PROJECT_ROOT")
-        if env_root:
-            project_root = env_root
-            logger.info(f"MCP_PROJECT_ROOT 環境変数から取得: {project_root}")
+        project_root = get_project_root_from_config(caller_agent_id=caller_agent_id)
 
     # エージェントの working_dir または worktree_path から取得（オプション）
     if not project_root and allow_agent_fallback:
@@ -146,6 +142,30 @@ def resolve_project_root(
 
 
 # ========== ロールチェック ヘルパー ==========
+
+
+def ensure_project_root_from_caller(
+    app_ctx: AppContext, caller_agent_id: str | None
+) -> None:
+    """caller_agent_id からレジストリを検索し、app_ctx.project_root を設定する。
+
+    各ツールの最初で呼び出すことで、Admin/Worker の MCP インスタンスでも
+    正しい project_root を使用できるようにする。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        caller_agent_id: 呼び出し元エージェントID
+    """
+    if app_ctx.project_root:
+        return  # 既に設定済み
+
+    if caller_agent_id:
+        project_root = get_project_root_from_registry(caller_agent_id)
+        if project_root:
+            app_ctx.project_root = project_root
+            logger.debug(
+                f"caller_agent_id {caller_agent_id} から project_root を設定: {project_root}"
+            )
 
 
 def get_agent_role(app_ctx: AppContext, agent_id: str) -> AgentRole | None:
@@ -233,6 +253,10 @@ def check_tool_permission(
                 "自身のエージェント ID を指定してください。"
             ),
         }
+
+    # caller_agent_id からレジストリを検索し project_root を設定
+    # （Admin/Worker の MCP インスタンスでも正しい project_root を使用可能にする）
+    ensure_project_root_from_caller(app_ctx, caller_agent_id)
 
     # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
     sync_agents_from_file(app_ctx)
@@ -433,19 +457,133 @@ def ensure_global_memory_manager() -> MemoryManager:
 # ========== プロジェクト設定ヘルパー ==========
 
 
-def get_project_root_from_config(working_dir: str | None = None) -> str | None:
-    """config.json から project_root を取得する。
+def _get_global_mcp_dir() -> Path:
+    """グローバルな MCP ディレクトリを取得する。"""
+    return Path.home() / ".multi-agent-mcp"
 
-    init_tmux_workspace で作成された config.json を読み取る。
-    working_dir が指定された場合、そのディレクトリの config.json を探す。
-    指定されない場合、カレントディレクトリから親方向に探索する。
+
+def _get_agent_registry_dir() -> Path:
+    """エージェントレジストリディレクトリを取得する。"""
+    return _get_global_mcp_dir() / "agents"
+
+
+def save_agent_to_registry(
+    agent_id: str, owner_id: str, project_root: str
+) -> None:
+    """エージェント情報をグローバルレジストリに保存する。
 
     Args:
-        working_dir: 探索開始ディレクトリ（オプション）
+        agent_id: エージェントID
+        owner_id: オーナーエージェントID（自分自身の場合は同じID）
+        project_root: プロジェクトルートパス
+    """
+    registry_dir = _get_agent_registry_dir()
+    registry_dir.mkdir(parents=True, exist_ok=True)
+    agent_file = registry_dir / f"{agent_id}.json"
+    data = {
+        "agent_id": agent_id,
+        "owner_id": owner_id,
+        "project_root": project_root,
+    }
+    with open(agent_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    logger.debug(f"エージェントをレジストリに保存: {agent_id} -> {project_root}")
+
+
+def get_project_root_from_registry(agent_id: str) -> str | None:
+    """レジストリからエージェントの project_root を取得する。
+
+    Args:
+        agent_id: エージェントID
 
     Returns:
         project_root のパス、見つからない場合は None
     """
+    agent_file = _get_agent_registry_dir() / f"{agent_id}.json"
+    if not agent_file.exists():
+        return None
+    try:
+        with open(agent_file, encoding="utf-8") as f:
+            data = json.load(f)
+        project_root = data.get("project_root")
+        if project_root:
+            logger.debug(f"レジストリから project_root を取得: {agent_id} -> {project_root}")
+        return project_root
+    except Exception as e:
+        logger.warning(f"レジストリファイルの読み込みに失敗: {agent_file}: {e}")
+        return None
+
+
+def remove_agent_from_registry(agent_id: str) -> bool:
+    """レジストリからエージェント情報を削除する。
+
+    Args:
+        agent_id: エージェントID
+
+    Returns:
+        削除成功時 True
+    """
+    agent_file = _get_agent_registry_dir() / f"{agent_id}.json"
+    if agent_file.exists():
+        agent_file.unlink()
+        logger.debug(f"エージェントをレジストリから削除: {agent_id}")
+        return True
+    return False
+
+
+def remove_agents_by_owner(owner_id: str) -> int:
+    """オーナーに紐づく全エージェントをレジストリから削除する。
+
+    Args:
+        owner_id: オーナーエージェントID
+
+    Returns:
+        削除したエージェント数
+    """
+    registry_dir = _get_agent_registry_dir()
+    if not registry_dir.exists():
+        return 0
+
+    removed_count = 0
+    for agent_file in registry_dir.glob("*.json"):
+        try:
+            with open(agent_file, encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("owner_id") == owner_id:
+                agent_file.unlink()
+                logger.debug(f"エージェントをレジストリから削除: {agent_file.stem}")
+                removed_count += 1
+        except Exception as e:
+            logger.warning(f"レジストリファイルの処理に失敗: {agent_file}: {e}")
+
+    return removed_count
+
+
+def get_project_root_from_config(
+    working_dir: str | None = None,
+    caller_agent_id: str | None = None,
+) -> str | None:
+    """project_root を取得する。
+
+    以下の優先順位で探索:
+    1. caller_agent_id からグローバルレジストリを検索
+    2. working_dir から config.json を探索
+    3. working_dir の worktree 解決先から config.json を探索
+
+    Args:
+        working_dir: 探索開始ディレクトリ（オプション）
+        caller_agent_id: 呼び出し元エージェントID（オプション）
+
+    Returns:
+        project_root のパス、見つからない場合は None
+    """
+    # 1. caller_agent_id からレジストリを検索（最優先）
+    if caller_agent_id:
+        project_root = get_project_root_from_registry(caller_agent_id)
+        if project_root:
+            return project_root
+
+    # 2. working_dir から config.json を探索
     search_dirs = []
 
     if working_dir:
@@ -454,10 +592,6 @@ def get_project_root_from_config(working_dir: str | None = None) -> str | None:
         main_repo = resolve_main_repo_root(working_dir)
         if main_repo != working_dir:
             search_dirs.append(Path(main_repo))
-
-    # カレントディレクトリからも探索
-    cwd = Path.cwd()
-    search_dirs.append(cwd)
 
     for base_dir in search_dirs:
         config_file = base_dir / get_mcp_dir() / "config.json"
@@ -680,12 +814,10 @@ def load_agents_from_file(app_ctx: AppContext) -> dict[str, "Agent"]:
     """
     from src.models.agent import Agent  # 循環インポート回避
 
-    # project_root を決定（config.json → 環境変数 → app_ctx の順）
+    # project_root を決定（app_ctx → config.json の順）
     project_root = app_ctx.project_root
     if not project_root:
         project_root = get_project_root_from_config()
-    if not project_root:
-        project_root = os.getenv("MCP_PROJECT_ROOT")
 
     # worktree の場合はメインリポジトリのパスを使用
     if project_root:
@@ -763,10 +895,6 @@ def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
     # config.json から取得（init_tmux_workspace で設定される）
     if not project_root:
         project_root = get_project_root_from_config()
-
-    # 環境変数から取得
-    if not project_root:
-        project_root = os.getenv("MCP_PROJECT_ROOT")
 
     # worktree の場合はメインリポジトリのパスを使用
     if project_root:
