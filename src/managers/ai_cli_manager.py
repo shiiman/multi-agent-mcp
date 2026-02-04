@@ -42,15 +42,18 @@ class AiCliManager:
             else:
                 logger.debug(f"AI CLI '{cli.value}' は見つかりませんでした")
 
-    def is_available(self, cli: AICli) -> bool:
+    def is_available(self, cli: AICli | str) -> bool:
         """指定のAI CLIが利用可能か確認する。
 
         Args:
-            cli: 確認するAI CLI
+            cli: 確認するAI CLI（文字列も受け付ける）
 
         Returns:
             利用可能な場合True
         """
+        # 文字列が渡された場合は enum に変換
+        if isinstance(cli, str):
+            cli = AICli(cli)
         return self._available_clis.get(cli, False)
 
     def get_available_clis(self) -> list[AICli]:
@@ -61,15 +64,18 @@ class AiCliManager:
         """
         return [cli for cli, available in self._available_clis.items() if available]
 
-    def get_command(self, cli: AICli) -> str:
+    def get_command(self, cli: AICli | str) -> str:
         """AI CLIのコマンドを取得する。
 
         Args:
-            cli: AI CLI
+            cli: AI CLI（文字列も受け付ける）
 
         Returns:
             コマンド文字列
         """
+        # 文字列が渡された場合は enum に変換
+        if isinstance(cli, str):
+            cli = AICli(cli)
         return self._cli_commands.get(cli, cli.value)
 
     def set_command(self, cli: AICli, command: str) -> None:
@@ -100,7 +106,7 @@ class AiCliManager:
 
     def build_stdin_command(
         self,
-        cli: AICli,
+        cli: AICli | str,
         task_file_path: str,
         worktree_path: str | None = None,
         project_root: str | None = None,
@@ -109,7 +115,7 @@ class AiCliManager:
         """AI CLIでstdinからタスクを読み込むコマンドを構築する。
 
         Args:
-            cli: AI CLI
+            cli: AI CLI（文字列も受け付ける）
             task_file_path: タスクファイルのパス
             worktree_path: 作業ディレクトリのパス（オプション）
             project_root: プロジェクトルートパス（MCP_PROJECT_ROOT 環境変数用）
@@ -118,6 +124,9 @@ class AiCliManager:
         Returns:
             実行コマンド文字列
         """
+        # 文字列が渡された場合は enum に変換
+        if isinstance(cli, str):
+            cli = AICli(cli)
         cmd = self.get_command(cli)
 
         # 環境変数設定（プロジェクトルートを MCP に伝える）
@@ -192,7 +201,7 @@ class AiCliManager:
     async def open_worktree(
         self,
         worktree_path: str,
-        cli: AICli | None = None,
+        cli: AICli | str | None = None,
         prompt: str | None = None,
         detach: bool = True,
     ) -> tuple[bool, str]:
@@ -200,13 +209,16 @@ class AiCliManager:
 
         Args:
             worktree_path: worktreeのパス
-            cli: 使用するAI CLI（Noneでデフォルト）
+            cli: 使用するAI CLI（Noneでデフォルト、文字列も受け付ける）
             prompt: 初期プロンプト（オプション）
             detach: バックグラウンドで実行するか
 
         Returns:
             (成功したかどうか, メッセージ) のタプル
         """
+        # 文字列が渡された場合は enum に変換
+        if isinstance(cli, str):
+            cli = AICli(cli)
         cli = cli or self.get_default_cli()
 
         if not self.is_available(cli):
@@ -285,7 +297,7 @@ class AiCliManager:
     async def open_worktree_in_terminal(
         self,
         worktree_path: str,
-        cli: AICli | None = None,
+        cli: AICli | str | None = None,
         prompt: str | None = None,
         terminal: TerminalApp = TerminalApp.AUTO,
     ) -> tuple[bool, str]:
@@ -293,13 +305,16 @@ class AiCliManager:
 
         Args:
             worktree_path: worktreeのパス
-            cli: 使用するAI CLI（Noneでデフォルト）
+            cli: 使用するAI CLI（Noneでデフォルト、文字列も受け付ける）
             prompt: 初期プロンプト（オプション）
             terminal: 使用するターミナルアプリ
 
         Returns:
             (成功したかどうか, メッセージ) のタプル
         """
+        # 文字列が渡された場合は enum に変換
+        if isinstance(cli, str):
+            cli = AICli(cli)
         cli = cli or self.get_default_cli()
 
         if not self.is_available(cli):

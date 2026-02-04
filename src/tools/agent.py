@@ -595,7 +595,14 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         # AI CLI を取得（エージェントに設定されていればそれを使用、なければデフォルト）
-        cli = agent.ai_cli or ai_cli_manager.get_default_cli()
+        # agent.ai_cli は use_enum_values=True により文字列になっている可能性がある
+        agent_cli = agent.ai_cli
+        if agent_cli is not None:
+            if isinstance(agent_cli, str):
+                agent_cli = AICli(agent_cli)
+            cli = agent_cli
+        else:
+            cli = ai_cli_manager.get_default_cli()
 
         # ターミナルで AI CLI を起動
         success, message = await ai_cli_manager.open_worktree_in_terminal(
