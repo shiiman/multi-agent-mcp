@@ -88,15 +88,33 @@ send_message(
 )
 ```
 
-### 監視方法
+### 監視方法（🔴 Worker からの報告を待つ - ポーリングではない）
 
-| 方法 | 説明 |
-|------|------|
-| `get_dashboard()` | 全タスクの状態を一覧で確認 |
-| `read_messages(unread_only=True)` | Worker からの完了報告を受信 |
-| `list_tasks()` | タスク一覧を取得 |
+**⚠️ Admin は Worker の状態をポーリングするのではなく、Worker からの報告を待ち受けてください。**
+
+| 優先度 | 方法 | 説明 |
+|--------|------|------|
+| **主** | `read_messages(unread_only=True)` | 🔴 Worker からの完了報告を受信（これを使う） |
+| 補助 | `get_dashboard()` | フォールバック用（報告が来ない場合のみ） |
+| 補助 | `list_tasks()` | フォールバック用 |
+
+```python
+# 🔴 正しい監視方法: Worker からの報告を待つ
+while True:
+    # Worker からの完了報告を確認（主要な方法）
+    messages = read_messages(agent_id=admin_id, unread_only=True, caller_agent_id=admin_id)
+    completed_workers = [m for m in messages if m["message_type"] == "task_complete"]
+
+    if len(completed_workers) == total_workers:
+        break  # 全 Worker 完了
+
+    # 30秒待機
+    time.sleep(30)
+```
 
 **Worker は `send_message(message_type="task_complete")` で完了を通知するので、それを待ち受けてください。**
+
+**❌ 禁止**: Admin が Worker の worktree を直接確認（ls, git status 等）してポーリングすること
 
 ## Who（誰が担当か）
 
@@ -628,24 +646,29 @@ for worker_id in worker_ids:
     get_output(agent_id=worker_id, lines=50)
 ```
 
-##### 6.2 Worker のブランチをベースブランチにマージ
+##### 6.2 🔴 Worker のブランチをベースブランチにマージ（必須）
 
-各 Worker がコミット・プッシュした変更をベースブランチにマージします。
+**⚠️ 重要: 各 Worker がコミット・プッシュした変更をベースブランチにマージしてください。マージしないと成果物が失われます。**
 
 ```bash
-# ベースブランチに移動
+# 1. ベースブランチに移動
 cd {repo_path}
 git checkout {base_branch}
 git pull origin {base_branch}
 
-# 各 Worker のブランチをマージ
+# 2. 各 Worker のブランチをマージ（必須！）
 git merge origin/{worker_branch_1} --no-edit
 git merge origin/{worker_branch_2} --no-edit
 # ... 全 Worker ブランチをマージ
 
-# マージ結果をプッシュ
+# 3. マージ結果をプッシュ（必須！）
 git push origin {base_branch}
 ```
+
+**マージしないと:**
+- ❌ Worker の成果物がベースブランチに反映されない
+- ❌ Owner が最終結果を確認できない
+- ❌ PR が空になる
 
 **コンフリクトが発生した場合**: Worker に修正タスクを投げるか、Owner に報告してください。
 
@@ -693,23 +716,19 @@ send_task(
 | ✅ 全てパス | 6.5 に進む |
 | ❌ 問題あり | 修正タスクを Worker に投げる → 再テスト |
 
-##### 6.5 クリーンアップと Owner 報告
+##### 6.5 Owner に完了報告（🔴 クリーンアップはしない！）
 
-**⚠️ テストがパスしたら、クリーンアップしてから Owner に報告してください。**
+**⚠️ 重要: Admin はクリーンアップをしません。完了報告のみ送信してください。**
+
+クリーンアップは **Owner がユーザー確認後に実行**します。これにより：
+- ユーザーが問題を発見した場合、環境をそのまま使って修正タスクを継続できる
+- 不要な環境再作成を避けられる
 
 ```python
-# 1. 全 Worker を終了
-for worker_id in worker_ids:
-    terminate_agent(agent_id=worker_id)
-
-# 2. Worktree を削除
-for worktree in worktrees:
-    remove_worktree(repo_path=repo_path, worktree_path=worktree)
-
-# 3. Owner に完了報告（最後に必ず送信）
+# 🔴 Owner に完了報告のみ送信（クリーンアップはしない！）
 send_message(
-    sender_id=admin_id,
-    receiver_id=owner_id,
+    sender_id=admin_id,           # 🔴 必須: 自分の ID
+    receiver_id=owner_id,         # 🔴 必須: Owner の ID
     message_type="task_complete",
     content="""
     ## ✅ タスク完了報告
@@ -724,19 +743,42 @@ send_message(
 
     ### 統合状況
     - 全ての変更が {base_branch} にマージ済み
-    - Worktree クリーンアップ完了
+
+    ### 環境状況
+    - Worker: {n} 名稼働中（idle 状態）
+    - Worktree: {n} 個存在
 
     ### 次のステップ
     Owner による最終確認をお願いします。
+    確認完了後、Owner がクリーンアップを実行してください。
+    問題があれば、Admin に再指示してください（環境はそのまま使用可能）。
     """,
-    priority="high"
+    priority="high",
+    caller_agent_id=admin_id      # 🔴 必須: RBAC 用
 )
 ```
 
+**⚠️ send_message の必須パラメータ:**
+
+| パラメータ | 説明 |
+|-----------|------|
+| `sender_id` | 送信元（自分）の ID |
+| `receiver_id` | 送信先の ID |
+| `caller_agent_id` | RBAC 用（自分の ID） |
+
+**❌ Admin がやらないこと:**
+- `terminate_agent` で Worker を終了
+- `remove_worktree` で worktree を削除
+- `cleanup_on_completion` を呼ぶ
+
+**✅ Owner がやること（ユーザー確認後）:**
+- 問題なし → `cleanup_on_completion` でクリーンアップ
+- 問題あり → Admin に再指示（環境そのまま継続）
+
 **重要**:
 - テストを実行せずに完了報告を送信しないでください
-- クリーンアップせずに完了報告を送信しないでください
-- 完了報告を送信しないと Owner がクリーンアップを実行できません
+- 完了報告を送信しないと Owner が状況を把握できません
+- **sender_id を指定しないとメッセージが届きません**
 
 ### Worktree セットアップパターン
 
