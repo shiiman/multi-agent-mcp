@@ -26,7 +26,9 @@ multi-agent-mcp/
 │   ├── context.py             # AppContext definition
 │   ├── config/
 │   │   ├── settings.py        # Pydantic Settings configuration
-│   │   └── templates.py       # Workspace templates
+│   │   ├── templates.py       # Workspace templates
+│   │   ├── template_loader.py # Template loading with caching
+│   │   └── workflow_guides.py # Role-based workflow guides
 │   ├── models/
 │   │   ├── agent.py           # Agent, AgentRole, AgentStatus
 │   │   ├── dashboard.py       # Dashboard, TaskInfo
@@ -71,7 +73,11 @@ multi-agent-mcp/
 │       ├── memory.py          # Memory management (19 tools)
 │       ├── screenshot.py      # Screenshot management (4 tools)
 │       └── model_profile.py   # Model profile (3 tools)
-├── templates/                 # CLAUDE.md templates for agents
+├── templates/                 # Templates for agents and scripts
+│   ├── roles/                 # Role-based workflow guides (owner, admin, worker)
+│   ├── tasks/                 # Task instruction templates (admin_task, worker_task)
+│   └── scripts/               # Script templates
+│       └── bash/              # Bash scripts (workspace_setup.sh)
 ├── tests/                     # Pytest test files
 ├── pyproject.toml
 └── README.md

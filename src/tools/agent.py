@@ -3,11 +3,13 @@
 import logging
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.config.settings import AICli, Settings
+from src.config.settings import AICli, Settings, TerminalApp
+from src.config.template_loader import get_template_loader
 from src.context import AppContext
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
@@ -378,4 +380,157 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "agent_id": agent_id,
             "message": f"エージェント {agent_id} を終了しました",
+        }
+
+    @mcp.tool()
+    async def initialize_agent(
+        agent_id: str,
+        prompt_type: str = "auto",
+        custom_prompt: str | None = None,
+        terminal: str = "auto",
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """エージェントを初期化し、ロールテンプレートを渡して AI CLI を起動する。
+
+        create_agent で作成されたエージェントに対して、roles/ テンプレートを
+        初期プロンプトとして渡し、ターミナルで AI CLI を起動する。
+
+        Args:
+            agent_id: 初期化するエージェントID
+            prompt_type: プロンプトタイプ
+                - "auto": roles/ テンプレートを自動読み込み（デフォルト）
+                - "custom": custom_prompt をそのまま使用
+                - "file": custom_prompt をファイルパスとして読み込み
+            custom_prompt: カスタムプロンプト（prompt_type が "custom" または "file" の場合）
+            terminal: ターミナルアプリ（auto/ghostty/iterm2/terminal）
+
+        Returns:
+            初期化結果（success, agent_id, cli, prompt_source, message）
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+        agents = app_ctx.agents
+        ai_cli_manager = app_ctx.ai_cli
+
+        # ファイルからエージェント情報を同期
+        sync_agents_from_file(app_ctx)
+
+        # エージェントの存在確認
+        agent = agents.get(agent_id)
+        if not agent:
+            return {
+                "success": False,
+                "error": f"エージェント {agent_id} が見つかりません",
+            }
+
+        # Owner は tmux ペインを持たないため初期化不可
+        if agent.role == AgentRole.OWNER:
+            return {
+                "success": False,
+                "error": "Owner エージェントは initialize_agent の対象外です（起点 Claude Code が担う）",
+            }
+
+        # 作業ディレクトリの確認
+        working_dir = agent.working_dir
+        if not working_dir:
+            return {
+                "success": False,
+                "error": f"エージェント {agent_id} に working_dir が設定されていません",
+            }
+
+        # プロンプトの構築
+        prompt: str | None = None
+        prompt_source: str = ""
+
+        if prompt_type == "auto":
+            # roles/ テンプレートを自動読み込み
+            try:
+                loader = get_template_loader()
+                prompt = loader.load("roles", agent.role.value)
+                prompt_source = f"roles/{agent.role.value}.md"
+            except FileNotFoundError as e:
+                return {
+                    "success": False,
+                    "error": f"ロールテンプレートが見つかりません: {e}",
+                }
+        elif prompt_type == "custom":
+            # custom_prompt をそのまま使用
+            if not custom_prompt:
+                return {
+                    "success": False,
+                    "error": "prompt_type='custom' の場合、custom_prompt は必須です",
+                }
+            prompt = custom_prompt
+            prompt_source = "custom"
+        elif prompt_type == "file":
+            # custom_prompt をファイルパスとして読み込み
+            if not custom_prompt:
+                return {
+                    "success": False,
+                    "error": "prompt_type='file' の場合、custom_prompt にファイルパスを指定してください",
+                }
+            file_path = Path(custom_prompt)
+            if not file_path.exists():
+                return {
+                    "success": False,
+                    "error": f"ファイルが見つかりません: {custom_prompt}",
+                }
+            try:
+                prompt = file_path.read_text(encoding="utf-8")
+                prompt_source = str(file_path)
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"ファイルの読み込みに失敗しました: {e}",
+                }
+        else:
+            return {
+                "success": False,
+                "error": f"無効な prompt_type です: {prompt_type}（有効: auto, custom, file）",
+            }
+
+        # ターミナルアプリの検証
+        try:
+            terminal_app = TerminalApp(terminal)
+        except ValueError:
+            valid_terminals = [t.value for t in TerminalApp]
+            return {
+                "success": False,
+                "error": f"無効なターミナルです: {terminal}（有効: {valid_terminals}）",
+            }
+
+        # AI CLI を取得（エージェントに設定されていればそれを使用、なければデフォルト）
+        cli = agent.ai_cli or ai_cli_manager.get_default_cli()
+
+        # ターミナルで AI CLI を起動
+        success, message = await ai_cli_manager.open_worktree_in_terminal(
+            worktree_path=working_dir,
+            cli=cli,
+            prompt=prompt,
+            terminal=terminal_app,
+        )
+
+        if not success:
+            return {
+                "success": False,
+                "error": f"AI CLI の起動に失敗しました: {message}",
+            }
+
+        # エージェントのステータスを更新
+        agent.status = AgentStatus.BUSY
+        agent.last_activity = datetime.now()
+
+        logger.info(
+            f"エージェント {agent_id}（{agent.role.value}）を初期化しました: "
+            f"CLI={cli.value}, prompt_source={prompt_source}"
+        )
+
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "role": agent.role.value,
+            "cli": cli.value,
+            "prompt_source": prompt_source,
+            "terminal": terminal_app.value,
+            "working_dir": working_dir,
+            "message": f"エージェント {agent_id} を初期化しました（{cli.value} で起動）",
         }
