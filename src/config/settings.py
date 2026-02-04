@@ -253,3 +253,21 @@ class Settings(BaseSettings):
         description="メモリエントリの保持期間（日）",
     )
     """メモリエントリの保持期間（デフォルト: 90日）"""
+
+
+# Settings シングルトンキャッシュ
+_settings_instance: Settings | None = None
+
+
+def get_mcp_dir() -> str:
+    """MCP ディレクトリ名を取得する（キャッシュ付き）。
+
+    Settings インスタンスをキャッシュして、毎回の生成オーバーヘッドを削減する。
+
+    Returns:
+        MCP ディレクトリ名（デフォルト: .multi-agent-mcp）
+    """
+    global _settings_instance
+    if _settings_instance is None:
+        _settings_instance = Settings()
+    return _settings_instance.mcp_dir

@@ -350,7 +350,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"エージェント {agent_id} が見つかりません",
             }
 
-        # グリッドレイアウトの場合はペインをクリアするだけ（セッションは維持）
+        # tmux ペインがある場合はクリア（セッションは維持）
         if (
             agent.session_name is not None
             and agent.window_index is not None
@@ -368,9 +368,7 @@ def register_tools(mcp: FastMCP) -> None:
             await tmux.set_pane_title(
                 agent.session_name, agent.window_index, agent.pane_index, "(empty)"
             )
-        else:
-            # フォールバック: 従来のセッション方式（個別セッションを終了）
-            await tmux.kill_session(agent.tmux_session)
+        # Owner の場合は tmux 操作なしでエージェント情報のみ削除
 
         del agents[agent_id]
 

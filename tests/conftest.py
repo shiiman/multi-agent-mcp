@@ -41,9 +41,12 @@ def settings(temp_dir):
 
 
 @pytest.fixture
-def tmux_manager(settings):
-    """TmuxManagerインスタンスを作成する。"""
-    return TmuxManager(settings)
+async def tmux_manager(settings):
+    """TmuxManagerインスタンスを作成する。テスト後にセッションをクリーンアップ。"""
+    manager = TmuxManager(settings)
+    yield manager
+    # テスト後にテスト用セッションをクリーンアップ
+    await manager.cleanup_all_sessions()
 
 
 @pytest.fixture

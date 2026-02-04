@@ -9,15 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.config.settings import Settings
+from src.config.settings import get_mcp_dir
 from src.context import AppContext
 
 logger = logging.getLogger(__name__)
 
-# Settings から MCP ディレクトリ名を取得するヘルパー
-def _get_mcp_dir() -> str:
-    """Settings から MCP ディレクトリ名を取得する。"""
-    return Settings().mcp_dir
 from src.managers.cost_manager import CostManager
 from src.managers.dashboard_manager import DashboardManager
 from src.managers.gtrconfig_manager import GtrconfigManager
@@ -78,17 +74,75 @@ def resolve_main_repo_root(path: str | Path) -> str:
         if git_common_dir.endswith(".git"):
             # 通常のリポジトリ（worktree ではない）
             return os.path.dirname(git_common_dir)
-        elif "/.git/" in git_common_dir or git_common_dir.endswith("/.git"):
+        else:
             # worktree: /path/to/main-repo/.git/worktrees/xxx → /path/to/main-repo
             git_dir_index = git_common_dir.find("/.git")
             return git_common_dir[:git_dir_index]
-        else:
-            # フォールバック
-            return repo_root
 
-    except subprocess.CalledProcessError:
-        # git コマンドが失敗した場合はそのまま返す
-        return str(path)
+    except subprocess.CalledProcessError as e:
+        raise ValueError(f"{path} は git リポジトリではありません: {e}") from e
+
+
+# ========== プロジェクトルート解決ヘルパー ==========
+
+
+def resolve_project_root(
+    app_ctx: AppContext,
+    allow_env_fallback: bool = False,
+    allow_agent_fallback: bool = False,
+    require_worktree_resolution: bool = True,
+) -> str:
+    """project_root を解決する共通ロジック。
+
+    複数のソースから project_root を探索し、解決する。
+    ensure_*_manager() 関数で共通して使用される。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        allow_env_fallback: MCP_PROJECT_ROOT 環境変数からの取得を許可
+        allow_agent_fallback: エージェントの working_dir からの取得を許可
+        require_worktree_resolution: worktree の場合にメインリポジトリを返す
+
+    Returns:
+        project_root のパス
+
+    Raises:
+        ValueError: project_root が解決できない場合
+    """
+    project_root = app_ctx.project_root
+
+    # config.json から取得（init_tmux_workspace で設定される）
+    if not project_root:
+        project_root = get_project_root_from_config()
+
+    # MCP_PROJECT_ROOT 環境変数をチェック（オプション）
+    if not project_root and allow_env_fallback:
+        env_root = os.getenv("MCP_PROJECT_ROOT")
+        if env_root:
+            project_root = env_root
+            logger.info(f"MCP_PROJECT_ROOT 環境変数から取得: {project_root}")
+
+    # エージェントの working_dir または worktree_path から取得（オプション）
+    if not project_root and allow_agent_fallback:
+        sync_agents_from_file(app_ctx)
+        for agent in app_ctx.agents.values():
+            if agent.working_dir:
+                project_root = resolve_main_repo_root(agent.working_dir)
+                break
+            elif agent.worktree_path:
+                project_root = resolve_main_repo_root(agent.worktree_path)
+                break
+
+    if not project_root:
+        raise ValueError(
+            "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
+        )
+
+    # worktree の場合はメインリポジトリのパスを使用
+    if require_worktree_resolution:
+        project_root = resolve_main_repo_root(project_root)
+
+    return project_root
 
 
 # ========== ロールチェック ヘルパー ==========
@@ -185,35 +239,16 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
     """IPCManagerが初期化されていることを確認する。
 
     worktree 内で実行されている場合でも、メインリポジトリの IPC ディレクトリを使用する。
-    これにより、Admin/Worker（worktree内）と Owner（メインリポジトリ）間の
-    メッセージ配信が正しく機能する。
 
     Raises:
         ValueError: project_root が設定されていない場合
     """
     if app_ctx.ipc_manager is None:
-        # project_root を決定（複数のソースから取得を試みる）
-        base_dir = app_ctx.project_root
-
-        # config.json から取得（init_tmux_workspace で設定される）
-        if not base_dir:
-            base_dir = get_project_root_from_config()
-
-        if not base_dir:
-            raise ValueError(
-                "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
-            )
-
-        # worktree の場合はメインリポジトリのパスを使用
-        base_dir = resolve_main_repo_root(base_dir)
-
-        # session_id がある場合はタスクディレクトリ配下に配置
+        base_dir = resolve_project_root(app_ctx)
         if app_ctx.session_id:
-            ipc_dir = os.path.join(
-                base_dir, _get_mcp_dir(), app_ctx.session_id, ".ipc"
-            )
+            ipc_dir = os.path.join(base_dir, get_mcp_dir(), app_ctx.session_id, ".ipc")
         else:
-            ipc_dir = os.path.join(base_dir, _get_mcp_dir(), ".ipc")
+            ipc_dir = os.path.join(base_dir, get_mcp_dir(), ".ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager
@@ -223,7 +258,6 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
     """DashboardManagerが初期化されていることを確認する。
 
     worktree 内で実行されている場合でも、メインリポジトリの Dashboard ディレクトリを使用する。
-    これにより、全エージェント間で Dashboard state が正しく同期される。
 
     Raises:
         ValueError: project_root が設定されていない場合
@@ -231,29 +265,11 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
     if app_ctx.dashboard_manager is None:
         if app_ctx.workspace_id is None:
             app_ctx.workspace_id = str(uuid.uuid4())[:8]
-
-        # project_root を決定（複数のソースから取得を試みる）
-        base_dir = app_ctx.project_root
-
-        # config.json から取得（init_tmux_workspace で設定される）
-        if not base_dir:
-            base_dir = get_project_root_from_config()
-
-        if not base_dir:
-            raise ValueError(
-                "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
-            )
-
-        # worktree の場合はメインリポジトリのパスを使用
-        base_dir = resolve_main_repo_root(base_dir)
-
-        # session_id がある場合はタスクディレクトリ配下に配置
+        base_dir = resolve_project_root(app_ctx)
         if app_ctx.session_id:
-            dashboard_dir = os.path.join(
-                base_dir, _get_mcp_dir(), app_ctx.session_id, ".dashboard"
-            )
+            dashboard_dir = os.path.join(base_dir, get_mcp_dir(), app_ctx.session_id, ".dashboard")
         else:
-            dashboard_dir = os.path.join(base_dir, _get_mcp_dir(), ".dashboard")
+            dashboard_dir = os.path.join(base_dir, get_mcp_dir(), ".dashboard")
         app_ctx.dashboard_manager = DashboardManager(
             workspace_id=app_ctx.workspace_id,
             workspace_path=base_dir,
@@ -289,17 +305,8 @@ def ensure_metrics_manager(app_ctx: AppContext) -> MetricsManager:
         ValueError: project_root が設定されていない場合
     """
     if app_ctx.metrics_manager is None:
-        # project_root を決定
-        base_dir = app_ctx.project_root
-        if not base_dir:
-            base_dir = get_project_root_from_config()
-
-        if not base_dir:
-            raise ValueError(
-                "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
-            )
-
-        metrics_dir = os.path.join(base_dir, _get_mcp_dir(), ".metrics")
+        base_dir = resolve_project_root(app_ctx, require_worktree_resolution=False)
+        metrics_dir = os.path.join(base_dir, get_mcp_dir(), ".metrics")
         app_ctx.metrics_manager = MetricsManager(metrics_dir)
     return app_ctx.metrics_manager
 
@@ -324,51 +331,18 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
     """MemoryManagerが初期化されていることを確認する。
 
     worktree 内で実行されている場合でも、メインリポジトリの memory ディレクトリを使用する。
-    これにより、全エージェントの完了報告が同じ memory.json に保存される。
     """
     if app_ctx.memory_manager is None:
-        # プロジェクトルートを決定
-        project_root = app_ctx.project_root
-
-        # config.json から取得（init_tmux_workspace で設定される）
-        if not project_root:
-            project_root = get_project_root_from_config()
-            if project_root:
-                logger.info(f"config.json から project_root を取得: {project_root}")
-
-        # MCP_PROJECT_ROOT 環境変数をチェック（フォールバック）
-        if not project_root:
-            env_project_root = os.getenv("MCP_PROJECT_ROOT")
-            if env_project_root:
-                project_root = env_project_root
-                logger.info(f"MCP_PROJECT_ROOT 環境変数から取得: {project_root}")
-
-        # エージェントの working_dir または worktree_path から取得
-        if not project_root:
-            sync_agents_from_file(app_ctx)
-            for agent in app_ctx.agents.values():
-                if agent.working_dir:
-                    project_root = resolve_main_repo_root(agent.working_dir)
-                    break
-                elif agent.worktree_path:
-                    project_root = resolve_main_repo_root(agent.worktree_path)
-                    break
-
-        if not project_root:
-            raise ValueError(
-                "project_root が設定されていません。init_tmux_workspace を先に実行してください。"
-            )
-
-        # worktree の場合はメインリポジトリのパスを使用
-        project_root = resolve_main_repo_root(project_root)
-
+        project_root = resolve_project_root(
+            app_ctx,
+            allow_env_fallback=True,
+            allow_agent_fallback=True,
+        )
         # project_root を設定（次回以降のために）
-        if project_root and not app_ctx.project_root:
+        if not app_ctx.project_root:
             app_ctx.project_root = project_root
             logger.info(f"project_root を自動設定: {project_root}")
-
-        # {project_dir}/memory/memory.json に保存
-        memory_path = os.path.join(project_root, _get_mcp_dir(), "memory", "memory.json")
+        memory_path = os.path.join(project_root, get_mcp_dir(), "memory", "memory.json")
         app_ctx.memory_manager = MemoryManager(storage_path=memory_path)
     return app_ctx.memory_manager
 
@@ -415,7 +389,7 @@ def get_project_root_from_config(working_dir: str | None = None) -> str | None:
     search_dirs.append(cwd)
 
     for base_dir in search_dirs:
-        config_file = base_dir / _get_mcp_dir() / "config.json"
+        config_file = base_dir / get_mcp_dir() / "config.json"
         if config_file.exists():
             try:
                 with open(config_file, encoding="utf-8") as f:
@@ -457,7 +431,7 @@ def get_mcp_tool_prefix_from_config(working_dir: str | None = None) -> str:
     search_dirs.append(cwd)
 
     for base_dir in search_dirs:
-        config_file = base_dir / _get_mcp_dir() / "config.json"
+        config_file = base_dir / get_mcp_dir() / "config.json"
         if config_file.exists():
             try:
                 with open(config_file, encoding="utf-8") as f:
@@ -491,8 +465,8 @@ def _get_agents_file_path(
         return None
     # session_id がある場合はタスクディレクトリ配下に配置
     if session_id:
-        return Path(project_root) / _get_mcp_dir() / session_id / "agents.json"
-    return Path(project_root) / _get_mcp_dir() / "agents.json"
+        return Path(project_root) / get_mcp_dir() / session_id / "agents.json"
+    return Path(project_root) / get_mcp_dir() / "agents.json"
 
 
 def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:

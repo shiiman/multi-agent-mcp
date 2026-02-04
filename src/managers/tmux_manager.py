@@ -11,11 +11,8 @@ from src.config.settings import TerminalApp
 
 logger = logging.getLogger(__name__)
 
-# セッション名定数（単一セッション方式）
-# 注意: MAIN_SESSION は後方互換性のために残していますが、
-# 実際のセッション名はプロジェクト名を含む動的な名前になります
-# デフォルト値は Settings.window_name_main で設定可能
-MAIN_SESSION = "main"  # デフォルト値、Settings.window_name_main で上書き可能
+# メインウィンドウ名（get_pane_for_role で使用）
+MAIN_SESSION = "main"
 
 
 def get_project_name(working_dir: str) -> str:
@@ -30,32 +27,31 @@ def get_project_name(working_dir: str) -> str:
 
     Returns:
         プロジェクト名（メインリポジトリのディレクトリ名）
+
+    Raises:
+        ValueError: git リポジトリでない場合
     """
     import subprocess
     from pathlib import Path
 
-    try:
-        # git リポジトリの共通ディレクトリ（メイン .git）を取得
-        # worktree の場合でもメインリポジトリの .git を指す
-        result = subprocess.run(
-            ["git", "-C", working_dir, "rev-parse", "--git-common-dir"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            git_common_dir = Path(result.stdout.strip())
-            # .git ディレクトリの親がリポジトリルート
-            # 絶対パスに変換（相対パスの場合があるため）
-            if not git_common_dir.is_absolute():
-                git_common_dir = (Path(working_dir) / git_common_dir).resolve()
-            repo_root = git_common_dir.parent
-            return repo_root.name
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
+    # git リポジトリの共通ディレクトリ（メイン .git）を取得
+    # worktree の場合でもメインリポジトリの .git を指す
+    result = subprocess.run(
+        ["git", "-C", working_dir, "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"{working_dir} は git リポジトリではありません")
 
-    # フォールバック: 従来の動作（ディレクトリ名を返す）
-    return Path(working_dir).name
+    git_common_dir = Path(result.stdout.strip())
+    # .git ディレクトリの親がリポジトリルート
+    # 絶対パスに変換（相対パスの場合があるため）
+    if not git_common_dir.is_absolute():
+        git_common_dir = (Path(working_dir) / git_common_dir).resolve()
+    repo_root = git_common_dir.parent
+    return repo_root.name
 
 # メインウィンドウのペイン配置
 # Owner は tmux ペインに配置しない（実行AIエージェントが担う）
@@ -74,6 +70,7 @@ class TmuxManager:
         Args:
             settings: アプリケーション設定
         """
+        self.settings = settings
         self.prefix = settings.tmux_prefix
         self.default_terminal = settings.default_terminal
 

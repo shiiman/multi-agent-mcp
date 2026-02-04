@@ -8,8 +8,27 @@ import shutil
 
 import pytest
 
+from src.managers.tmux_manager import get_project_name
+
 # tmuxが利用可能かチェック
 HAS_TMUX = shutil.which("tmux") is not None
+
+
+class TestGetProjectName:
+    """get_project_name 関数のテスト。"""
+
+    def test_raises_value_error_for_non_git_directory(self, temp_dir):
+        """git リポジトリでないディレクトリで ValueError を発生させることをテスト。"""
+        with pytest.raises(ValueError) as exc_info:
+            get_project_name(str(temp_dir))
+
+        assert "git リポジトリではありません" in str(exc_info.value)
+
+    def test_returns_project_name_for_git_repo(self, git_repo):
+        """git リポジトリでプロジェクト名を返すことをテスト。"""
+        result = get_project_name(str(git_repo))
+        # git_repo フィクスチャは temp_dir/repo を作成
+        assert result == "repo"
 
 
 @pytest.mark.skipif(not HAS_TMUX, reason="tmux is not installed")
@@ -286,6 +305,11 @@ class TestTmuxManager:
         """launch_workspace_in_terminal の Ghostty 起動テスト（モック使用）。"""
         import asyncio
 
+        import src.managers.tmux_manager as tmux_module
+
+        # get_project_name をモック（git リポジトリでなくても動作させる）
+        monkeypatch.setattr(tmux_module, "get_project_name", lambda x: "test-project")
+
         # shutil.which をモックして ghostty が存在するようにする
         monkeypatch.setattr(shutil, "which", lambda x: "/usr/local/bin/ghostty")
 
@@ -316,7 +340,12 @@ class TestTmuxManager:
         self, tmux_manager, temp_dir, monkeypatch
     ):
         """launch_workspace_in_terminal の iTerm2 起動テスト（モック使用）。"""
+        import src.managers.tmux_manager as tmux_module
+
         from src.managers.terminal import GhosttyExecutor, ITerm2Executor
+
+        # get_project_name をモック（git リポジトリでなくても動作させる）
+        monkeypatch.setattr(tmux_module, "get_project_name", lambda x: "test-project")
 
         # Ghostty を利用不可にする
         async def mock_ghostty_unavailable(self):
@@ -346,11 +375,16 @@ class TestTmuxManager:
         self, tmux_manager, temp_dir, monkeypatch
     ):
         """launch_workspace_in_terminal の Terminal.app 起動テスト（モック使用）。"""
+        import src.managers.tmux_manager as tmux_module
+
         from src.managers.terminal import (
             GhosttyExecutor,
             ITerm2Executor,
             TerminalAppExecutor,
         )
+
+        # get_project_name をモック（git リポジトリでなくても動作させる）
+        monkeypatch.setattr(tmux_module, "get_project_name", lambda x: "test-project")
 
         # Ghostty を利用不可にする
         async def mock_ghostty_unavailable(self):

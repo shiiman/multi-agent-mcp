@@ -145,7 +145,7 @@ class AiCliManager:
                 return f"{env_prefix}cd {shlex.quote(worktree_path)} && {command}"
             return f"{env_prefix}{command}"
 
-        elif cli == AICli.GEMINI:
+        else:  # AICli.GEMINI
             # export MCP_PROJECT_ROOT=... && cd <path> && gemini --yolo < task.md
             parts = [cmd, "--yolo"]
             parts.append(f"< {shlex.quote(task_file_path)}")
@@ -153,9 +153,6 @@ class AiCliManager:
             if worktree_path:
                 return f"{env_prefix}cd {shlex.quote(worktree_path)} && {command}"
             return f"{env_prefix}{command}"
-
-        # フォールバック
-        return f"{env_prefix}{cmd} < {shlex.quote(task_file_path)}"
 
     def _build_cli_args(
         self,

@@ -5,8 +5,48 @@ from pathlib import Path
 
 import pytest
 
-from src.config.settings import get_project_env_file
+import src.config.settings as settings_module
+from src.config.settings import get_mcp_dir, get_project_env_file
 from src.tools.session import generate_env_template
+
+
+class TestGetMcpDir:
+    """get_mcp_dir 関数のテスト。"""
+
+    def test_returns_default_mcp_dir(self, monkeypatch):
+        """デフォルト値 .multi-agent-mcp を返すことをテスト。"""
+        # シングルトンキャッシュをリセット
+        monkeypatch.setattr(settings_module, "_settings_instance", None)
+        monkeypatch.delenv("MCP_MCP_DIR", raising=False)
+
+        result = get_mcp_dir()
+        assert result == ".multi-agent-mcp"
+
+    def test_returns_custom_mcp_dir_from_env(self, monkeypatch):
+        """環境変数でカスタム値を設定できることをテスト。"""
+        # シングルトンキャッシュをリセット
+        monkeypatch.setattr(settings_module, "_settings_instance", None)
+        monkeypatch.setenv("MCP_MCP_DIR", ".custom-mcp-dir")
+
+        result = get_mcp_dir()
+        assert result == ".custom-mcp-dir"
+
+    def test_caches_settings_instance(self, monkeypatch):
+        """Settings インスタンスがキャッシュされることをテスト。"""
+        # シングルトンキャッシュをリセット
+        monkeypatch.setattr(settings_module, "_settings_instance", None)
+        monkeypatch.delenv("MCP_MCP_DIR", raising=False)
+
+        # 最初の呼び出し
+        get_mcp_dir()
+
+        # キャッシュが設定されていることを確認
+        assert settings_module._settings_instance is not None
+
+        # 2回目の呼び出しで同じインスタンスを使用
+        cached_instance = settings_module._settings_instance
+        get_mcp_dir()
+        assert settings_module._settings_instance is cached_instance
 
 
 class TestGetProjectEnvFile:

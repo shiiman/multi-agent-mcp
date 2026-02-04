@@ -19,14 +19,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from src.config.settings import Settings
+from src.config.settings import Settings, get_mcp_dir
 
 logger = logging.getLogger(__name__)
-
-
-def _get_mcp_dir() -> str:
-    """Settings から MCP ディレクトリ名を取得する。"""
-    return Settings().mcp_dir
 
 
 def _get_default_max_entries() -> int:
@@ -117,7 +112,7 @@ class MemoryManager:
         Returns:
             MemoryManager インスタンス
         """
-        storage_path = Path(project_root) / _get_mcp_dir() / "memory" / "memory.json"
+        storage_path = Path(project_root) / get_mcp_dir() / "memory" / "memory.json"
         return cls(storage_path, max_entries=max_entries, ttl_days=ttl_days)
 
     @classmethod
@@ -138,7 +133,7 @@ class MemoryManager:
             MemoryManager インスタンス
         """
         home_dir = Path(os.path.expanduser("~"))
-        storage_path = home_dir / _get_mcp_dir() / "memory" / "memory.json"
+        storage_path = home_dir / get_mcp_dir() / "memory" / "memory.json"
         return cls(storage_path, max_entries=max_entries, ttl_days=ttl_days)
 
     def _load_from_file(self) -> None:
