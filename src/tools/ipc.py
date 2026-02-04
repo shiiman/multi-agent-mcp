@@ -6,7 +6,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.context import AppContext
 from src.models.message import MessagePriority, MessageType
-from src.tools.helpers import ensure_ipc_manager
+from src.tools.helpers import check_tool_permission, ensure_ipc_manager
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -20,6 +20,7 @@ def register_tools(mcp: FastMCP) -> None:
         content: str,
         subject: str = "",
         priority: str = "normal",
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """エージェント間でメッセージを送信する。
@@ -31,11 +32,18 @@ def register_tools(mcp: FastMCP) -> None:
             content: メッセージ内容
             subject: 件名（オプション）
             priority: 優先度（low/normal/high/urgent）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             送信結果（success, message_id, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "send_message", caller_agent_id)
+        if role_error:
+            return role_error
+
         ipc = ensure_ipc_manager(app_ctx)
 
         # メッセージタイプの検証
@@ -91,6 +99,7 @@ def register_tools(mcp: FastMCP) -> None:
         unread_only: bool = False,
         message_type: str | None = None,
         mark_as_read: bool = True,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """エージェントのメッセージを読み取る。
@@ -100,11 +109,18 @@ def register_tools(mcp: FastMCP) -> None:
             unread_only: 未読のみ取得するか
             message_type: フィルターするメッセージタイプ
             mark_as_read: 既読としてマークするか
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             メッセージ一覧（success, messages, count または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "read_messages", caller_agent_id)
+        if role_error:
+            return role_error
+
         ipc = ensure_ipc_manager(app_ctx)
 
         # メッセージタイプの検証
@@ -140,16 +156,27 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def get_unread_count(agent_id: str, ctx: Context = None) -> dict[str, Any]:
+    async def get_unread_count(
+        agent_id: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """エージェントの未読メッセージ数を取得する。
 
         Args:
             agent_id: エージェントID
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             未読数（success, agent_id, unread_count）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_unread_count", caller_agent_id)
+        if role_error:
+            return role_error
+
         ipc = ensure_ipc_manager(app_ctx)
 
         if agent_id not in ipc.get_all_agent_ids():
@@ -164,16 +191,29 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def clear_messages(agent_id: str, ctx: Context = None) -> dict[str, Any]:
+    async def clear_messages(
+        agent_id: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """エージェントのメッセージをクリアする。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             agent_id: エージェントID
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             クリア結果（success, agent_id, deleted_count, message）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "clear_messages", caller_agent_id)
+        if role_error:
+            return role_error
+
         ipc = ensure_ipc_manager(app_ctx)
 
         if agent_id not in ipc.get_all_agent_ids():
@@ -192,16 +232,27 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def register_agent_to_ipc(agent_id: str, ctx: Context = None) -> dict[str, Any]:
+    async def register_agent_to_ipc(
+        agent_id: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """エージェントをIPCシステムに登録する。
 
         Args:
             agent_id: エージェントID
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             登録結果（success, agent_id, message）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "register_agent_to_ipc", caller_agent_id)
+        if role_error:
+            return role_error
+
         ipc = ensure_ipc_manager(app_ctx)
 
         ipc.register_agent(agent_id)

@@ -10,7 +10,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from src.config.settings import Settings
 from src.context import AppContext
 from src.managers.tmux_manager import get_project_name
-from src.tools.helpers import get_gtrconfig_manager, get_worktree_manager
+from src.tools.helpers import check_tool_permission, get_gtrconfig_manager, get_worktree_manager
 
 logger = logging.getLogger(__name__)
 
@@ -88,19 +88,20 @@ MCP_ADMIN_THINKING_TOKENS=1000
 MCP_WORKER_THINKING_TOKENS=10000
 
 # ========== スクリーンショット設定 ==========
-# スクリーンショットとして認識する拡張子（カンマ区切り）
-MCP_SCREENSHOT_EXTENSIONS=.png,.jpg,.jpeg,.gif,.webp
+# スクリーンショットとして認識する拡張子（JSON形式）
+MCP_SCREENSHOT_EXTENSIONS=[".png",".jpg",".jpeg",".gif",".webp"]
 '''
 
 
 def _setup_mcp_directories(
-    working_dir: str, settings: Settings | None = None
+    working_dir: str, settings: Settings | None = None, session_id: str | None = None
 ) -> dict[str, Any]:
     """MCP ディレクトリと .env ファイルをセットアップする。
 
     Args:
         working_dir: 作業ディレクトリのパス
         settings: MCP 設定（省略時は新規作成）
+        session_id: セッションID（Admin/Worker で共有、省略時は None）
 
     Returns:
         セットアップ結果（created_dirs, env_created, env_path, config_created）
@@ -133,7 +134,7 @@ def _setup_mcp_directories(
         env_created = True
         logger.info(f".env テンプレートを作成しました: {env_file}")
 
-    # config.json 作成（project_root, mcp_tool_prefix を保存、MCP インスタンス間で共有）
+    # config.json 作成（project_root, mcp_tool_prefix, session_id を保存、MCP インスタンス間で共有）
     config_file = mcp_dir / "config.json"
     config_created = False
     # MCP ツールの完全名プレフィックス（Claude Code が MCP ツールを呼び出す際に使用）
@@ -142,13 +143,16 @@ def _setup_mcp_directories(
         "project_root": working_dir,
         "mcp_tool_prefix": mcp_tool_prefix,
     }
+    # session_id が指定されている場合は保存
+    if session_id:
+        config_data["session_id"] = session_id
     if not config_file.exists():
         with open(config_file, "w", encoding="utf-8") as f:
             json.dump(config_data, f, ensure_ascii=False, indent=2)
         config_created = True
         logger.info(f"config.json を作成しました: {config_file}")
     else:
-        # 既存の config.json を更新（project_root, mcp_tool_prefix が変わっている場合）
+        # 既存の config.json を更新（project_root, mcp_tool_prefix, session_id が変わっている場合）
         try:
             with open(config_file, encoding="utf-8") as f:
                 existing = json.load(f)
@@ -158,6 +162,10 @@ def _setup_mcp_directories(
                 updated = True
             if existing.get("mcp_tool_prefix") != mcp_tool_prefix:
                 existing["mcp_tool_prefix"] = mcp_tool_prefix
+                updated = True
+            # session_id が指定されている場合は更新
+            if session_id and existing.get("session_id") != session_id:
+                existing["session_id"] = session_id
                 updated = True
             if updated:
                 with open(config_file, "w", encoding="utf-8") as f:
@@ -219,15 +227,29 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def cleanup_workspace(ctx: Context) -> dict[str, Any]:
+    async def cleanup_workspace(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """ワークスペースをクリーンアップする。
 
         全エージェントを終了し、リソースを解放する。
+
+        ※ Owner のみ使用可能。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             クリーンアップ結果（success, terminated_sessions, cleared_agents, message）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "cleanup_workspace", caller_agent_id)
+        if role_error:
+            return role_error
+
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
@@ -246,11 +268,19 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def check_all_tasks_completed(ctx: Context) -> dict[str, Any]:
+    async def check_all_tasks_completed(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """全タスクが完了したかチェックする。
 
         完了条件: pending=0, in_progress=0, failed=0
         failedタスクがある場合は完了と見なさない。
+
+        ※ Owner のみ使用可能。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             is_all_completed: 全タスク完了か
@@ -261,6 +291,12 @@ def register_tools(mcp: FastMCP) -> None:
             failed_tasks: 失敗タスク数
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "check_all_tasks_completed", caller_agent_id)
+        if role_error:
+            return role_error
+
         status = _check_completion_status(app_ctx)
 
         return {
@@ -272,6 +308,7 @@ def register_tools(mcp: FastMCP) -> None:
     async def cleanup_on_completion(
         force: bool = False,
         repo_path: str | None = None,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """全タスク完了時にワークスペースをクリーンアップする。
@@ -279,14 +316,23 @@ def register_tools(mcp: FastMCP) -> None:
         タスクが完了していない場合はエラーを返す。
         force=True で未完了でも強制クリーンアップ。
 
+        ※ Owner のみ使用可能。
+
         Args:
             force: 未完了でも強制的にクリーンアップするか
             repo_path: メインリポジトリのパス（worktree 削除に使用）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             クリーンアップ結果
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "cleanup_on_completion", caller_agent_id)
+        if role_error:
+            return role_error
+
         status = _check_completion_status(app_ctx)
 
         # エラーチェック
@@ -385,6 +431,7 @@ def register_tools(mcp: FastMCP) -> None:
         open_terminal: bool = True,
         auto_setup_gtr: bool = True,
         session_id: str | None = None,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """ターミナルを開いてtmuxワークスペース（グリッドレイアウト）を構築する。
@@ -401,18 +448,36 @@ def register_tools(mcp: FastMCP) -> None:
         └─────────────┴────────┴────────┴────────┘
           左40%          右60% (Workers 1-6)
 
+        ※ Owner のみ使用可能。
+
         Args:
             working_dir: 作業ディレクトリのパス
             open_terminal: Trueでターミナルを開いて表示（デフォルト）、
                            Falseでバックグラウンド作成
             auto_setup_gtr: gtr利用可能時に自動でgtrconfig設定（デフォルト: True）
             session_id: セッションID（省略時は None、指定時はディレクトリ構造に使用）
+            caller_agent_id: 呼び出し元エージェントID（指定時はロールチェック）
 
         Returns:
             初期化結果（success, session_name, gtr_status, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
         tmux = app_ctx.tmux
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "init_tmux_workspace", caller_agent_id)
+        if role_error:
+            return role_error
+
+        # 既存の tmux セッションが存在するかチェック（重複起動防止）
+        project_name = get_project_name(working_dir)
+        expected_session = f"{tmux.prefix}-{project_name}"
+        session_exists = await tmux.session_exists(expected_session)
+        if session_exists:
+            return {
+                "success": False,
+                "error": f"tmux セッション '{expected_session}' は既に存在します。重複初期化は許可されていません。",
+            }
 
         # session_id を設定（後続の create_agent 等で使用）
         if session_id:
@@ -475,7 +540,7 @@ def register_tools(mcp: FastMCP) -> None:
                 logger.warning(f"gtr 設定確認に失敗: {e}")
 
         # MCP ディレクトリと .env ファイルのセットアップ
-        mcp_setup = _setup_mcp_directories(working_dir)
+        mcp_setup = _setup_mcp_directories(working_dir, session_id=session_id)
         logger.info(
             f"MCP ディレクトリをセットアップしました: "
             f"作成={mcp_setup['created_dirs']}, env_created={mcp_setup['env_created']}"

@@ -8,6 +8,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import Settings
 from src.context import AppContext
+from src.tools.helpers import check_tool_permission
 
 
 def _get_mcp_dir() -> str:
@@ -19,13 +20,24 @@ def register_tools(mcp: FastMCP) -> None:
     """スクリーンショット管理ツールを登録する。"""
 
     @mcp.tool()
-    async def get_screenshot_dir(ctx: Context = None) -> dict[str, Any]:
+    async def get_screenshot_dir(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """スクリーンショットディレクトリを取得する。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             ディレクトリ情報（success, path, exists）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_screenshot_dir", caller_agent_id)
+        if role_error:
+            return role_error
 
         if not app_ctx.project_root:
             return {
@@ -44,17 +56,25 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def list_screenshots(
         limit: int = 10,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """スクリーンショット一覧を取得する（最新順）。
 
         Args:
             limit: 最大取得件数（デフォルト: 10）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             スクリーンショット一覧（success, screenshots, count）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "list_screenshots", caller_agent_id)
+        if role_error:
+            return role_error
+
         settings = app_ctx.settings
 
         if not app_ctx.project_root:
@@ -100,17 +120,24 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def read_screenshot(
         filename: str,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """指定したスクリーンショットを読み取る（Base64）。
 
         Args:
             filename: ファイル名
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             画像データ（success, filename, base64_data, mime_type）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "read_screenshot", caller_agent_id)
+        if role_error:
+            return role_error
 
         if not app_ctx.project_root:
             return {
@@ -152,13 +179,25 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def read_latest_screenshot(ctx: Context = None) -> dict[str, Any]:
+    async def read_latest_screenshot(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """最新のスクリーンショットを読み取る（Base64）。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             画像データ（success, filename, base64_data, mime_type）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "read_latest_screenshot", caller_agent_id)
+        if role_error:
+            return role_error
+
         settings = app_ctx.settings
 
         if not app_ctx.project_root:

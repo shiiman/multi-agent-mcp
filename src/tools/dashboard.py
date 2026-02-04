@@ -9,6 +9,7 @@ from src.models.dashboard import TaskStatus
 from src.models.message import MessagePriority, MessageType
 from src.tools.helpers import (
     check_role_permission,
+    check_tool_permission,
     ensure_dashboard_manager,
     ensure_ipc_manager,
     ensure_memory_manager,
@@ -27,20 +28,30 @@ def register_tools(mcp: FastMCP) -> None:
         description: str = "",
         assigned_agent_id: str | None = None,
         branch: str | None = None,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """新しいタスクを作成する。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             title: タスクタイトル
             description: タスク説明
             assigned_agent_id: 割り当て先エージェントID（オプション）
             branch: 作業ブランチ（オプション）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             作成結果（success, task, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "create_task", caller_agent_id)
+        if role_error:
+            return role_error
+
         dashboard = ensure_dashboard_manager(app_ctx)
 
         task = dashboard.create_task(
@@ -81,8 +92,8 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
 
-        # ロールチェック: Admin のみ
-        role_error = check_role_permission(app_ctx, caller_agent_id, ["admin"])
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "update_task_status", caller_agent_id)
         if role_error:
             return role_error
 
@@ -137,8 +148,8 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
 
-        # ロールチェック: Admin のみ
-        role_error = check_role_permission(app_ctx, caller_agent_id, ["admin"])
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "assign_task_to_agent", caller_agent_id)
         if role_error:
             return role_error
 
@@ -172,6 +183,7 @@ def register_tools(mcp: FastMCP) -> None:
     async def list_tasks(
         status: str | None = None,
         agent_id: str | None = None,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """タスク一覧を取得する。
@@ -179,11 +191,18 @@ def register_tools(mcp: FastMCP) -> None:
         Args:
             status: フィルターするステータス（オプション）
             agent_id: フィルターするエージェントID（オプション）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             タスク一覧（success, tasks, count または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "list_tasks", caller_agent_id)
+        if role_error:
+            return role_error
+
         dashboard = ensure_dashboard_manager(app_ctx)
 
         # ステータスの検証
@@ -235,8 +254,8 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
 
-        # ロールチェック: Worker のみ
-        role_error = check_role_permission(app_ctx, caller_agent_id, ["worker"])
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "report_task_completion", caller_agent_id)
         if role_error:
             return role_error
 
@@ -258,13 +277,8 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効なステータスです: {status}（有効: completed, failed）",
             }
 
-        # IPC マネージャーを取得
-        ipc = app_ctx.ipc_manager
-        if ipc is None:
-            return {
-                "success": False,
-                "error": "IPC マネージャーが初期化されていません",
-            }
+        # IPC マネージャーを取得（自動初期化）
+        ipc = ensure_ipc_manager(app_ctx)
 
         # タスク完了報告を送信
         ipc.send_message(
@@ -318,16 +332,27 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def get_task(task_id: str, ctx: Context = None) -> dict[str, Any]:
+    async def get_task(
+        task_id: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """タスクの詳細を取得する。
 
         Args:
             task_id: タスクID
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             タスク詳細（success, task または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_task", caller_agent_id)
+        if role_error:
+            return role_error
+
         dashboard = ensure_dashboard_manager(app_ctx)
 
         task = dashboard.get_task(task_id)
@@ -343,16 +368,29 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def remove_task(task_id: str, ctx: Context = None) -> dict[str, Any]:
+    async def remove_task(
+        task_id: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """タスクを削除する。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             task_id: タスクID
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             削除結果（success, task_id, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "remove_task", caller_agent_id)
+        if role_error:
+            return role_error
+
         dashboard = ensure_dashboard_manager(app_ctx)
 
         success, message = dashboard.remove_task(task_id)
@@ -364,13 +402,25 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def get_dashboard(ctx: Context = None) -> dict[str, Any]:
+    async def get_dashboard(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """ダッシュボード全体を取得する。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             ダッシュボード情報（success, dashboard）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_dashboard", caller_agent_id)
+        if role_error:
+            return role_error
+
         dashboard = ensure_dashboard_manager(app_ctx)
 
         # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
@@ -388,13 +438,25 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def get_dashboard_summary(ctx: Context = None) -> dict[str, Any]:
+    async def get_dashboard_summary(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """ダッシュボードのサマリーを取得する。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             サマリー情報（success, summary）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_dashboard_summary", caller_agent_id)
+        if role_error:
+            return role_error
+
         dashboard = ensure_dashboard_manager(app_ctx)
 
         # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）

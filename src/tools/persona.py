@@ -5,7 +5,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.context import AppContext
-from src.tools.helpers import ensure_persona_manager
+from src.tools.helpers import check_tool_permission, ensure_persona_manager
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -14,17 +14,27 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def detect_task_type(
         task_description: str,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """タスクの説明からタスクタイプを検出する。
 
+        ※ Admin のみ使用可能。
+
         Args:
             task_description: タスクの説明文
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             検出結果（success, task_type, persona）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "detect_task_type", caller_agent_id)
+        if role_error:
+            return role_error
+
         persona = ensure_persona_manager(app_ctx)
 
         task_type = persona.detect_task_type(task_description)
@@ -42,17 +52,27 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_optimal_persona(
         task_description: str,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """タスクに最適なペルソナを取得する。
 
+        ※ Admin のみ使用可能。
+
         Args:
             task_description: タスクの説明文
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             ペルソナ情報（success, persona, system_prompt_addition）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_optimal_persona", caller_agent_id)
+        if role_error:
+            return role_error
+
         persona_manager = ensure_persona_manager(app_ctx)
 
         persona = persona_manager.get_optimal_persona(task_description)
@@ -67,13 +87,27 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def list_personas(ctx: Context = None) -> dict[str, Any]:
+    async def list_personas(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """利用可能なペルソナ一覧を取得する。
+
+        ※ Admin のみ使用可能。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             ペルソナ一覧（success, personas, count）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "list_personas", caller_agent_id)
+        if role_error:
+            return role_error
+
         persona_manager = ensure_persona_manager(app_ctx)
 
         personas = persona_manager.list_personas()

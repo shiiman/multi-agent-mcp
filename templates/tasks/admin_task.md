@@ -29,11 +29,15 @@
 | `read_messages` | `{mcp_tool_prefix}read_messages` |
 | `healthcheck_all` | `{mcp_tool_prefix}healthcheck_all` |
 
+**重要**: ロール制限のあるツールは `caller_agent_id` パラメータが必須です。
+Admin ID: `{agent_id}`
+
 **呼び出し例:**
 ```
-{mcp_tool_prefix}create_task(title="タスク名", description="説明")
-{mcp_tool_prefix}create_agent(role="worker", working_dir="/path/to/worktree")
-{mcp_tool_prefix}send_task(agent_id="xxx", task_content="内容", session_id="{session_id}")
+{mcp_tool_prefix}create_task(title="タスク名", description="説明", caller_agent_id="{agent_id}")
+{mcp_tool_prefix}create_agent(role="worker", working_dir="/path/to/worktree", caller_agent_id="{agent_id}")
+{mcp_tool_prefix}create_worktree(branch_name="xxx", caller_agent_id="{agent_id}")
+{mcp_tool_prefix}send_task(agent_id="xxx", task_content="内容", session_id="{session_id}", caller_agent_id="{agent_id}")
 ```
 
 ## 計画書
@@ -63,6 +67,9 @@
 ### 3. Worker 作成・タスク割り当て
 各 Worker に対して以下を実行：
 1. Worktree 作成（`create_worktree`）
+   - **ブランチ名**: `{branch_name}-worker-N` 形式で作成（N は Worker 番号、ベースブランチとの競合を回避）
+   - 例: `{branch_name}-worker-1`, `{branch_name}-worker-2`
+   - `base_branch` には作業ブランチ（`{branch_name}`）を指定
 2. Worker エージェント作成（`create_agent(role="worker")`）
 3. Worktree 割り当て（`assign_worktree`）
 4. タスク割り当て（`assign_task_to_agent`）

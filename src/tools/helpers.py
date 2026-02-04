@@ -185,6 +185,9 @@ def check_role_permission(
             "error": "caller_agent_id が必要です（このツールはロール制限があります）",
         }
 
+    # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
+    sync_agents_from_file(app_ctx)
+
     role = get_agent_role(app_ctx, caller_agent_id)
     if role is None:
         return {
@@ -196,6 +199,65 @@ def check_role_permission(
         return {
             "success": False,
             "error": f"このツールは {allowed_roles} のみ使用可能です（現在: {role.value}）",
+        }
+
+    return None
+
+
+def check_tool_permission(
+    app_ctx: AppContext,
+    tool_name: str,
+    caller_agent_id: str | None,
+) -> dict[str, Any] | None:
+    """ツールのロール権限をチェックする。
+
+    全ての MCP ツールで使用する統一的な権限チェック関数。
+    role_permissions.py で定義された許可ロールに基づいてチェックする。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        tool_name: ツール名
+        caller_agent_id: 呼び出し元エージェントID（必須）
+
+    Returns:
+        権限エラーの場合はエラー dict、許可されている場合は None
+    """
+    from src.config.role_permissions import get_allowed_roles, get_role_error_message
+
+    # caller_agent_id は必須
+    if caller_agent_id is None:
+        return {
+            "success": False,
+            "error": (
+                f"`{tool_name}` の呼び出しには `caller_agent_id` が必須です。"
+                "自身のエージェント ID を指定してください。"
+            ),
+        }
+
+    # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
+    sync_agents_from_file(app_ctx)
+
+    # ロールを取得
+    role = get_agent_role(app_ctx, caller_agent_id)
+    if role is None:
+        return {
+            "success": False,
+            "error": f"エージェント {caller_agent_id} が見つかりません",
+        }
+
+    # 許可ロールを取得
+    allowed_roles = get_allowed_roles(tool_name)
+
+    # ツールが未定義の場合は全ロール許可（後方互換性）
+    if not allowed_roles:
+        logger.warning(f"ツール '{tool_name}' の権限が未定義です。全ロールに許可します。")
+        return None
+
+    # ロールチェック
+    if role.value not in allowed_roles:
+        return {
+            "success": False,
+            "error": get_role_error_message(tool_name, role.value),
         }
 
     return None
@@ -245,8 +307,10 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
     """
     if app_ctx.ipc_manager is None:
         base_dir = resolve_project_root(app_ctx)
-        if app_ctx.session_id:
-            ipc_dir = os.path.join(base_dir, get_mcp_dir(), app_ctx.session_id, ".ipc")
+        # session_id を確保（config.json から読み取り）
+        session_id = ensure_session_id(app_ctx)
+        if session_id:
+            ipc_dir = os.path.join(base_dir, get_mcp_dir(), session_id, ".ipc")
         else:
             ipc_dir = os.path.join(base_dir, get_mcp_dir(), ".ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
@@ -266,8 +330,10 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
         if app_ctx.workspace_id is None:
             app_ctx.workspace_id = str(uuid.uuid4())[:8]
         base_dir = resolve_project_root(app_ctx)
-        if app_ctx.session_id:
-            dashboard_dir = os.path.join(base_dir, get_mcp_dir(), app_ctx.session_id, ".dashboard")
+        # session_id を確保（config.json から読み取り）
+        session_id = ensure_session_id(app_ctx)
+        if session_id:
+            dashboard_dir = os.path.join(base_dir, get_mcp_dir(), session_id, ".dashboard")
         else:
             dashboard_dir = os.path.join(base_dir, get_mcp_dir(), ".dashboard")
         app_ctx.dashboard_manager = DashboardManager(
@@ -342,7 +408,12 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
         if not app_ctx.project_root:
             app_ctx.project_root = project_root
             logger.info(f"project_root を自動設定: {project_root}")
-        memory_path = os.path.join(project_root, get_mcp_dir(), "memory", "memory.json")
+        # session_id を確保（config.json から読み取り）
+        session_id = ensure_session_id(app_ctx)
+        if session_id:
+            memory_path = os.path.join(project_root, get_mcp_dir(), session_id, ".memory", "memory.json")
+        else:
+            memory_path = os.path.join(project_root, get_mcp_dir(), "memory", "memory.json")
         app_ctx.memory_manager = MemoryManager(storage_path=memory_path)
     return app_ctx.memory_manager
 
@@ -446,6 +517,72 @@ def get_mcp_tool_prefix_from_config(working_dir: str | None = None) -> str:
     return default_prefix
 
 
+def get_session_id_from_config(working_dir: str | None = None) -> str | None:
+    """config.json から session_id を取得する。
+
+    init_tmux_workspace で作成された config.json を読み取る。
+    見つからない場合は None を返す。
+
+    Args:
+        working_dir: 探索開始ディレクトリ（オプション）
+
+    Returns:
+        セッションID、見つからない場合は None
+    """
+    search_dirs = []
+
+    if working_dir:
+        search_dirs.append(Path(working_dir))
+        # worktree の場合、メインリポジトリを探す
+        main_repo = resolve_main_repo_root(working_dir)
+        if main_repo != working_dir:
+            search_dirs.append(Path(main_repo))
+
+    # カレントディレクトリからも探索
+    cwd = Path.cwd()
+    search_dirs.append(cwd)
+
+    for base_dir in search_dirs:
+        config_file = base_dir / get_mcp_dir() / "config.json"
+        if config_file.exists():
+            try:
+                with open(config_file, encoding="utf-8") as f:
+                    config = json.load(f)
+                session_id = config.get("session_id")
+                if session_id:
+                    logger.debug(f"config.json から session_id を取得: {session_id}")
+                    return session_id
+            except Exception as e:
+                logger.warning(f"config.json の読み込みに失敗: {e}")
+
+    return None
+
+
+def ensure_session_id(app_ctx: "AppContext") -> str | None:
+    """セッションID を確保する。
+
+    app_ctx.session_id が設定されていなければ config.json から読み取る。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+
+    Returns:
+        セッションID、見つからない場合は None
+    """
+    if app_ctx.session_id:
+        return app_ctx.session_id
+
+    # config.json から取得
+    working_dir = app_ctx.project_root or get_project_root_from_config()
+    session_id = get_session_id_from_config(working_dir)
+
+    if session_id:
+        app_ctx.session_id = session_id
+        logger.debug(f"config.json から session_id を設定: {session_id}")
+
+    return session_id
+
+
 # ========== エージェント永続化ヘルパー ==========
 
 
@@ -499,7 +636,9 @@ def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
     if project_root:
         project_root = resolve_main_repo_root(project_root)
 
-    agents_file = _get_agents_file_path(project_root, app_ctx.session_id)
+    # session_id を確保（config.json から読み取り）
+    session_id = ensure_session_id(app_ctx)
+    agents_file = _get_agents_file_path(project_root, session_id)
 
     if not agents_file:
         logger.debug("project_root が設定されていないため、エージェント情報を保存できません")
@@ -551,7 +690,10 @@ def load_agents_from_file(app_ctx: AppContext) -> dict[str, "Agent"]:
     # worktree の場合はメインリポジトリのパスを使用
     if project_root:
         project_root = resolve_main_repo_root(project_root)
-    agents_file = _get_agents_file_path(project_root, app_ctx.session_id)
+
+    # session_id を確保（config.json から読み取り）
+    session_id = ensure_session_id(app_ctx)
+    agents_file = _get_agents_file_path(project_root, session_id)
 
     if not agents_file or not agents_file.exists():
         return {}
@@ -629,7 +771,10 @@ def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
     # worktree の場合はメインリポジトリのパスを使用
     if project_root:
         project_root = resolve_main_repo_root(project_root)
-    agents_file = _get_agents_file_path(project_root, app_ctx.session_id)
+
+    # session_id を確保（config.json から読み取り）
+    session_id = ensure_session_id(app_ctx)
+    agents_file = _get_agents_file_path(project_root, session_id)
 
     if not agents_file or not agents_file.exists():
         return False

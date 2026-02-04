@@ -201,20 +201,27 @@ create_agent(role="worker", working_dir="/path/to/worktree", ai_cli="gemini")
 | `list_tasks` | 全タスク一覧 |
 | `get_dashboard` | 完全なダッシュボード取得 |
 
-**⚠️ 重要: caller_agent_id の指定**
+### ⚠️ 重要: caller_agent_id の指定（全ツール共通）
 
-一部のツールはロール制限があり、`caller_agent_id` パラメータが必須です：
+**全ての MCP ツールには `caller_agent_id` パラメータが必須です。**
+
+これはロールベースのアクセス制御（RBAC）のためのパラメータで、ツール呼び出し時に自分の Agent ID を指定します。
 
 ```python
 # ❌ エラー: caller_agent_id が必要です
 assign_task_to_agent(task_id="xxx", agent_id="yyy")
+list_tasks()
+get_dashboard()
 
 # ✅ 正しい使い方（自分の Admin ID を指定）
 assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID")
+list_tasks(caller_agent_id="自分のID")
+get_dashboard(caller_agent_id="自分のID")
 ```
 
 - `caller_agent_id` には **自分（Admin）の ID** を指定してください
-- 自分の ID は `Self-Check` セクションで確認できます
+- 自分の ID は `create_agent(role="admin", ...)` の戻り値、または `list_agents()` で確認できます
+- このパラメータを省略するとエラーが返されます
 
 #### 通信
 

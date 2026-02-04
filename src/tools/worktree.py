@@ -7,7 +7,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.context import AppContext
-from src.tools.helpers import get_worktree_manager
+from src.tools.helpers import check_tool_permission, get_worktree_manager
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +22,12 @@ def register_tools(mcp: FastMCP) -> None:
         branch: str,
         create_branch: bool = True,
         base_branch: str | None = None,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """新しいgit worktreeを作成する。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             repo_path: メインリポジトリのパス
@@ -32,11 +35,18 @@ def register_tools(mcp: FastMCP) -> None:
             branch: ブランチ名
             create_branch: 新しいブランチを作成するか（デフォルト: True）
             base_branch: 基点ブランチ（create_branch=Trueの場合のみ有効）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             作成結果（success, worktree_path, branch, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "create_worktree", caller_agent_id)
+        if role_error:
+            return role_error
+
         worktree = get_worktree_manager(app_ctx, repo_path)
 
         # リポジトリの確認
@@ -61,16 +71,27 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def list_worktrees(repo_path: str, ctx: Context = None) -> dict[str, Any]:
+    async def list_worktrees(
+        repo_path: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """リポジトリのworktree一覧を取得する。
 
         Args:
             repo_path: メインリポジトリのパス
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             worktree一覧（success, worktrees, count または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "list_worktrees", caller_agent_id)
+        if role_error:
+            return role_error
+
         worktree = get_worktree_manager(app_ctx, repo_path)
 
         if not await worktree.is_git_repo():
@@ -93,19 +114,29 @@ def register_tools(mcp: FastMCP) -> None:
         repo_path: str,
         worktree_path: str,
         force: bool = False,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """git worktreeを削除する。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             repo_path: メインリポジトリのパス
             worktree_path: 削除するworktreeのパス
             force: 強制削除するか（デフォルト: False）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             削除結果（success, worktree_path, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "remove_worktree", caller_agent_id)
+        if role_error:
+            return role_error
+
         worktree = get_worktree_manager(app_ctx, repo_path)
 
         if not await worktree.is_git_repo():
@@ -130,19 +161,29 @@ def register_tools(mcp: FastMCP) -> None:
         agent_id: str,
         worktree_path: str,
         branch: str,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """エージェントにworktreeを割り当てる。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             agent_id: エージェントID
             worktree_path: worktreeのパス
             branch: ブランチ名
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             割り当て結果（success, agent_id, worktree_path, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "assign_worktree", caller_agent_id)
+        if role_error:
+            return role_error
+
         agents = app_ctx.agents
 
         agent = agents.get(agent_id)
@@ -170,6 +211,7 @@ def register_tools(mcp: FastMCP) -> None:
     async def get_worktree_status(
         repo_path: str,
         worktree_path: str,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """指定worktreeのgitステータスを取得する。
@@ -177,11 +219,18 @@ def register_tools(mcp: FastMCP) -> None:
         Args:
             repo_path: メインリポジトリのパス
             worktree_path: worktreeのパス
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             ステータス情報（success, status または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_worktree_status", caller_agent_id)
+        if role_error:
+            return role_error
+
         worktree = get_worktree_manager(app_ctx, repo_path)
 
         if not await worktree.is_git_repo():
@@ -198,16 +247,29 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def check_gtr_available(repo_path: str, ctx: Context = None) -> dict[str, Any]:
+    async def check_gtr_available(
+        repo_path: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """gtr (git-worktree-runner) が利用可能か確認する。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             repo_path: リポジトリのパス
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             gtrの利用可否（success, gtr_available, message）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "check_gtr_available", caller_agent_id)
+        if role_error:
+            return role_error
+
         worktree = get_worktree_manager(app_ctx, repo_path)
 
         available = await worktree.is_gtr_available()
@@ -226,20 +288,30 @@ def register_tools(mcp: FastMCP) -> None:
     async def open_worktree_with_ai(
         repo_path: str,
         branch: str,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """gtr ai コマンドでworktreeをAIツール（Claude Code）で開く。
 
         gtr がインストールされている場合のみ使用可能。
 
+        ※ Owner と Admin のみ使用可能。
+
         Args:
             repo_path: リポジトリのパス
             branch: ブランチ名
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             実行結果（success, branch, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "open_worktree_with_ai", caller_agent_id)
+        if role_error:
+            return role_error
+
         worktree = get_worktree_manager(app_ctx, repo_path)
 
         if not await worktree.is_git_repo():

@@ -71,6 +71,24 @@ Owner (You)
 
 ## Decisions（決定事項）
 
+### ⚠️ caller_agent_id について（重要）
+
+**全ての MCP ツールには `caller_agent_id` パラメータが必須です。**
+
+これはロールベースのアクセス制御（RBAC）のためのパラメータで、ツール呼び出し時に自分の Agent ID を指定します。
+
+```python
+# ❌ エラー: caller_agent_id が必要です
+get_dashboard_summary()
+
+# ✅ 正しい使い方
+get_dashboard_summary(caller_agent_id="自分のID")
+```
+
+**自分の ID の確認方法**:
+- `create_agent(role="owner", ...)` の戻り値に含まれる `agent_id`
+- または `list_agents()` で確認
+
 ### 利用可能な MCP ツール
 
 #### 初期化フェーズ

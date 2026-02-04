@@ -98,6 +98,26 @@ Owner (1 agent)
 
 ## Decisions（決定事項）
 
+### ⚠️ caller_agent_id について（重要）
+
+**全ての MCP ツールには `caller_agent_id` パラメータが必須です。**
+
+これはロールベースのアクセス制御（RBAC）のためのパラメータで、ツール呼び出し時に自分の Agent ID を指定します。
+
+```python
+# ❌ エラー: caller_agent_id が必要です
+update_task_status(task_id, "in_progress")
+send_message(admin_id, "task_progress", "完了しました")
+
+# ✅ 正しい使い方
+update_task_status(task_id, "in_progress", caller_agent_id="自分のID")
+send_message(admin_id, "task_progress", "完了しました", caller_agent_id="自分のID")
+```
+
+**自分の ID の確認方法**:
+- Admin から `send_task` で送られてくる情報に含まれる
+- または `read_messages()` で確認
+
 ### 利用可能な MCP ツール
 
 #### 通信

@@ -6,6 +6,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import ModelProfile
 from src.context import AppContext
+from src.tools.helpers import check_tool_permission
 
 
 def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str, Any]:
@@ -56,13 +57,25 @@ def register_tools(mcp: FastMCP) -> None:
     """モデルプロファイル管理ツールを登録する。"""
 
     @mcp.tool()
-    async def get_model_profile(ctx: Context = None) -> dict[str, Any]:
+    async def get_model_profile(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """現在のモデルプロファイルを取得する。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             プロファイル情報（success, active_profile, settings）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_model_profile", caller_agent_id)
+        if role_error:
+            return role_error
+
         settings = app_ctx.settings
 
         current_settings = get_current_profile_settings(app_ctx)
@@ -77,17 +90,27 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def switch_model_profile(
         profile: str,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """モデルプロファイルを切り替える。
 
+        ※ Owner のみ使用可能。
+
         Args:
             profile: 切り替え先プロファイル（standard/performance）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             切り替え結果（success, previous_profile, current_profile, settings）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "switch_model_profile", caller_agent_id)
+        if role_error:
+            return role_error
+
         settings = app_ctx.settings
 
         # プロファイルの検証
@@ -118,17 +141,25 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def get_model_profile_settings(
         profile: str | None = None,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """モデルプロファイルの設定詳細を取得する。
 
         Args:
             profile: プロファイル名（省略時は全プロファイル）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             プロファイル設定の詳細
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_model_profile_settings", caller_agent_id)
+        if role_error:
+            return role_error
+
         settings = app_ctx.settings
 
         if profile:

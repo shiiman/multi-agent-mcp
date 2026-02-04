@@ -18,6 +18,7 @@ from src.managers.tmux_manager import (
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.helpers import (
+    check_tool_permission,
     ensure_ipc_manager,
     ensure_metrics_manager,
     save_agent_to_file,
@@ -96,6 +97,7 @@ def register_tools(mcp: FastMCP) -> None:
         role: str,
         working_dir: str,
         ai_cli: str | None = None,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """新しいエージェントを作成する。
@@ -106,10 +108,13 @@ def register_tools(mcp: FastMCP) -> None:
         - 右 60%: Worker 1-6 (pane 1-6)
         - Worker 7以降は追加ウィンドウ（2×5=10ペイン/ウィンドウ）
 
+        ※ Owner と Admin のみ使用可能。
+
         Args:
             role: エージェントの役割（owner/admin/worker）
             working_dir: 作業ディレクトリのパス
             ai_cli: 使用するAI CLI（claude/codex/gemini、省略でデフォルト）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             作成結果（success, agent, message または error）
@@ -118,6 +123,12 @@ def register_tools(mcp: FastMCP) -> None:
         settings = app_ctx.settings
         tmux = app_ctx.tmux
         agents = app_ctx.agents
+
+        # ロールチェック（Owner 作成時は caller_agent_id 不要、それ以外は必須）
+        if role != "owner":
+            role_error = check_tool_permission(app_ctx, "create_agent", caller_agent_id)
+            if role_error:
+                return role_error
 
         # 現在のプロファイル設定を取得
         profile_settings = get_current_profile_settings(app_ctx)
@@ -274,16 +285,27 @@ def register_tools(mcp: FastMCP) -> None:
         return result
 
     @mcp.tool()
-    async def list_agents(ctx: Context) -> dict[str, Any]:
+    async def list_agents(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """全エージェントの一覧を取得する。
 
         ファイルに保存されたエージェント情報も含めて返す。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             エージェント一覧（success, agents, count, synced_from_file）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
         agents = app_ctx.agents
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "list_agents", caller_agent_id)
+        if role_error:
+            return role_error
 
         # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
         synced = sync_agents_from_file(app_ctx)
@@ -298,16 +320,27 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def get_agent_status(agent_id: str, ctx: Context) -> dict[str, Any]:
+    async def get_agent_status(
+        agent_id: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """指定エージェントの詳細ステータスを取得する。
 
         Args:
             agent_id: エージェントID
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             エージェント詳細（success, agent, session_active または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_agent_status", caller_agent_id)
+        if role_error:
+            return role_error
+
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
@@ -330,18 +363,31 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def terminate_agent(agent_id: str, ctx: Context) -> dict[str, Any]:
+    async def terminate_agent(
+        agent_id: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """エージェントを終了する。
 
         グリッドレイアウトではペインは維持され、再利用可能になる。
 
+        ※ Owner と Admin のみ使用可能。
+
         Args:
             agent_id: 終了するエージェントID
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             終了結果（success, agent_id, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "terminate_agent", caller_agent_id)
+        if role_error:
+            return role_error
+
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
@@ -388,12 +434,15 @@ def register_tools(mcp: FastMCP) -> None:
         prompt_type: str = "auto",
         custom_prompt: str | None = None,
         terminal: str = "auto",
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """エージェントを初期化し、ロールテンプレートを渡して AI CLI を起動する。
 
         create_agent で作成されたエージェントに対して、roles/ テンプレートを
         初期プロンプトとして渡し、ターミナルで AI CLI を起動する。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             agent_id: 初期化するエージェントID
@@ -403,11 +452,18 @@ def register_tools(mcp: FastMCP) -> None:
                 - "file": custom_prompt をファイルパスとして読み込み
             custom_prompt: カスタムプロンプト（prompt_type が "custom" または "file" の場合）
             terminal: ターミナルアプリ（auto/ghostty/iterm2/terminal）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             初期化結果（success, agent_id, cli, prompt_source, message）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "initialize_agent", caller_agent_id)
+        if role_error:
+            return role_error
+
         agents = app_ctx.agents
         ai_cli_manager = app_ctx.ai_cli
 

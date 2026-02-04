@@ -9,6 +9,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from src.context import AppContext
 from src.models.agent import AgentRole, AgentStatus
 from src.tools.helpers import (
+    check_tool_permission,
     ensure_dashboard_manager,
     ensure_global_memory_manager,
     ensure_memory_manager,
@@ -25,17 +26,31 @@ def register_tools(mcp: FastMCP) -> None:
     """コマンド実行ツールを登録する。"""
 
     @mcp.tool()
-    async def send_command(agent_id: str, command: str, ctx: Context) -> dict[str, Any]:
+    async def send_command(
+        agent_id: str,
+        command: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """指定エージェントにコマンドを送信する。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             agent_id: 対象エージェントID
             command: 実行するコマンド
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             送信結果（success, agent_id, command, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "send_command", caller_agent_id)
+        if role_error:
+            return role_error
+
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
@@ -72,17 +87,31 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def get_output(agent_id: str, lines: int = 50, ctx: Context = None) -> dict[str, Any]:
+    async def get_output(
+        agent_id: str,
+        lines: int = 50,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """エージェントのtmux出力を取得する。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             agent_id: 対象エージェントID
             lines: 取得する行数（デフォルト: 50）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             出力内容（success, agent_id, lines, output または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_output", caller_agent_id)
+        if role_error:
+            return role_error
+
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
@@ -122,6 +151,7 @@ def register_tools(mcp: FastMCP) -> None:
         auto_enhance: bool = True,
         worker_count: int | None = None,
         branch_name: str | None = None,
+        caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
         """タスク指示をファイル経由でエージェントに送信する。
@@ -131,6 +161,8 @@ def register_tools(mcp: FastMCP) -> None:
         - Admin: 計画書 + Worker管理手順を自動生成
         - Worker: 7セクション構造・ペルソナ・メモリを自動統合
 
+        ※ Owner と Admin のみ使用可能。
+
         Args:
             agent_id: エージェントID
             task_content: タスク内容（Markdown形式）
@@ -138,11 +170,18 @@ def register_tools(mcp: FastMCP) -> None:
             auto_enhance: 自動拡張を行うか（デフォルト: True）
             worker_count: Worker 数（Admin 用、省略時はプロファイル設定を使用）
             branch_name: 作業ブランチ名（Admin 用、省略時は feature/{session_id}）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             送信結果（success, task_file, command_sent, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "send_task", caller_agent_id)
+        if role_error:
+            return role_error
+
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
@@ -316,18 +355,31 @@ def register_tools(mcp: FastMCP) -> None:
         return result
 
     @mcp.tool()
-    async def open_session(agent_id: str, ctx: Context = None) -> dict[str, Any]:
+    async def open_session(
+        agent_id: str,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
         """エージェントのtmuxセッションをターミナルアプリで開く。
 
         優先順位: ghostty → iTerm2 → Terminal.app
 
+        ※ Owner のみ使用可能。
+
         Args:
             agent_id: エージェントID
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             開く結果（success, agent_id, session, message または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "open_session", caller_agent_id)
+        if role_error:
+            return role_error
+
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
@@ -360,18 +412,30 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def broadcast_command(
-        command: str, role: str | None = None, ctx: Context = None
+        command: str,
+        role: str | None = None,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
     ) -> dict[str, Any]:
         """全エージェント（または特定役割）にコマンドをブロードキャストする。
+
+        ※ Owner と Admin のみ使用可能。
 
         Args:
             command: 実行するコマンド
             role: 対象の役割（省略時は全員、有効: owner/admin/worker）
+            caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
             送信結果（success, command, role_filter, results, summary または error）
         """
         app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "broadcast_command", caller_agent_id)
+        if role_error:
+            return role_error
+
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 

@@ -125,6 +125,9 @@ class AiCliManager:
         if project_root:
             env_prefix = f"export MCP_PROJECT_ROOT={shlex.quote(project_root)} && "
 
+        # 作業ディレクトリ: worktree_path > project_root > なし
+        working_dir = worktree_path or project_root
+
         if cli == AICli.CLAUDE:
             # export MCP_PROJECT_ROOT=... && cd <path> && claude --model <model> --dangerously-skip-permissions < task.md
             parts = [cmd]
@@ -133,16 +136,16 @@ class AiCliManager:
             parts.append("--dangerously-skip-permissions")
             parts.append(f"< {shlex.quote(task_file_path)}")
             command = " ".join(parts)
-            if worktree_path:
-                return f"{env_prefix}cd {shlex.quote(worktree_path)} && {command}"
+            if working_dir:
+                return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
         elif cli == AICli.CODEX:
             # export MCP_PROJECT_ROOT=... && cd <path> && cat task.md | codex -a never
             parts = ["cat", shlex.quote(task_file_path), "|", cmd, "-a", "never"]
             command = " ".join(parts)
-            if worktree_path:
-                return f"{env_prefix}cd {shlex.quote(worktree_path)} && {command}"
+            if working_dir:
+                return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
         else:  # AICli.GEMINI
@@ -150,8 +153,8 @@ class AiCliManager:
             parts = [cmd, "--yolo"]
             parts.append(f"< {shlex.quote(task_file_path)}")
             command = " ".join(parts)
-            if worktree_path:
-                return f"{env_prefix}cd {shlex.quote(worktree_path)} && {command}"
+            if working_dir:
+                return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
     def _build_cli_args(

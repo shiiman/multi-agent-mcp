@@ -46,5 +46,20 @@
 
 ## Notes（メモ）
 
-- 作業完了時は `report_task_completion` で Admin に報告
 - 作業結果は `save_to_memory` で保存
+
+## 完了報告（必須）
+
+**作業が完了したら必ず `report_task_completion` を呼び出してください。**
+
+```
+mcp__multi-agent-mcp__report_task_completion(
+    task_id="{task_id}",
+    status="completed",  # または "failed"
+    message="作業内容の要約",
+    summary="結果の詳細（メモリに保存される）",
+    caller_agent_id="{agent_id}"
+)
+```
+
+これを呼び出さないと Admin がタスク完了を検知できません。
