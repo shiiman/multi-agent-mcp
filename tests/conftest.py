@@ -4,15 +4,20 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.config.settings import Settings
+from src.context import AppContext
+from src.managers.agent_manager import AgentManager
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
 from src.managers.gtrconfig_manager import GtrconfigManager
 from src.managers.healthcheck_manager import HealthcheckManager
 from src.managers.ipc_manager import IPCManager
+from src.managers.memory_manager import MemoryManager
+from src.managers.persona_manager import PersonaManager
 from src.managers.scheduler_manager import SchedulerManager
 from src.managers.tmux_manager import TmuxManager
 from src.managers.worktree_manager import WorktreeManager
@@ -52,9 +57,21 @@ async def tmux_manager(settings):
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_tmux_sessions_at_end():
     """テストセッション終了時に残ったtmuxセッションをクリーンアップ。"""
-    yield
-    # セッション終了時に test-mcp-agent プレフィックスのセッションを全て削除
     import subprocess
+
+    # テスト開始前に既存のテスト用セッションをクリーンアップ
+    _cleanup_test_tmux_sessions()
+
+    yield
+
+    # テスト終了後にもクリーンアップ
+    _cleanup_test_tmux_sessions()
+
+
+def _cleanup_test_tmux_sessions():
+    """テスト用 tmux セッションをクリーンアップする。"""
+    import subprocess
+
     result = subprocess.run(
         ["tmux", "list-sessions", "-F", "#{session_name}"],
         capture_output=True,
@@ -62,6 +79,7 @@ def cleanup_tmux_sessions_at_end():
     )
     if result.returncode == 0:
         for session in result.stdout.strip().split("\n"):
+            # テスト用プレフィックスのセッションのみ削除
             if session.startswith("test-mcp-agent"):
                 subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)
 
@@ -159,3 +177,113 @@ def healthcheck_manager(tmux_manager, sample_agents):
 def worktree_manager(git_repo):
     """WorktreeManagerインスタンスを作成する。"""
     return WorktreeManager(str(git_repo))
+
+
+@pytest.fixture
+def agent_manager(tmux_manager, worktree_manager):
+    """AgentManagerインスタンスを作成する。"""
+    return AgentManager(tmux_manager, worktree_manager)
+
+
+@pytest.fixture
+def memory_manager(temp_dir):
+    """MemoryManagerインスタンスを作成する。"""
+    memory_dir = temp_dir / ".memory"
+    manager = MemoryManager(str(memory_dir))
+    yield manager
+
+
+@pytest.fixture
+def persona_manager():
+    """PersonaManagerインスタンスを作成する。"""
+    return PersonaManager()
+
+
+@pytest.fixture
+def app_ctx(
+    settings,
+    tmux_manager,
+    ai_cli_manager,
+    sample_agents,
+    temp_dir,
+):
+    """テスト用のAppContextを作成する。"""
+    # IPC マネージャー
+    ipc_dir = temp_dir / "ipc"
+    ipc = IPCManager(str(ipc_dir))
+    ipc.initialize()
+
+    # ダッシュボードマネージャー
+    dashboard_dir = temp_dir / ".dashboard"
+    dashboard = DashboardManager(
+        workspace_id="test-workspace",
+        workspace_path=str(temp_dir),
+        dashboard_dir=str(dashboard_dir),
+    )
+    dashboard.initialize()
+
+    # メモリマネージャー
+    memory_dir = temp_dir / ".memory"
+    memory = MemoryManager(str(memory_dir))
+
+    # ペルソナマネージャー
+    persona = PersonaManager()
+
+    # スケジューラーマネージャー
+    scheduler = SchedulerManager(dashboard, sample_agents)
+
+    ctx = AppContext(
+        settings=settings,
+        tmux=tmux_manager,
+        ai_cli=ai_cli_manager,
+        agents=sample_agents.copy(),
+        ipc_manager=ipc,
+        dashboard_manager=dashboard,
+        scheduler_manager=scheduler,
+        memory_manager=memory,
+        persona_manager=persona,
+        workspace_id="test-workspace",
+        project_root=str(temp_dir),
+        session_id="test-session",
+    )
+    yield ctx
+    # クリーンアップ
+    ipc.cleanup()
+    dashboard.cleanup()
+
+
+@pytest.fixture
+def mock_mcp_context(app_ctx):
+    """MCPツールのContextをモックする。"""
+    mock_ctx = MagicMock()
+    mock_ctx.request_context.lifespan_context = app_ctx
+    return mock_ctx
+
+
+@pytest.fixture
+def mock_terminal_executor():
+    """TerminalExecutorのモック。"""
+    mock = MagicMock()
+    mock.name = "MockTerminal"
+    mock.is_available = AsyncMock(return_value=True)
+    mock.execute_script = AsyncMock(return_value=(True, "成功"))
+    return mock
+
+
+@pytest.fixture
+def mock_tmux_manager():
+    """TmuxManagerのモック（tmux 不要なテスト用）。"""
+    mock = MagicMock()
+    mock.create_main_session = AsyncMock(return_value=True)
+    mock.send_keys = AsyncMock(return_value=True)
+    mock.send_keys_to_pane = AsyncMock(return_value=True)
+    mock.capture_pane = AsyncMock(return_value="mock output")
+    mock.capture_pane_by_position = AsyncMock(return_value="mock output")
+    mock.session_exists = AsyncMock(return_value=True)
+    mock.set_pane_title = AsyncMock(return_value=True)
+    mock.add_extra_worker_window = AsyncMock(return_value=True)
+    mock.cleanup_all_sessions = AsyncMock()
+    mock._session_name = MagicMock(return_value="test-session")
+    mock._get_window_name = MagicMock(return_value="main")
+    mock._run = AsyncMock(return_value="")
+    return mock

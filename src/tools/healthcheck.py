@@ -196,10 +196,10 @@ def register_tools(mcp: FastMCP) -> None:
 
         # Worker のみ復旧対象
         from src.models.agent import AgentRole
-        if old_agent.role != AgentRole.WORKER:
+        if old_agent.role != AgentRole.WORKER.value:
             return {
                 "success": False,
-                "error": f"Worker のみ復旧可能です（対象: {old_agent.role.value}）",
+                "error": f"Worker のみ復旧可能です（対象: {old_agent.role}）",
             }
 
         # 元の情報を保存

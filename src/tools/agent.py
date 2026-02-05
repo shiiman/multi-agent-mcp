@@ -333,7 +333,6 @@ def register_tools(mcp: FastMCP) -> None:
             "agent": agent.model_dump(mode="json"),
             "message": f"エージェント {agent_id}（{role}）を作成しました",
             "ipc_registered": ipc_registered,
-            "metrics_tracking": metrics_tracking,
             "file_persisted": file_saved,
             "dashboard_updated": dashboard_updated,
         }
@@ -476,19 +475,19 @@ def register_tools(mcp: FastMCP) -> None:
         # Owner の場合は tmux 操作なしでエージェント情報のみ更新
 
         # エージェントの状態を terminated に変更（削除せず履歴を残す）
-        agent.status = AgentStatus.OFFLINE
+        agent.status = AgentStatus.TERMINATED
         agent.last_activity = datetime.now()
 
         # ファイルに保存（MCP インスタンス間で共有）
         file_saved = save_agent_to_file(app_ctx, agent)
 
-        logger.info(f"エージェント {agent_id} を終了しました (status: offline, file_saved: {file_saved})")
+        logger.info(f"エージェント {agent_id} を終了しました (status: terminated, file_saved: {file_saved})")
 
         return {
             "success": True,
             "agent_id": agent_id,
             "message": f"エージェント {agent_id} を終了しました",
-            "status": "offline",
+            "status": "terminated",
             "file_persisted": file_saved,
         }
 
