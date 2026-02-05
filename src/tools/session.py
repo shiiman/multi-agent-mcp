@@ -28,6 +28,10 @@ def generate_env_template() -> str:
 # Worker エージェントの最大数
 MCP_MAX_WORKERS=6
 
+# ========== Worktree 設定 ==========
+# git worktree を使用するか（false で Non-Worktree モード）
+MCP_ENABLE_WORKTREE=true
+
 # ========== tmux 設定 ==========
 # tmux セッション名のプレフィックス
 MCP_TMUX_PREFIX=multi-agent-mcp
@@ -75,6 +79,13 @@ MCP_COST_WARNING_THRESHOLD_USD=10.0
 # 応答がなければ即座に異常と判断
 MCP_HEALTHCHECK_INTERVAL_SECONDS=60
 
+# ========== 品質チェック設定 ==========
+# 品質チェックの最大イテレーション回数
+MCP_QUALITY_CHECK_MAX_ITERATIONS=5
+
+# 同一問題の繰り返し上限（この回数を超えたら Owner に相談）
+MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT=3
+
 # ========== Extended Thinking 設定 ==========
 # Owner の思考トークン数（0 = 即断即決モード）
 MCP_OWNER_THINKING_TOKENS=0
@@ -84,6 +95,13 @@ MCP_ADMIN_THINKING_TOKENS=1000
 
 # Worker の思考トークン数
 MCP_WORKER_THINKING_TOKENS=10000
+
+# ========== メモリ設定 ==========
+# メモリの最大エントリ数
+MCP_MEMORY_MAX_ENTRIES=1000
+
+# メモリエントリの保持期間（日）
+MCP_MEMORY_TTL_DAYS=90
 
 # ========== スクリーンショット設定 ==========
 # スクリーンショットとして認識する拡張子（JSON形式）

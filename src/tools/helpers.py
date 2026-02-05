@@ -387,7 +387,8 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
         # workspace_id は session_id を使用（同一タスク = 同一ダッシュボード）
         if app_ctx.workspace_id is None:
             app_ctx.workspace_id = session_id
-        dashboard_dir = os.path.join(base_dir, get_mcp_dir(), session_id, ".dashboard")
+        # 🔴 ダッシュボード統合: .dashboard/ ではなく dashboard/ に保存
+        dashboard_dir = os.path.join(base_dir, get_mcp_dir(), session_id, "dashboard")
         app_ctx.dashboard_manager = DashboardManager(
             workspace_id=app_ctx.workspace_id,
             workspace_path=base_dir,

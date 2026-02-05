@@ -728,7 +728,42 @@ def register_tools(mcp: FastMCP) -> None:
         # worktree 無効モードのチェック
         enable_worktree = settings.enable_worktree
 
-        async def create_single_worker(config: dict, worker_index: int) -> dict[str, Any]:
+        # 🔴 Race condition 対策: 並列実行前に pane を事前割り当て
+        project_name = get_project_name(repo_path)
+        pre_assigned_slots: list[tuple[int, int] | None] = []
+
+        # 現在のWorkerペイン割り当て状況を取得
+        used_slots: set[tuple[int, int]] = set()
+        for agent in agents.values():
+            if (
+                agent.role == AgentRole.WORKER
+                and agent.session_name == project_name
+                and agent.window_index is not None
+                and agent.pane_index is not None
+            ):
+                used_slots.add((agent.window_index, agent.pane_index))
+
+        # 各 Worker に pane を事前割り当て
+        for i in range(len(worker_configs)):
+            slot = None
+            # メインウィンドウの空きを探す
+            for pane_index in MAIN_WINDOW_WORKER_PANES:
+                if (0, pane_index) not in used_slots:
+                    slot = (0, pane_index)
+                    used_slots.add(slot)  # 確保済みとしてマーク
+                    break
+
+            # メインウィンドウが満杯の場合は追加ウィンドウ（TODO: 実装が必要な場合）
+            if slot is None:
+                logger.warning(f"Worker {i + 1}: 利用可能な pane がありません")
+
+            pre_assigned_slots.append(slot)
+
+        logger.info(f"事前割り当て済み pane: {pre_assigned_slots}")
+
+        async def create_single_worker(
+            config: dict, worker_index: int, assigned_slot: tuple[int, int] | None
+        ) -> dict[str, Any]:
             """単一の Worker を作成する内部関数。"""
             branch = config.get("branch")
             task_title = config.get("task_title", f"Worker {worker_index + 1}")
@@ -764,7 +799,6 @@ def register_tools(mcp: FastMCP) -> None:
                 # 2. Worker エージェント作成
                 # create_agent の内部ロジックを直接実行
                 tmux = app_ctx.tmux
-                project_name = get_project_name(repo_path)
 
                 # メインセッションを確保
                 if not await tmux.create_main_session(repo_path):
@@ -774,15 +808,14 @@ def register_tools(mcp: FastMCP) -> None:
                         "worker_index": worker_index,
                     }
 
-                # 次の空きスロットを探す
-                slot = _get_next_worker_slot(agents, settings, project_name, profile_max_workers)
-                if slot is None:
+                # 🔴 事前割り当てされた pane を使用（race condition 対策）
+                if assigned_slot is None:
                     return {
                         "success": False,
-                        "error": f"Worker {worker_index + 1}: 利用可能なスロットがありません",
+                        "error": f"Worker {worker_index + 1}: 利用可能なスロットがありません（事前割り当て失敗）",
                         "worker_index": worker_index,
                     }
-                window_index, pane_index = slot
+                window_index, pane_index = assigned_slot
 
                 # 追加ウィンドウが必要な場合は作成
                 if window_index > 0:
@@ -1007,10 +1040,13 @@ def register_tools(mcp: FastMCP) -> None:
                     "worker_index": worker_index,
                 }
 
-        # 全 Worker を並列で作成
+        # 全 Worker を並列で作成（事前割り当てされた pane を渡す）
         logger.info(f"{len(worker_configs)} 個の Worker を並列で作成開始")
         results = await asyncio.gather(
-            *[create_single_worker(config, i) for i, config in enumerate(worker_configs)],
+            *[
+                create_single_worker(config, i, pre_assigned_slots[i])
+                for i, config in enumerate(worker_configs)
+            ],
             return_exceptions=True
         )
 

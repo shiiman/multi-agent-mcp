@@ -78,7 +78,8 @@ class DashboardManager:
 
     def _get_dashboard_path(self) -> Path:
         """ダッシュボードファイルパスを取得する。"""
-        return self.dashboard_dir / f"dashboard_{self.workspace_id}.md"
+        # 🔴 ダッシュボード統合: dashboard.md に統一
+        return self.dashboard_dir / "dashboard.md"
 
     def _get_legacy_json_path(self) -> Path:
         """レガシー JSON ダッシュボードファイルパスを取得する（移行用）。"""
@@ -752,12 +753,9 @@ class DashboardManager:
             session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
 
         Returns:
-            保存したファイルのパス
+            保存したファイルのパス（{session_id}/dashboard/dashboard.md）
         """
-        md_content = self.generate_markdown_dashboard()
-        dashboard_dir = project_root / get_mcp_dir() / session_id / "dashboard"
-        dashboard_dir.mkdir(parents=True, exist_ok=True)
-        md_path = dashboard_dir / "dashboard.md"
-        md_path.write_text(md_content, encoding="utf-8")
-        logger.info(f"Markdownダッシュボードを保存しました: {md_path}")
-        return md_path
+        # 🔴 ダッシュボード統合: dashboard/dashboard.md に保存
+        dashboard = self._read_dashboard()
+        self._write_dashboard(dashboard)
+        return self._get_dashboard_path()
