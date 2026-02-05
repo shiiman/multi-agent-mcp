@@ -1,12 +1,16 @@
 """IPC/メッセージング管理ツール。"""
 
+import logging
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.context import AppContext
+from src.models.agent import AgentStatus
 from src.models.message import MessagePriority, MessageType
-from src.tools.helpers import check_tool_permission, ensure_ipc_manager
+from src.tools.helpers import check_tool_permission, ensure_ipc_manager, sync_agents_from_file
+
+logger = logging.getLogger(__name__)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -83,9 +87,68 @@ def register_tools(mcp: FastMCP) -> None:
             priority=msg_priority,
         )
 
+        # イベント駆動通知: 受信者の状態に応じて通知方法を選択
+        notification_sent = False
+        notification_method = None
+        if receiver_id:
+            # エージェント情報を同期
+            sync_agents_from_file(app_ctx)
+            agents = app_ctx.agents
+            tmux = app_ctx.tmux
+
+            receiver_agent = agents.get(receiver_id)
+            if receiver_agent:
+                # tmux ペインがある場合は tmux 経由で通知
+                if (
+                    receiver_agent.session_name
+                    and receiver_agent.window_index is not None
+                    and receiver_agent.pane_index is not None
+                ):
+                    notification_text = (
+                        f"[IPC] 新しいメッセージ: {msg_type.value} from {sender_id}"
+                    )
+                    try:
+                        await tmux.send_keys_to_pane(
+                            receiver_agent.session_name,
+                            receiver_agent.window_index,
+                            receiver_agent.pane_index,
+                            f"echo '{notification_text}'",
+                        )
+                        notification_sent = True
+                        notification_method = "tmux"
+                        logger.info(
+                            f"IPC通知を送信(tmux): {receiver_id}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"tmux通知の送信に失敗: {e}")
+                else:
+                    # tmux ペインがない場合（Owner など）は macOS 通知を送る
+                    try:
+                        import subprocess
+                        notification_title = "Multi-Agent MCP"
+                        notification_body = f"{msg_type.value}: {content[:100]}"
+                        subprocess.run(
+                            [
+                                "osascript",
+                                "-e",
+                                f'display notification "{notification_body}" with title "{notification_title}"',
+                            ],
+                            capture_output=True,
+                            timeout=5,
+                        )
+                        notification_sent = True
+                        notification_method = "macos"
+                        logger.info(
+                            f"IPC通知を送信(macOS): {receiver_id}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"macOS通知の送信に失敗: {e}")
+
         return {
             "success": True,
             "message_id": message.id,
+            "notification_sent": notification_sent,
+            "notification_method": notification_method,  # "tmux" or "macos" or None
             "message": (
                 "ブロードキャストを送信しました"
                 if receiver_id is None

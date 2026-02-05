@@ -26,7 +26,7 @@ Admin からの明確な指示に基づき、割り当てられた worktree 内�
 ```
 Owner (1 agent)
   └── Admin (1 agent)
-        └── Workers (You + up to 4 others)
+        └── Workers (You, up to 6 total)
 ```
 
 ### 通信先
@@ -84,8 +84,23 @@ Owner (1 agent)
 | ツール | 用途 |
 |--------|------|
 | `get_task` | 割り当てられたタスクの詳細 |
-| `read_messages` | Admin からの指示 |
-| `get_unread_count` | 未読メッセージ数 |
+| `read_messages` | Admin からの指示・追加指示を確認 |
+| `get_unread_count` | 未読メッセージ数（進捗報告時に確認） |
+
+### 進捗報告時の追加指示確認
+
+**進捗報告（25%ごと）のタイミングで、Admin からの追加指示や方向修正がないか確認してください：**
+
+```python
+# 進捗報告時
+send_message(admin_id, "task_progress", "30% 完了", caller_agent_id=worker_id)
+
+# 追加指示があるか確認
+unread = get_unread_count(agent_id=worker_id, caller_agent_id=worker_id)
+if unread["unread_count"] > 0:
+    messages = read_messages(agent_id=worker_id, unread_only=True, caller_agent_id=worker_id)
+    # Admin からの追加指示があれば対応
+```
 
 ### 作業環境情報
 
@@ -98,25 +113,10 @@ Owner (1 agent)
 
 ## Decisions（決定事項）
 
-### ⚠️ caller_agent_id について（重要）
+### ⚠️ caller_agent_id（全ツール共通）
 
-**全ての MCP ツールには `caller_agent_id` パラメータが必須です。**
-
-これはロールベースのアクセス制御（RBAC）のためのパラメータで、ツール呼び出し時に自分の Agent ID を指定します。
-
-```python
-# ❌ エラー: caller_agent_id が必要です
-update_task_status(task_id, "in_progress")
-send_message(admin_id, "task_progress", "完了しました")
-
-# ✅ 正しい使い方
-update_task_status(task_id, "in_progress", caller_agent_id="自分のID")
-send_message(admin_id, "task_progress", "完了しました", caller_agent_id="自分のID")
-```
-
-**自分の ID の確認方法**:
-- Admin から `send_task` で送られてくる情報に含まれる
-- または `read_messages()` で確認
+**全ツールに `caller_agent_id`（自分の Worker ID）が必須です。**
+自分の ID は Admin から `send_task` で送られてくる情報に含まれます。
 
 ### 利用可能な MCP ツール
 
@@ -132,12 +132,12 @@ send_message(admin_id, "task_progress", "完了しました", caller_agent_id="�
 
 | ツール | 用途 |
 |--------|------|
-| `report_task_progress` | **10% ごとに進捗を報告**（Dashboard + Admin に通知） |
+| `report_task_progress` | **25% ごとに進捗を報告**（Admin に通知、Dashboard は自動更新） |
 | `report_task_completion` | タスク完了時に報告 |
 | `get_task` | 割り当てタスクの詳細確認 |
 
 **⚠️ 進捗報告ルール**:
-- **10% ごとに `report_task_progress` を呼び出してください**
+- **25% ごとに `report_task_progress` を呼び出してください**
 - Admin と Owner がリアルタイムで進捗を把握できます
 - 進捗報告は Dashboard に反映されます
 
@@ -154,12 +154,6 @@ report_task_progress(task_id="xxx", progress=90, message="動作確認完了", c
 # 例: 完了
 report_task_completion(task_id="xxx", status="completed", message="タスク完了", caller_agent_id="自分のID")
 ```
-
-#### ヘルスチェック
-
-| ツール | 用途 |
-|--------|------|
-| `record_heartbeat` | 生存信号を記録（定期的に呼ぶ） |
 
 ### メッセージタイプ
 
@@ -219,47 +213,6 @@ send_message(
 )
 ```
 
-### 進捗報告パターン
-
-```python
-# 作業開始
-record_heartbeat(self_id)  # ハートビート記録
-update_task_status(task_id, "in_progress", progress=0)
-
-# 作業中 - 定期的に進捗報告
-record_heartbeat(self_id)  # ハートビート記録
-send_message(
-    receiver_id=admin_id,
-    message_type="task_progress",
-    content="データベーススキーマ完了、マイグレーション作業中",
-    caller_agent_id=self_id
-)
-update_task_status(task_id, "in_progress", progress=50)
-
-# 完了時 - 必ず 2 ステップ実行
-record_heartbeat(self_id)
-
-# ステップ 1: Dashboard 更新
-report_task_completion(
-    task_id=task_id,
-    status="completed",
-    message="タスク完了",
-    caller_agent_id=self_id
-)
-
-# ステップ 2: Admin に IPC 通知（必須！）
-send_message(
-    receiver_id=admin_id,
-    message_type="task_complete",  # ← 必ずこのタイプ
-    content="タスク完了。変更は feature/xyz ブランチにコミット・プッシュ済み",
-    caller_agent_id=self_id
-)
-```
-
-**注意**:
-- `record_heartbeat` を定期的に呼ぶことで、Admin がエージェントの状態を監視できます
-- **完了時は `report_task_completion` と `send_message` の両方が必須です**
-
 ### ブロッカー発生時の対応
 
 ```python
@@ -287,26 +240,6 @@ update_task_status(
 4. **早期エスカレーション**: ブロッカーは即座に報告
 5. **クリーンなコミット**: アトミックで説明的なコミット
 6. **ブランチ規律**: 割り当てられた worktree/ブランチでのみ作業
-
-### ワークフロー例
-
-```
-1. Admin → Worker: "バリデーション付き User モデルを実装"
-
-2. Worker: 作業開始
-   - read_messages() → タスク詳細取得
-   - update_task_status(task_id, "in_progress")
-
-3. Worker: 進捗報告
-   - "User モデル作成" → progress=25%
-   - "バリデーション追加" → progress=50%
-   - "ユニットテスト作成" → progress=75%
-
-4. Worker: 完了
-   - git commit -m "feat: バリデーション付き User モデルを実装"
-   - update_task_status(task_id, "completed", progress=100)
-   - send_message(admin_id, "task_complete", "完了、ブランチを確認...")
-```
 
 ---
 

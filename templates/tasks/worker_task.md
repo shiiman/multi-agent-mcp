@@ -82,7 +82,7 @@ save_to_memory(
 git add -A
 
 # 2. コミット（作業内容を要約したメッセージ）
-git commit -m "feat: {作業内容の要約}"
+git commit -m "feat: {{作業内容の要約}}"
 
 # 3. リモートにプッシュ（必須！）
 git push origin {branch_name}
@@ -114,7 +114,7 @@ mcp__multi-agent-mcp__report_task_completion(
 mcp__multi-agent-mcp__send_message(
     receiver_id="{admin_id}",
     message_type="task_complete",
-    content="タスク完了: {作業内容の要約}",
+    content="タスク完了: {{作業内容の要約}}",
     caller_agent_id="{agent_id}"
 )
 ```

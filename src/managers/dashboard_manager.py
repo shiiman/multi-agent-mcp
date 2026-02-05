@@ -1,4 +1,7 @@
-"""ダッシュボード管理モジュール。"""
+"""ダッシュボード管理モジュール。
+
+複数プロセス対応: インメモリキャッシュを使わず、毎回ファイルから読み書きする。
+"""
 
 import json
 import logging
@@ -24,7 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 class DashboardManager:
-    """ダッシュボードを管理するクラス。"""
+    """ダッシュボードを管理するクラス。
+
+    複数プロセス対応のため、インメモリキャッシュを使わず
+    毎回ファイルから読み書きする。
+    """
 
     def __init__(
         self,
@@ -42,15 +49,16 @@ class DashboardManager:
         self.workspace_id = workspace_id
         self.workspace_path = workspace_path
         self.dashboard_dir = Path(dashboard_dir)
-        self.dashboard = Dashboard(
-            workspace_id=workspace_id,
-            workspace_path=workspace_path,
-        )
 
     def initialize(self) -> None:
         """ダッシュボード環境を初期化する。"""
         self.dashboard_dir.mkdir(parents=True, exist_ok=True)
-        self._save_dashboard()
+        # 初期ダッシュボードを作成して保存
+        dashboard = Dashboard(
+            workspace_id=self.workspace_id,
+            workspace_path=self.workspace_path,
+        )
+        self._write_dashboard(dashboard)
         logger.info(f"ダッシュボード環境を初期化しました: {self.dashboard_dir}")
 
     def cleanup(self) -> None:
@@ -67,13 +75,17 @@ class DashboardManager:
         """ダッシュボードファイルパスを取得する。"""
         return self.dashboard_dir / f"dashboard_{self.workspace_id}.json"
 
-    def _save_dashboard(self) -> None:
-        """ダッシュボードをファイルに保存する。"""
+    def _write_dashboard(self, dashboard: Dashboard) -> None:
+        """ダッシュボードをファイルに保存する。
+
+        Args:
+            dashboard: 保存するDashboardオブジェクト
+        """
         dashboard_path = self._get_dashboard_path()
         try:
             with open(dashboard_path, "w", encoding="utf-8") as f:
                 json.dump(
-                    self.dashboard.model_dump(mode="json"),
+                    dashboard.model_dump(mode="json"),
                     f,
                     ensure_ascii=False,
                     indent=2,
@@ -81,16 +93,25 @@ class DashboardManager:
         except OSError as e:
             logger.error(f"ダッシュボード保存エラー: {e}")
 
-    def _load_dashboard(self) -> None:
-        """ダッシュボードをファイルから読み込む。"""
+    def _read_dashboard(self) -> Dashboard:
+        """ダッシュボードをファイルから読み込む。
+
+        Returns:
+            Dashboardオブジェクト（ファイルがない場合は新規作成）
+        """
         dashboard_path = self._get_dashboard_path()
         if dashboard_path.exists():
             try:
                 with open(dashboard_path, encoding="utf-8") as f:
                     data = json.load(f)
-                    self.dashboard = Dashboard(**data)
+                    return Dashboard(**data)
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning(f"ダッシュボード読み込みエラー: {e}")
+        # ファイルがない場合は新規作成
+        return Dashboard(
+            workspace_id=self.workspace_id,
+            workspace_path=self.workspace_path,
+        )
 
     def get_dashboard(self) -> Dashboard:
         """現在のダッシュボードを取得する。
@@ -98,8 +119,7 @@ class DashboardManager:
         Returns:
             Dashboard オブジェクト
         """
-        self._load_dashboard()
-        return self.dashboard
+        return self._read_dashboard()
 
     # タスク管理メソッド
 
@@ -125,6 +145,8 @@ class DashboardManager:
         Returns:
             作成されたTaskInfo
         """
+        dashboard = self._read_dashboard()
+
         task = TaskInfo(
             id=str(uuid.uuid4()),
             title=title,
@@ -137,9 +159,9 @@ class DashboardManager:
             created_at=datetime.now(),
         )
 
-        self.dashboard.tasks.append(task)
-        self.dashboard.calculate_stats()
-        self._save_dashboard()
+        dashboard.tasks.append(task)
+        dashboard.calculate_stats()
+        self._write_dashboard(dashboard)
 
         logger.info(f"タスクを作成しました: {task.id} - {title}")
         return task
@@ -162,7 +184,9 @@ class DashboardManager:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
-        task = self.dashboard.get_task(task_id)
+        dashboard = self._read_dashboard()
+
+        task = dashboard.get_task(task_id)
         if not task:
             return False, f"タスク {task_id} が見つかりません"
 
@@ -184,8 +208,8 @@ class DashboardManager:
             if status == TaskStatus.COMPLETED:
                 task.progress = 100
 
-        self.dashboard.calculate_stats()
-        self._save_dashboard()
+        dashboard.calculate_stats()
+        self._write_dashboard(dashboard)
 
         logger.info(f"タスク {task_id} のステータスを更新: {old_status} -> {status}")
         return True, f"ステータスを更新しました: {status.value}"
@@ -208,7 +232,9 @@ class DashboardManager:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
-        task = self.dashboard.get_task(task_id)
+        dashboard = self._read_dashboard()
+
+        task = dashboard.get_task(task_id)
         if not task:
             return False, f"タスク {task_id} が見つかりません"
 
@@ -218,7 +244,7 @@ class DashboardManager:
         if worktree_path:
             task.worktree_path = worktree_path
 
-        self._save_dashboard()
+        self._write_dashboard(dashboard)
 
         logger.info(f"タスク {task_id} をエージェント {agent_id} に割り当てました")
         return True, f"タスクを割り当てました: {agent_id}"
@@ -232,13 +258,15 @@ class DashboardManager:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
-        task = self.dashboard.get_task(task_id)
+        dashboard = self._read_dashboard()
+
+        task = dashboard.get_task(task_id)
         if not task:
             return False, f"タスク {task_id} が見つかりません"
 
-        self.dashboard.tasks = [t for t in self.dashboard.tasks if t.id != task_id]
-        self.dashboard.calculate_stats()
-        self._save_dashboard()
+        dashboard.tasks = [t for t in dashboard.tasks if t.id != task_id]
+        dashboard.calculate_stats()
+        self._write_dashboard(dashboard)
 
         logger.info(f"タスク {task_id} を削除しました")
         return True, "タスクを削除しました"
@@ -252,7 +280,8 @@ class DashboardManager:
         Returns:
             TaskInfo、見つからない場合はNone
         """
-        return self.dashboard.get_task(task_id)
+        dashboard = self._read_dashboard()
+        return dashboard.get_task(task_id)
 
     def list_tasks(
         self,
@@ -268,7 +297,8 @@ class DashboardManager:
         Returns:
             TaskInfoのリスト
         """
-        tasks = self.dashboard.tasks
+        dashboard = self._read_dashboard()
+        tasks = dashboard.tasks
 
         if status is not None:
             tasks = [t for t in tasks if t.status == status]
@@ -286,8 +316,10 @@ class DashboardManager:
         Args:
             agent: Agentオブジェクト
         """
+        dashboard = self._read_dashboard()
+
         # 既存のサマリーを検索
-        existing = self.dashboard.get_agent(agent.id)
+        existing = dashboard.get_agent(agent.id)
 
         summary = AgentSummary(
             agent_id=agent.id,
@@ -303,16 +335,16 @@ class DashboardManager:
             # 既存のサマリーを更新
             idx = next(
                 i
-                for i, a in enumerate(self.dashboard.agents)
+                for i, a in enumerate(dashboard.agents)
                 if a.agent_id == agent.id
             )
-            self.dashboard.agents[idx] = summary
+            dashboard.agents[idx] = summary
         else:
             # 新規追加
-            self.dashboard.agents.append(summary)
+            dashboard.agents.append(summary)
 
-        self.dashboard.calculate_stats()
-        self._save_dashboard()
+        dashboard.calculate_stats()
+        self._write_dashboard(dashboard)
 
     def remove_agent_summary(self, agent_id: str) -> None:
         """エージェントサマリーを削除する。
@@ -320,11 +352,13 @@ class DashboardManager:
         Args:
             agent_id: エージェントID
         """
-        self.dashboard.agents = [
-            a for a in self.dashboard.agents if a.agent_id != agent_id
+        dashboard = self._read_dashboard()
+
+        dashboard.agents = [
+            a for a in dashboard.agents if a.agent_id != agent_id
         ]
-        self.dashboard.calculate_stats()
-        self._save_dashboard()
+        dashboard.calculate_stats()
+        self._write_dashboard(dashboard)
 
     # ワークスペース統計更新メソッド
 
@@ -337,18 +371,20 @@ class DashboardManager:
         Args:
             worktree_manager: WorktreeManager インスタンス
         """
+        dashboard = self._read_dashboard()
+
         worktrees = await worktree_manager.list_worktrees()
-        self.dashboard.total_worktrees = len(worktrees)
+        dashboard.total_worktrees = len(worktrees)
 
         # アクティブなworktree（エージェントに割り当てられている）をカウント
         assigned_paths = {
-            a.worktree_path for a in self.dashboard.agents if a.worktree_path
+            a.worktree_path for a in dashboard.agents if a.worktree_path
         }
-        self.dashboard.active_worktrees = len(
+        dashboard.active_worktrees = len(
             [wt for wt in worktrees if wt.path in assigned_paths]
         )
 
-        self._save_dashboard()
+        self._write_dashboard(dashboard)
 
     def sync_from_agent_manager(self, agent_manager: "AgentManager") -> None:
         """AgentManagerからエージェント情報を同期する。
@@ -356,12 +392,23 @@ class DashboardManager:
         Args:
             agent_manager: AgentManager インスタンス
         """
-        self.dashboard.agents = []
-        for agent in agent_manager.agents.values():
-            self.update_agent_summary(agent)
+        dashboard = self._read_dashboard()
+        dashboard.agents = []
 
-        self.dashboard.calculate_stats()
-        self._save_dashboard()
+        for agent in agent_manager.agents.values():
+            summary = AgentSummary(
+                agent_id=agent.id,
+                role=agent.role,
+                status=agent.status,
+                current_task_id=agent.current_task,
+                worktree_path=agent.worktree_path,
+                branch=None,
+                last_activity=agent.last_activity,
+            )
+            dashboard.agents.append(summary)
+
+        dashboard.calculate_stats()
+        self._write_dashboard(dashboard)
 
     def get_summary(self) -> dict:
         """ダッシュボードのサマリーを取得する。
@@ -369,23 +416,23 @@ class DashboardManager:
         Returns:
             サマリー情報の辞書
         """
-        self._load_dashboard()
+        dashboard = self._read_dashboard()
         return {
-            "workspace_id": self.dashboard.workspace_id,
-            "total_agents": self.dashboard.total_agents,
-            "active_agents": self.dashboard.active_agents,
-            "total_tasks": self.dashboard.total_tasks,
-            "completed_tasks": self.dashboard.completed_tasks,
-            "failed_tasks": self.dashboard.failed_tasks,
+            "workspace_id": dashboard.workspace_id,
+            "total_agents": dashboard.total_agents,
+            "active_agents": dashboard.active_agents,
+            "total_tasks": dashboard.total_tasks,
+            "completed_tasks": dashboard.completed_tasks,
+            "failed_tasks": dashboard.failed_tasks,
             "pending_tasks": len(
-                self.dashboard.get_tasks_by_status(TaskStatus.PENDING)
+                dashboard.get_tasks_by_status(TaskStatus.PENDING)
             ),
             "in_progress_tasks": len(
-                self.dashboard.get_tasks_by_status(TaskStatus.IN_PROGRESS)
+                dashboard.get_tasks_by_status(TaskStatus.IN_PROGRESS)
             ),
-            "total_worktrees": self.dashboard.total_worktrees,
-            "active_worktrees": self.dashboard.active_worktrees,
-            "updated_at": self.dashboard.updated_at.isoformat(),
+            "total_worktrees": dashboard.total_worktrees,
+            "active_worktrees": dashboard.active_worktrees,
+            "updated_at": dashboard.updated_at.isoformat(),
         }
 
     # タスクファイル管理メソッド（ファイルベースのタスク配布）
@@ -472,7 +519,7 @@ class DashboardManager:
         Returns:
             Markdown形式のダッシュボード文字列
         """
-        dashboard = self.get_dashboard()
+        dashboard = self._read_dashboard()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         lines = [

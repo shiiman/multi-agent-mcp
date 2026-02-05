@@ -12,6 +12,7 @@ class MessageType(str, Enum):
     # タスク関連
     TASK_ASSIGN = "task_assign"  # タスク割り当て
     TASK_COMPLETE = "task_complete"  # タスク完了報告
+    TASK_APPROVED = "task_approved"  # タスク承認（Owner → Admin）
     TASK_FAILED = "task_failed"  # タスク失敗報告
     TASK_PROGRESS = "task_progress"  # 進捗報告
 

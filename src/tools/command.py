@@ -8,6 +8,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.context import AppContext
 from src.models.agent import AgentRole, AgentStatus
+from src.config.workflow_guides import get_role_guide
 from src.tools.helpers import (
     check_tool_permission,
     ensure_dashboard_manager,
@@ -292,6 +293,15 @@ def register_tools(mcp: FastMCP) -> None:
                     project_name=project_name,
                     worktree_path=worker_worktree,
                     branch_name=worker_branch,
+                    admin_id=caller_agent_id,  # Worker に Admin の ID を渡す
+                )
+
+            # ロールテンプレートを先頭に追加
+            role_name = "admin" if is_admin else "worker"
+            role_guide = get_role_guide(role_name)
+            if role_guide:
+                final_task_content = (
+                    role_guide.content + "\n\n---\n\n# タスク指示\n\n" + final_task_content
                 )
 
         # タスクファイル作成
