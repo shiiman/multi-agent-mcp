@@ -150,8 +150,7 @@ subprocess.run([
 
 ### Admin が覚えておくこと
 
-1. **Worker 完了待ち**: `read_messages(unread_only=True)` でポーリング
-2. **tmux 通知**: ターミナルに通知が表示されたら `read_messages` で内容確認
+1. **Worker 完了待ち**: tmux 通知が来たら `read_messages` で内容を確認（イベント駆動、ポーリング不要）
 
 ## マルチプロセス対応
 

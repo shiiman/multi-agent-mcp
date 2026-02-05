@@ -161,50 +161,71 @@ create_workers_batch(worker_configs=worker_configs, ...)  # Dashboard に登録�
 - `create_workers_batch` は worktree 作成 → agent 作成 → タスク割り当て → タスク送信を Worker ごとに並列実行
 - ブランチ名は `{branch_name}-worker-N` 形式（N は Worker 番号）
 
-### 4. Worker 完了待ち（🔴 進捗ポーリング禁止・healthcheck は許可）
+### 4. Worker 完了待ち（🔴 ポーリング禁止・IPC 通知駆動）
 
-**⚠️ Admin は Worker の進捗をポーリングしません。Worker からのメッセージを受動的に待つだけです。**
+**⚠️ Admin は Worker の進捗をポーリングしません。Worker からの IPC 通知が来るまで「ユーザー指示待ち」状態になります。**
+
+#### 4.1. 禁止パターン
 
 ```python
-# ❌ 禁止: 進捗確認のポーリングループ
+# ❌ 禁止: ポーリングループ（read_messages も含む！）
 while True:
-    get_dashboard_summary()  # ❌ 禁止（進捗確認）
-    list_tasks()             # ❌ 禁止（タスク状態確認）
+    messages = read_messages(...)  # ❌ 禁止
+    get_dashboard_summary()        # ❌ 禁止
+    list_tasks()                   # ❌ 禁止
     time.sleep(30)
+```
 
-# ✅ 許可: healthcheck（Worker が生きているかの確認）
-healthcheck_all(caller_agent_id="{agent_id}")
+#### 4.2. 正しい待機方法
 
-# ✅ 正しい方法: Worker からのメッセージを待つ
+**Worker にタスクを送信したら、ユーザーに以下のメッセージを表示して待機状態に入ります：**
+
+```
+全 Worker にタスクを送信しました。Worker からの完了報告を待っています。
+```
+
+**この後、Admin は何もしません。ユーザーからの指示を待ちます。**
+
+#### 4.3. IPC 通知の形式
+
+Worker が完了報告すると、Admin の tmux ペインに以下の通知が表示されます：
+
+```
+[IPC] 新しいメッセージ: task_complete from {worker_id}
+```
+
+#### 4.4. IPC 通知を受けたら read_messages を実行
+
+**IPC 通知が表示されたら**、以下を実行：
+
+```python
+# ✅ IPC 通知を受けてから read_messages を実行
 messages = read_messages(
     agent_id="{agent_id}",
     unread_only=True,
     caller_agent_id="{agent_id}"
 )
 # Worker からの task_complete メッセージを処理
+for msg in messages:
+    if msg["message_type"] == "task_complete":
+        # タスク完了処理
+        pass
 ```
 
-**待機ルール:**
-- Worker からの `task_complete` メッセージを受信したら次のステップへ
-- Worker からの質問（`request` メッセージ）には回答
-- **進捗ポーリングは禁止**（`get_dashboard_summary`, `list_tasks` のループ呼び出し等）
-- **healthcheck は許可**（Worker のプロセス生存確認は OK）
-
-**🔴 全スキャン原則（SCAN-001）:**
+#### 4.5. 全スキャン原則（SCAN-001）
 
 > Worker からの通知を受けたら、**その Worker だけでなく全 Worker のメッセージをスキャン**してください。
 
-```python
-# ❌ 悪い例: 特定の Worker のメッセージだけ確認
-messages = read_messages(sender_id=worker_1_id, ...)
-
-# ✅ 良い例: 全 Worker のメッセージを確認
-messages = read_messages(agent_id="{agent_id}", unread_only=True, ...)
-for msg in messages:
-    # 全 Worker からのメッセージを処理
-```
-
 **理由**: メッセージ配信が失敗している可能性がある。1人の Worker から通知が来たら、他の Worker も完了している可能性がある。
+
+#### 4.6. healthcheck は許可
+
+Worker の生存確認（healthcheck）は待機中でも許可されます：
+
+```python
+# ✅ 許可: healthcheck（Worker が生きているかの確認）
+healthcheck_all(caller_agent_id="{agent_id}")
+```
 
 ### 5. 品質チェック（計画 → タスク分割 → 割当）
 
@@ -336,19 +357,47 @@ send_message(
 - イテレーション回数（もしあれば）
 - 残存する既知の問題（もしあれば）
 
-### 8. Owner からの応答待ち（🔴 WAIT-001 - 必須・ポーリング禁止）
+### 8. Owner からの応答待ち（🔴 WAIT-001 - IPC 通知駆動）
 
 **⚠️ 完了報告を送信したら、必ず Owner からの応答を待ってください。勝手に終了しないでください。**
 
-**🔴 ポーリング禁止: `while True` ループで `read_messages` を繰り返し呼ばない**
+#### 8.1. 禁止パターン
 
 ```python
-# ❌ 禁止: ポーリングループ
+# ❌ 禁止: ポーリングループ（read_messages も含む！）
 while True:
-    messages = read_messages(...)
-    time.sleep(30)  # ❌ 禁止
+    messages = read_messages(...)  # ❌ 禁止
+    time.sleep(30)
+```
 
-# ✅ 正しい方法: 1回だけ read_messages を呼び、メッセージがなければ待機状態を維持
+#### 8.2. 正しい待機方法
+
+**Owner に完了報告を送信したら、ユーザーに以下のメッセージを表示して待機状態に入ります：**
+
+```
+Owner に完了報告を送信しました。Owner からの承認または再指示を待っています。
+```
+
+**この後、Admin は何もしません。ユーザーからの指示を待ちます。**
+
+#### 8.3. IPC 通知の形式
+
+Owner が応答すると、Admin の tmux ペインに以下の通知が表示されます：
+
+```
+[IPC] 新しいメッセージ: task_approved from {owner_id}
+```
+または
+```
+[IPC] 新しいメッセージ: request from {owner_id}
+```
+
+#### 8.4. IPC 通知を受けたら read_messages を実行
+
+**IPC 通知が表示されたら**、以下を実行：
+
+```python
+# ✅ IPC 通知を受けてから read_messages を実行
 messages = read_messages(
     agent_id="{agent_id}",
     unread_only=True,
@@ -366,21 +415,21 @@ for msg in messages:
             # 🔄 Owner から再指示 → ステップ 5（品質チェック）に戻る
             additional_instructions = msg["content"]
             # 再指示に基づいて修正タスクを作成し、Worker に依頼
-
-# メッセージがない場合は待機状態を維持（ポーリングしない）
 ```
 
-**Owner の応答タイプ:**
+#### 8.5. Owner の応答タイプ
 
 | タイプ | 意味 | Admin の行動 |
 | ------ | ---- | ------------ |
 | `task_approved` | ユーザー確認 OK | 終了（クリーンアップは Owner が実行） |
 | `request` | 修正依頼あり | ステップ 5（品質チェック）に戻る |
 
-**⚠️ 禁止事項:**
+#### 8.6. 禁止事項
+
 - ❌ Owner からの応答なしに終了する
 - ❌ クリーンアップを Admin が実行する（Owner の仕事）
-- ❌ **ポーリングループ**（`while True` + `time.sleep`）
+- ❌ **ポーリングループ**（`while True` + `read_messages`）
+- ❌ **自発的に `read_messages` を呼ぶ**（IPC 通知が来るまで待つ）
 
 ## 関連情報（メモリから取得）
 

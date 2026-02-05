@@ -417,10 +417,11 @@ def register_tools(mcp: FastMCP) -> None:
         ipc = ensure_ipc_manager(app_ctx)
 
         # タスク完了報告を送信
+        msg_type = MessageType.TASK_COMPLETE if status == "completed" else MessageType.ERROR
         ipc.send_message(
             sender_id=caller_agent_id,
             receiver_id=admin_id,
-            message_type=MessageType.TASK_COMPLETE if status == "completed" else MessageType.ERROR,
+            message_type=msg_type,
             subject=f"タスク報告: {task_id} ({status})",
             content=message,
             priority=MessagePriority.HIGH,
@@ -430,6 +431,27 @@ def register_tools(mcp: FastMCP) -> None:
                 "reporter": caller_agent_id,
             },
         )
+
+        # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
+        notification_sent = False
+        try:
+            sync_agents_from_file(app_ctx)
+            agents = app_ctx.agents
+            tmux = app_ctx.tmux
+
+            admin_agent = agents.get(admin_id)
+            if admin_agent and admin_agent.session_name and admin_agent.pane_index is not None:
+                notification_text = f"[IPC] 新しいメッセージ: {msg_type.value} from {caller_agent_id}"
+                await tmux.send_keys_to_pane(
+                    admin_agent.session_name,
+                    admin_agent.window_index or 0,
+                    admin_agent.pane_index,
+                    f"echo '{notification_text}'",
+                )
+                notification_sent = True
+                logger.info(f"Admin への tmux 通知を送信: {admin_id}")
+        except Exception as e:
+            logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
 
         # 自動メモリ保存（タスク結果を記録）
         memory_saved = False
@@ -479,6 +501,7 @@ def register_tools(mcp: FastMCP) -> None:
             "markdown_updated": markdown_updated,
             "memory_saved": memory_saved,
             "metrics_updated": metrics_updated,
+            "notification_sent": notification_sent,
         }
 
     @mcp.tool()
