@@ -3,21 +3,25 @@
 プロジェクトレベル / グローバルレベルの永続的な学習・知識を管理する。
 
 保存先:
-- Layer 2 (グローバル): ~/{mcp_dir}/memory/memory.json
-- Layer 3 (プロジェクト): {project_root}/{mcp_dir}/memory/memory.json
+- Layer 2 (グローバル): ~/{mcp_dir}/memory/
+- Layer 3 (プロジェクト): {project_root}/{mcp_dir}/{session_id}/.memory/
+
+形式: YAML Front Matter + Markdown（各エントリは個別の .md ファイル）
 
 アーカイブ:
-- prune 時に削除ではなくアーカイブファイルに移動
+- prune 時に削除ではなくアーカイブディレクトリに移動
 - 必要時にアーカイブから検索・復元可能
-- アーカイブファイル: memory_archive.json
+- アーカイブディレクトリ: archive/
 """
 
-import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import yaml
 
 from src.config.settings import Settings, get_mcp_dir
 
@@ -32,6 +36,16 @@ def _get_default_max_entries() -> int:
 def _get_default_ttl_days() -> int:
     """Settings からデフォルトの TTL（日数）を取得する。"""
     return Settings().memory_ttl_days
+
+
+def _sanitize_filename(key: str) -> str:
+    """キーをファイル名として安全な形式に変換する。"""
+    # 危険な文字を置換
+    safe = re.sub(r'[<>:"/\\|?*]', '_', key)
+    # 先頭・末尾の空白とドットを除去
+    safe = safe.strip(' .')
+    # 空の場合はデフォルト名
+    return safe or 'entry'
 
 
 @dataclass
@@ -60,13 +74,14 @@ class MemoryEntry:
 class MemoryManager:
     """メモリ管理クラス。
 
-    プロジェクトレベル / グローバルレベルでの知識・学習内容を JSON ファイルで永続化する。
+    プロジェクトレベル / グローバルレベルでの知識・学習内容を
+    YAML Front Matter + Markdown ファイルで永続化する。
     自動クリーンアップ機能付き。
     """
 
     def __init__(
         self,
-        storage_path: str | Path | None = None,
+        storage_dir: str | Path | None = None,
         max_entries: int | None = None,
         ttl_days: int | None = None,
         auto_prune: bool = True,
@@ -74,31 +89,32 @@ class MemoryManager:
         """MemoryManagerを初期化する。
 
         Args:
-            storage_path: メモリストレージのパス（オプション）
+            storage_dir: メモリストレージのディレクトリ（オプション）
             max_entries: 最大エントリ数（デフォルト: Settings から取得）
             ttl_days: エントリの有効期限（日数、デフォルト: Settings から取得）
             auto_prune: 保存時に自動でクリーンアップするか（デフォルト: True）
         """
-        self.storage_path = Path(storage_path) if storage_path else None
+        self.storage_dir = Path(storage_dir) if storage_dir else None
         self.max_entries = max_entries if max_entries is not None else _get_default_max_entries()
         self.ttl_days = ttl_days if ttl_days is not None else _get_default_ttl_days()
         self.auto_prune = auto_prune
         self.entries: dict[str, MemoryEntry] = {}
 
-        if self.storage_path:
-            self._load_from_file()
+        if self.storage_dir:
+            self._load_from_dir()
 
     @property
-    def archive_path(self) -> Path | None:
-        """アーカイブファイルのパスを取得する。"""
-        if self.storage_path is None:
+    def archive_dir(self) -> Path | None:
+        """アーカイブディレクトリのパスを取得する。"""
+        if self.storage_dir is None:
             return None
-        return self.storage_path.parent / "memory_archive.json"
+        return self.storage_dir / "archive"
 
     @classmethod
     def from_project_root(
         cls,
         project_root: str | Path,
+        session_id: str | None = None,
         max_entries: int | None = None,
         ttl_days: int | None = None,
     ) -> "MemoryManager":
@@ -106,14 +122,18 @@ class MemoryManager:
 
         Args:
             project_root: プロジェクトのルートディレクトリ
+            session_id: セッションID（オプション）
             max_entries: 最大エントリ数（デフォルト: Settings から取得）
             ttl_days: エントリの有効期限（日数、デフォルト: Settings から取得）
 
         Returns:
             MemoryManager インスタンス
         """
-        storage_path = Path(project_root) / get_mcp_dir() / "memory" / "memory.json"
-        return cls(storage_path, max_entries=max_entries, ttl_days=ttl_days)
+        if session_id:
+            storage_dir = Path(project_root) / get_mcp_dir() / session_id / ".memory"
+        else:
+            storage_dir = Path(project_root) / get_mcp_dir() / "memory"
+        return cls(storage_dir, max_entries=max_entries, ttl_days=ttl_days)
 
     @classmethod
     def from_global(
@@ -123,7 +143,7 @@ class MemoryManager:
     ) -> "MemoryManager":
         """グローバルMemoryManagerを作成する (Layer 2)。
 
-        保存先: ~/{mcp_dir}/memory/memory.json
+        保存先: ~/{mcp_dir}/memory/
 
         Args:
             max_entries: 最大エントリ数（デフォルト: Settings から取得）
@@ -133,27 +153,85 @@ class MemoryManager:
             MemoryManager インスタンス
         """
         home_dir = Path(os.path.expanduser("~"))
-        storage_path = home_dir / get_mcp_dir() / "memory" / "memory.json"
-        return cls(storage_path, max_entries=max_entries, ttl_days=ttl_days)
+        storage_dir = home_dir / get_mcp_dir() / "memory"
+        return cls(storage_dir, max_entries=max_entries, ttl_days=ttl_days)
 
-    def _load_from_file(self) -> None:
-        """ファイルからメモリエントリを読み込む。"""
-        if not self.storage_path or not self.storage_path.exists():
+    def _get_entry_path(self, key: str) -> Path:
+        """エントリのファイルパスを取得する。"""
+        if not self.storage_dir:
+            raise ValueError("storage_dir が設定されていません")
+        filename = _sanitize_filename(key) + ".md"
+        return self.storage_dir / filename
+
+    def _parse_markdown_entry(self, file_path: Path) -> MemoryEntry | None:
+        """Markdown ファイルからメモリエントリを読み込む。"""
+        try:
+            content = file_path.read_text(encoding="utf-8")
+
+            # YAML Front Matter を抽出
+            if not content.startswith("---"):
+                return None
+
+            parts = content.split("---", 2)
+            if len(parts) < 3:
+                return None
+
+            # YAML パース
+            front_matter = yaml.safe_load(parts[1])
+            if not front_matter or "key" not in front_matter:
+                return None
+
+            # Markdown 本文
+            body = parts[2].strip()
+
+            return MemoryEntry(
+                key=front_matter["key"],
+                content=body,
+                tags=front_matter.get("tags", []),
+                created_at=datetime.fromisoformat(front_matter["created_at"]) if "created_at" in front_matter else datetime.now(),
+                updated_at=datetime.fromisoformat(front_matter["updated_at"]) if "updated_at" in front_matter else datetime.now(),
+                metadata=front_matter.get("metadata", {}),
+            )
+        except Exception as e:
+            logger.warning(f"エントリの読み込みに失敗 ({file_path}): {e}")
+            return None
+
+    def _write_markdown_entry(self, entry: MemoryEntry, file_path: Path) -> None:
+        """メモリエントリを Markdown ファイルとして保存する。"""
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # YAML Front Matter を構築
+            front_matter = {
+                "key": entry.key,
+                "tags": entry.tags,
+                "created_at": entry.created_at.isoformat(),
+                "updated_at": entry.updated_at.isoformat(),
+            }
+            if entry.metadata:
+                front_matter["metadata"] = entry.metadata
+
+            # YAML + Markdown を結合
+            yaml_str = yaml.dump(front_matter, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            content = f"---\n{yaml_str}---\n\n{entry.content}\n"
+
+            file_path.write_text(content, encoding="utf-8")
+        except Exception as e:
+            logger.error(f"エントリの保存に失敗 ({file_path}): {e}")
+            raise
+
+    def _load_from_dir(self) -> None:
+        """ディレクトリから全メモリエントリを読み込む。"""
+        if not self.storage_dir or not self.storage_dir.exists():
             return
 
         try:
-            with open(self.storage_path, encoding="utf-8") as f:
-                data = json.load(f)
-
-            for key, entry_data in data.items():
-                self.entries[key] = MemoryEntry(
-                    key=key,
-                    content=entry_data["content"],
-                    tags=entry_data.get("tags", []),
-                    created_at=datetime.fromisoformat(entry_data["created_at"]),
-                    updated_at=datetime.fromisoformat(entry_data["updated_at"]),
-                    metadata=entry_data.get("metadata", {}),
-                )
+            for file_path in self.storage_dir.glob("*.md"):
+                if file_path.name == "README.md":
+                    continue
+                entry = self._parse_markdown_entry(file_path)
+                if entry:
+                    self.entries[entry.key] = entry
 
             logger.info(f"メモリを読み込みました: {len(self.entries)} エントリ")
 
@@ -163,30 +241,22 @@ class MemoryManager:
         except Exception as e:
             logger.warning(f"メモリの読み込みに失敗: {e}")
 
-    def _save_to_file(self) -> None:
-        """メモリエントリをファイルに保存する。"""
-        if not self.storage_path:
+    def _save_entry(self, entry: MemoryEntry) -> None:
+        """単一エントリを保存する。"""
+        if not self.storage_dir:
             return
 
-        try:
-            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path = self._get_entry_path(entry.key)
+        self._write_markdown_entry(entry, file_path)
 
-            data = {}
-            for key, entry in self.entries.items():
-                data[key] = {
-                    "content": entry.content,
-                    "tags": entry.tags,
-                    "created_at": entry.created_at.isoformat(),
-                    "updated_at": entry.updated_at.isoformat(),
-                    "metadata": entry.metadata,
-                }
+    def _delete_entry_file(self, key: str) -> None:
+        """エントリのファイルを削除する。"""
+        if not self.storage_dir:
+            return
 
-            with open(self.storage_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-
-            logger.info(f"メモリを保存しました: {len(self.entries)} エントリ")
-        except Exception as e:
-            logger.error(f"メモリの保存に失敗: {e}")
+        file_path = self._get_entry_path(key)
+        if file_path.exists():
+            file_path.unlink()
 
     def prune(self) -> int:
         """古いエントリと超過エントリをアーカイブに移動する。
@@ -211,6 +281,7 @@ class MemoryManager:
         for key in expired_keys:
             entries_to_archive.append(self.entries[key])
             del self.entries[key]
+            self._delete_entry_file(key)
             archived_count += 1
             logger.debug(f"TTL 超過によりアーカイブ: {key}")
 
@@ -226,70 +297,48 @@ class MemoryManager:
             for key, entry in sorted_entries[:excess_count]:
                 entries_to_archive.append(entry)
                 del self.entries[key]
+                self._delete_entry_file(key)
                 archived_count += 1
                 logger.debug(f"エントリ数超過によりアーカイブ: {key}")
 
         if archived_count > 0:
             # アーカイブに追加
-            self._append_to_archive(entries_to_archive)
+            self._move_to_archive(entries_to_archive)
             logger.info(f"クリーンアップ: {archived_count} エントリをアーカイブ")
-            self._save_to_file()
 
         return archived_count
 
-    def _append_to_archive(self, entries: list[MemoryEntry]) -> None:
-        """エントリをアーカイブファイルに追加する。"""
-        if not self.archive_path or not entries:
+    def _move_to_archive(self, entries: list[MemoryEntry]) -> None:
+        """エントリをアーカイブディレクトリに移動する。"""
+        if not self.archive_dir or not entries:
             return
 
         try:
-            # 既存のアーカイブを読み込み
-            archive_data = {}
-            if self.archive_path.exists():
-                with open(self.archive_path, encoding="utf-8") as f:
-                    archive_data = json.load(f)
-
-            # 新しいエントリを追加（アーカイブ日時を記録）
+            self.archive_dir.mkdir(parents=True, exist_ok=True)
             archive_time = datetime.now().isoformat()
-            for entry in entries:
-                archive_data[entry.key] = {
-                    "content": entry.content,
-                    "tags": entry.tags,
-                    "created_at": entry.created_at.isoformat(),
-                    "updated_at": entry.updated_at.isoformat(),
-                    "metadata": entry.metadata,
-                    "archived_at": archive_time,
-                }
 
-            # 保存
-            self.archive_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.archive_path, "w", encoding="utf-8") as f:
-                json.dump(archive_data, f, ensure_ascii=False, indent=2)
+            for entry in entries:
+                # メタデータにアーカイブ日時を追加
+                entry.metadata["archived_at"] = archive_time
+                file_path = self.archive_dir / (_sanitize_filename(entry.key) + ".md")
+                self._write_markdown_entry(entry, file_path)
 
             logger.info(f"アーカイブに追加: {len(entries)} エントリ")
         except Exception as e:
             logger.error(f"アーカイブへの追加に失敗: {e}")
 
     def _load_archive(self) -> dict[str, MemoryEntry]:
-        """アーカイブファイルからエントリを読み込む。"""
+        """アーカイブディレクトリからエントリを読み込む。"""
         archive_entries: dict[str, MemoryEntry] = {}
 
-        if not self.archive_path or not self.archive_path.exists():
+        if not self.archive_dir or not self.archive_dir.exists():
             return archive_entries
 
         try:
-            with open(self.archive_path, encoding="utf-8") as f:
-                data = json.load(f)
-
-            for key, entry_data in data.items():
-                archive_entries[key] = MemoryEntry(
-                    key=key,
-                    content=entry_data["content"],
-                    tags=entry_data.get("tags", []),
-                    created_at=datetime.fromisoformat(entry_data["created_at"]),
-                    updated_at=datetime.fromisoformat(entry_data["updated_at"]),
-                    metadata=entry_data.get("metadata", {}),
-                )
+            for file_path in self.archive_dir.glob("*.md"):
+                entry = self._parse_markdown_entry(file_path)
+                if entry:
+                    archive_entries[entry.key] = entry
 
             logger.debug(f"アーカイブを読み込み: {len(archive_entries)} エントリ")
         except Exception as e:
@@ -361,36 +410,29 @@ class MemoryManager:
         Returns:
             復元されたメモリエントリ、見つからない場合はNone
         """
-        if not self.archive_path or not self.archive_path.exists():
+        if not self.archive_dir or not self.archive_dir.exists():
             return None
 
         try:
-            with open(self.archive_path, encoding="utf-8") as f:
-                archive_data = json.load(f)
-
-            if key not in archive_data:
+            archive_file = self.archive_dir / (_sanitize_filename(key) + ".md")
+            if not archive_file.exists():
                 return None
 
-            entry_data = archive_data[key]
+            entry = self._parse_markdown_entry(archive_file)
+            if not entry:
+                return None
 
-            # エントリを作成
-            entry = MemoryEntry(
-                key=key,
-                content=entry_data["content"],
-                tags=entry_data.get("tags", []),
-                created_at=datetime.fromisoformat(entry_data["created_at"]),
-                updated_at=datetime.now(),  # 復元時に更新
-                metadata=entry_data.get("metadata", {}),
-            )
+            # 更新日時を現在に
+            entry.updated_at = datetime.now()
+            # アーカイブ日時をメタデータから削除
+            entry.metadata.pop("archived_at", None)
 
             # メインメモリに追加
             self.entries[key] = entry
-            self._save_to_file()
+            self._save_entry(entry)
 
             # アーカイブから削除
-            del archive_data[key]
-            with open(self.archive_path, "w", encoding="utf-8") as f:
-                json.dump(archive_data, f, ensure_ascii=False, indent=2)
+            archive_file.unlink()
 
             logger.info(f"アーカイブから復元: {key}")
             return entry
@@ -422,7 +464,7 @@ class MemoryManager:
             "total_entries": len(archive_entries),
             "unique_tags": list(all_tags),
             "tag_count": len(all_tags),
-            "archive_path": str(self.archive_path) if self.archive_path else None,
+            "archive_dir": str(self.archive_dir) if self.archive_dir else None,
             "oldest_entry": oldest_entry.isoformat() if oldest_entry else None,
             "newest_entry": newest_entry.isoformat() if newest_entry else None,
         }
@@ -473,7 +515,7 @@ class MemoryManager:
         if self.auto_prune:
             self.prune()
 
-        self._save_to_file()
+        self._save_entry(entry)
         return entry
 
     def get(self, key: str) -> MemoryEntry | None:
@@ -556,15 +598,16 @@ class MemoryManager:
         """
         if key in self.entries:
             del self.entries[key]
-            self._save_to_file()
+            self._delete_entry_file(key)
             logger.info(f"メモリを削除: {key}")
             return True
         return False
 
     def clear(self) -> None:
         """すべてのメモリエントリを削除する。"""
+        for key in list(self.entries.keys()):
+            self._delete_entry_file(key)
         self.entries.clear()
-        self._save_to_file()
         logger.info("メモリをクリアしました")
 
     def get_summary(self) -> dict:
@@ -588,7 +631,7 @@ class MemoryManager:
             "total_entries": len(self.entries),
             "unique_tags": list(all_tags),
             "tag_count": len(all_tags),
-            "storage_path": str(self.storage_path) if self.storage_path else None,
+            "storage_dir": str(self.storage_dir) if self.storage_dir else None,
             "max_entries": self.max_entries,
             "ttl_days": self.ttl_days,
             "oldest_entry": oldest_entry.isoformat() if oldest_entry else None,

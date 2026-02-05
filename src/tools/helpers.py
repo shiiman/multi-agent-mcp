@@ -464,10 +464,10 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
         # session_id を確保（config.json から読み取り）
         session_id = ensure_session_id(app_ctx)
         if session_id:
-            memory_path = os.path.join(project_root, get_mcp_dir(), session_id, ".memory", "memory.json")
+            memory_dir = os.path.join(project_root, get_mcp_dir(), session_id, ".memory")
         else:
-            memory_path = os.path.join(project_root, get_mcp_dir(), "memory", "memory.json")
-        app_ctx.memory_manager = MemoryManager(storage_path=memory_path)
+            memory_dir = os.path.join(project_root, get_mcp_dir(), "memory")
+        app_ctx.memory_manager = MemoryManager(storage_dir=memory_dir)
     return app_ctx.memory_manager
 
 

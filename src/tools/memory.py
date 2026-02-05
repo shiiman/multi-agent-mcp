@@ -389,7 +389,7 @@ def register_tools(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """知識をグローバルメモリに保存する（全プロジェクト共通）。
 
-        保存先: ~/.multi-agent-mcp/memory/memory.json
+        保存先: ~/.multi-agent-mcp/memory/
 
         Args:
             key: エントリのキー（一意な識別子）

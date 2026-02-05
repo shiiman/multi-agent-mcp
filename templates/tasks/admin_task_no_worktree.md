@@ -17,18 +17,18 @@
 **主要ツール一覧:**
 
 | 短縮名 | 完全名 |
-|--------|--------|
+| ------ | ------ |
 | `create_task` | `{mcp_tool_prefix}create_task` |
 | `create_agent` | `{mcp_tool_prefix}create_agent` |
 | `create_workers_batch` | `{mcp_tool_prefix}create_workers_batch` |
 | `assign_task_to_agent` | `{mcp_tool_prefix}assign_task_to_agent` |
 | `send_task` | `{mcp_tool_prefix}send_task` |
 | `send_message` | `{mcp_tool_prefix}send_message` |
+| `read_messages` | `{mcp_tool_prefix}read_messages` |
 | `get_dashboard` | `{mcp_tool_prefix}get_dashboard` |
 | `get_dashboard_summary` | `{mcp_tool_prefix}get_dashboard_summary` |
 | `list_tasks` | `{mcp_tool_prefix}list_tasks` |
 | `list_agents` | `{mcp_tool_prefix}list_agents` |
-| `read_messages` | `{mcp_tool_prefix}read_messages` |
 | `healthcheck_all` | `{mcp_tool_prefix}healthcheck_all` |
 
 **重要**: ロール制限のあるツールは `caller_agent_id` パラメータが必須です。
@@ -74,6 +74,16 @@ Admin ID: `{agent_id}`
 
 ### 2. タスク分割（🔴 必須: create_task で登録）
 
+**分割前に自問する 5 つの質問:**
+
+| # | 質問 | 確認内容 |
+| - | ---- | -------- |
+| 1 | 目的は何か？ | ユーザーが達成したいゴールを明確に |
+| 2 | どう分解するか？ | 並列可能な独立したサブタスクに分割 |
+| 3 | 何人必要か？ | Worker 数とタスク粒度のバランス |
+| 4 | どんな視点が必要か？ | 技術的観点・ユーザー観点・品質観点 |
+| 5 | リスクは何か？ | 依存関係・競合・ブロッカーの洗い出し |
+
 **⚠️ 重要: 必ず `create_task` を呼んでください。呼ばないと Dashboard が更新されず、Owner が進捗を追跡できません。**
 
 **⚠️ Non-Worktree 注意: 同じファイルを編集するタスクは異なる Worker に割り当てない**
@@ -100,36 +110,43 @@ for task in subtasks:
 - 計画書から並列実行可能なサブタスクを抽出
 - **各サブタスクを必ず `create_task` で Dashboard に登録**
 - **同一ファイルを編集するタスクは同じ Worker に割り当てる**
-- **1ファイル = 1タスク** を目安に細かく分割
 
 ### 3. Worker 一括作成・タスク割り当て・タスク送信
 
 **Non-Worktree モードでは worktree 作成が自動的にスキップされます。**
 
-**`create_workers_batch` を使用して Worker 作成からタスク送信まで全て並列実行:**
+**🔴 重要: `create_workers_batch` を呼ぶ前に、必ず `create_task` を呼んでタスクを Dashboard に登録してください！**
 
 ```python
-# Worker 設定を準備（タスク数分）
+# ステップ 1: 🔴 まず create_task で全タスクを登録（必須！）
+task_ids = []
+for task in subtasks:
+    result = create_task(
+        title=task["title"],
+        description=task["description"],
+        caller_agent_id="{agent_id}"
+    )
+    task_ids.append(result["task_id"])
+
+# ステップ 2: Worker 設定を準備（task_id を含める）
 # Non-Worktree モードでは branch は使用されないが、識別用に指定
-# task_id と task_content を含めると、タスク割り当て・送信も並列実行される
 worker_configs = [
     {{
         "branch": "worker-1",
-        "task_title": "タスク1",
-        "task_id": task_id_1,      # create_task で取得した ID
-        "task_content": "タスク1の詳細内容..."
+        "task_title": subtasks[0]["title"],
+        "task_id": task_ids[0],      # ← create_task で取得した ID
+        "task_content": subtasks[0]["description"]
     }},
     {{
         "branch": "worker-2",
-        "task_title": "タスク2",
-        "task_id": task_id_2,
-        "task_content": "タスク2の詳細内容..."
+        "task_title": subtasks[1]["title"],
+        "task_id": task_ids[1],      # ← create_task で取得した ID
+        "task_content": subtasks[1]["description"]
     }},
     # ... タスク数に応じて追加
 ]
 
-# 全 Worker を並列で作成・タスク割り当て・タスク送信
-# worktree スキップ → agent → assign_task → send_task が Worker ごとに並列実行
+# ステップ 3: Worker 一括作成・タスク送信
 result = create_workers_batch(
     worker_configs=worker_configs,
     repo_path="{working_dir}",
@@ -143,10 +160,17 @@ for worker in result["workers"]:
     print(f"Worker {{worker['agent_id']}}: task_sent={{worker['task_sent']}}")
 ```
 
+**🔴 禁止パターン（絶対にやらないこと）:**
+```python
+# ❌ create_task を呼ばずに直接 create_workers_batch
+worker_configs = [{{"task_content": "..."}}]  # task_id がない！
+create_workers_batch(worker_configs=worker_configs, ...)  # Dashboard に登録されない！
+```
+
 **注意事項:**
+- **`create_task` なしで `create_workers_batch` を呼ぶと、Dashboard にタスクが登録されず、Owner が進捗を追跡できません**
 - Non-Worktree モードでは全 Worker が `{working_dir}` で作業
 - ファイル競合を避けるため、異なるファイルを編集するタスクを各 Worker に割り当て
-- `task_id` と `task_content` を省略した場合は Worker 作成のみ実行
 
 ### 4. Worker 完了待ち（🔴 進捗ポーリング禁止・healthcheck は許可）
 
@@ -177,7 +201,23 @@ messages = read_messages(
 - **進捗ポーリングは禁止**（`get_dashboard_summary`, `list_tasks` のループ呼び出し等）
 - **healthcheck は許可**（Worker のプロセス生存確認は OK）
 
+**フルスキャン原則（SCAN-001）:**
+Worker から通知を受け取ったら、**その Worker だけでなく全タスクの状態を確認**してください。
+他の Worker も同時に完了している可能性があります。
+
+```python
+# ✅ 正しい: 全タスクをスキャン
+tasks = list_tasks(caller_agent_id="{agent_id}")
+completed = [t for t in tasks if t["status"] == "completed"]
+
+# ❌ 誤り: 通知元の Worker だけ確認
+```
+
 ### 5. 品質チェック（計画 → タスク分割 → 割当）
+
+**自律実行原則（AUTONOMOUS-002）:**
+品質チェックは Owner の指示を待たずに **Admin が自主的に実行** してください。
+全 Worker の実装完了を確認したら、即座に品質チェックフェーズに移行します。
 
 **⚠️ Admin はテストを実行しない。品質チェックも「計画 → タスク分割 → 割当」のパターンで Worker に委譲する。**
 
@@ -340,7 +380,7 @@ for msg in messages:
 **Owner の応答タイプ:**
 
 | タイプ | 意味 | Admin の行動 |
-|--------|------|-------------|
+| ------ | ---- | ------------ |
 | `task_approved` | ユーザー確認 OK | 終了（クリーンアップは Owner が実行） |
 | `request` | 修正依頼あり | ステップ 5（品質チェック）に戻る |
 

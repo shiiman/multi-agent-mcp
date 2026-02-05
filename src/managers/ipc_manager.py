@@ -3,6 +3,7 @@
 ファイルベースのメッセージキューを使用してエージェント間通信を実現する。
 """
 
+import fcntl
 import json
 import logging
 import uuid
@@ -54,11 +55,11 @@ class IPCManager:
         return self.ipc_dir / f"queue_{agent_id}.json"
 
     def _load_queue(self, agent_id: str) -> MessageQueue:
-        """エージェントのメッセージキューをロードする。"""
-        # メモリキャッシュを確認
-        if agent_id in self.queues:
-            return self.queues[agent_id]
+        """エージェントのメッセージキューをロードする。
 
+        🔴 マルチプロセス対応: 常にファイルから読み込む
+        （各 MCP サーバープロセスは独立しているため、メモリキャッシュは同期されない）
+        """
         queue_path = self._get_queue_path(agent_id)
         if queue_path.exists():
             try:
@@ -113,6 +114,44 @@ class IPCManager:
 
         logger.info(f"エージェント {agent_id} のキューを削除しました")
 
+    def _append_message_atomic(self, agent_id: str, message: Message) -> None:
+        """メッセージをアトミックにキューに追加する。
+
+        🔴 マルチプロセス対応: ファイルロックを使用して race condition を防止
+        """
+        queue_path = self._get_queue_path(agent_id)
+        lock_path = queue_path.with_suffix(".lock")
+
+        # ロックファイルを作成/開く
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w") as lock_file:
+            try:
+                # 排他ロックを取得
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                # ファイルから最新のキューを読み込む
+                if queue_path.exists():
+                    try:
+                        with open(queue_path, encoding="utf-8") as f:
+                            data = json.load(f)
+                            queue = MessageQueue(**data)
+                    except (json.JSONDecodeError, OSError) as e:
+                        logger.warning(f"キューファイルの読み込みエラー: {e}")
+                        queue = MessageQueue(agent_id=agent_id)
+                else:
+                    queue = MessageQueue(agent_id=agent_id)
+
+                # メッセージを追加
+                queue.messages.append(message)
+
+                # ファイルに保存
+                with open(queue_path, "w", encoding="utf-8") as f:
+                    json.dump(queue.model_dump(mode="json"), f, ensure_ascii=False)
+
+            finally:
+                # ロックを解放
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
     def send_message(
         self,
         sender_id: str,
@@ -124,6 +163,8 @@ class IPCManager:
         metadata: dict | None = None,
     ) -> Message:
         """メッセージを送信する。
+
+        🔴 マルチプロセス対応: ファイルロックを使用してアトミックに保存
 
         Args:
             sender_id: 送信元エージェントID
@@ -153,17 +194,13 @@ class IPCManager:
             # ブロードキャスト: 全エージェントのキューに追加
             for agent_id in self.queues:
                 if agent_id != sender_id:  # 送信者自身には送らない
-                    queue = self._load_queue(agent_id)
-                    queue.messages.append(message)
-                    self._save_queue(queue)
+                    self._append_message_atomic(agent_id, message)
             logger.info(
                 f"ブロードキャストメッセージを送信: {sender_id} -> all"
             )
         else:
-            # 特定エージェントへの送信
-            queue = self._load_queue(receiver_id)
-            queue.messages.append(message)
-            self._save_queue(queue)
+            # 特定エージェントへの送信（アトミック操作）
+            self._append_message_atomic(receiver_id, message)
             logger.info(
                 f"メッセージを送信: {sender_id} -> {receiver_id}"
             )

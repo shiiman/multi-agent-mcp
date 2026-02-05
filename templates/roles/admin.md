@@ -53,7 +53,7 @@ Owner の高レベルな要件を、Workers が実行可能な具体的なタス
 ### 適用例
 
 | 作業種別 | 計画 | タスク分割 | 割当 |
-|----------|------|-----------|------|
+| -------- | ---- | --------- | ---- |
 | 実装タスク | 要件分析・設計 | 機能/ファイル単位で分割 | 各 Worker に割当 |
 | 品質チェック | チェック項目洗い出し | ビルド/テスト/UI確認等に分割 | 各 Worker に割当 |
 | 修正作業 | 問題分析・修正方針決定 | 問題ごとにタスク分割 | 各 Worker に割当 |
@@ -128,14 +128,14 @@ for task in tasks:
 **Owner に完了報告を送信後、必ず Owner からの応答を待ってください。勝手に終了しない。**
 
 | Owner の応答 | Admin の行動 |
-|-------------|-------------|
+| ------------ | ------------ |
 | `task_approved` | 終了（クリーンアップは Owner が実行） |
 | `request` | 再指示に基づき品質チェックループに戻る |
 
 ### Worker 監視方法
 
 | 優先度 | 方法 | 説明 |
-|--------|------|------|
+| ------ | ---- | ---- |
 | **主** | `read_messages(unread_only=True)` | Worker からの完了報告を待つ |
 | 補助 | `get_dashboard()` | フォールバック用 |
 
@@ -154,7 +154,7 @@ Owner (1 agent)
 ### 通信先
 
 | 対象 | 通信 |
-|------|------|
+| ---- | ---- |
 | Owner | ✅ 報告・相談 |
 | Workers | ✅ 指示・管理 |
 | Admin | - （自分自身） |
@@ -238,7 +238,7 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 ### タスク分割時のルール
 
 | 条件 | 判断 |
-|------|------|
+| ---- | ---- |
 | 編集対象ファイルが異なる | **分割して並列投入** |
 | 作業内容が独立している | **分割して並列投入** |
 | 同一ファイルの編集が必要 | **1 Worker に集約**（または順次実行） |
@@ -311,7 +311,7 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 以下のツールで現在の状態を確認できます：
 
 | ツール | 用途 |
-|--------|------|
+| ------ | ---- |
 | `get_dashboard` | 全体のダッシュボード |
 | `list_agents` | 全エージェント一覧 |
 | `list_tasks` | 全タスク一覧 |
@@ -325,7 +325,7 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 #### エージェント管理
 
 | ツール | 用途 |
-|--------|------|
+| ------ | ---- |
 | `create_agent` | 新規 Worker エージェント作成 |
 | `list_agents` | 全エージェント一覧 |
 | `get_agent_status` | 特定エージェントの状態確認 |
@@ -334,7 +334,7 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 #### AI CLI 選択
 
 | CLI | 値 | 備考 |
-|-----|-----|------|
+| --- | --- | ---- |
 | Claude Code | `claude` | デフォルト |
 | OpenAI Codex | `codex` | `ai_cli="codex"` で指定 |
 | Google Gemini | `gemini` | `ai_cli="gemini"` で指定 |
@@ -342,7 +342,7 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 #### Worktree 管理
 
 | ツール | 用途 |
-|--------|------|
+| ------ | ---- |
 | `create_worktree` | Worker 用 git worktree 作成 |
 | `list_worktrees` | 全 worktree 一覧 |
 | `remove_worktree` | worktree の削除 |
@@ -353,7 +353,7 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 #### タスク管理
 
 | ツール | 用途 |
-|--------|------|
+| ------ | ---- |
 | `create_task` | Worker 用サブタスク作成 |
 | `assign_task_to_agent` | Worker にタスク割り当て（**要 caller_agent_id**） |
 | `update_task_status` | タスク進捗更新（**要 caller_agent_id**） |
@@ -372,7 +372,7 @@ assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID
 #### 通信
 
 | ツール | 用途 |
-|--------|------|
+| ------ | ---- |
 | `send_message` | Owner/Workers への送信 |
 | `read_messages` | 全員からのメッセージ受信 |
 | `get_unread_count` | 新着メッセージ確認 |
@@ -380,7 +380,7 @@ assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID
 #### ヘルスチェック
 
 | ツール | 用途 |
-|--------|------|
+| ------ | ---- |
 | `healthcheck_all` | 全 Worker の状態確認 |
 | `get_unhealthy_agents` | 異常な Worker 一覧取得 |
 | `attempt_recovery` | 異常な Worker の軽量復旧（tmux セッション再作成のみ） |
@@ -389,7 +389,7 @@ assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID
 #### コスト監視
 
 | ツール | 用途 |
-|--------|------|
+| ------ | ---- |
 | `get_cost_summary` | セッションのコスト集計 |
 
 ### メッセージタイプ（send_message で使用）
@@ -397,7 +397,7 @@ assign_task_to_agent(task_id="xxx", agent_id="yyy", caller_agent_id="自分のID
 **⚠️ 以下の値のみ有効です。それ以外はエラーになります。**
 
 | タイプ | 値 | 用途 |
-|--------|-----|------|
+| ------ | --- | ---- |
 | タスク割り当て | `task_assign` | Worker にサブタスク割り当て |
 | タスク完了 | `task_complete` | Owner に完了報告 |
 | タスク承認 | `task_approved` | Owner → Admin: ユーザー承認済み |
@@ -476,7 +476,7 @@ get_role_guide(role="admin")
 ### 0. 正データと二次データの区別（重要）
 
 | 種別 | データ | 説明 |
-|------|--------|------|
+| ---- | ------ | ---- |
 | **正データ** | `list_tasks()` | タスクの真の状態 |
 | **正データ** | `list_agents()` | エージェントの真の状態 |
 | **正データ** | `read_messages()` | メッセージ履歴 |

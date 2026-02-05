@@ -639,6 +639,11 @@ class TmuxManager:
         window_name = self._get_window_name(window)
         target = f"{session_name}:{window_name}.{pane}"
 
+        # 🔴 入力バッファをクリア（残存文字による @export 問題を防止）
+        # C-u: 現在の入力行をクリア、C-c: 実行中のコマンドをキャンセル
+        await self._run("send-keys", "-t", target, "C-c")
+        await self._run("send-keys", "-t", target, "C-u")
+
         # コマンド送信
         if literal:
             code, _, stderr = await self._run("send-keys", "-t", target, "-l", command)
