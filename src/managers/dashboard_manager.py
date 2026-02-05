@@ -1,21 +1,26 @@
 """ダッシュボード管理モジュール。
 
 複数プロセス対応: インメモリキャッシュを使わず、毎回ファイルから読み書きする。
+YAML Front Matter 付き Markdown で統一管理。
 """
 
-import json
 import logging
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 from src.config.settings import get_mcp_dir
 from src.models.agent import Agent
 from src.models.dashboard import (
     AgentSummary,
+    ChecklistItem,
     Dashboard,
     TaskInfo,
+    TaskLog,
     TaskStatus,
 )
 
@@ -73,45 +78,219 @@ class DashboardManager:
 
     def _get_dashboard_path(self) -> Path:
         """ダッシュボードファイルパスを取得する。"""
+        return self.dashboard_dir / f"dashboard_{self.workspace_id}.md"
+
+    def _get_legacy_json_path(self) -> Path:
+        """レガシー JSON ダッシュボードファイルパスを取得する（移行用）。"""
         return self.dashboard_dir / f"dashboard_{self.workspace_id}.json"
 
     def _write_dashboard(self, dashboard: Dashboard) -> None:
-        """ダッシュボードをファイルに保存する。
+        """ダッシュボードをファイルに保存する（YAML Front Matter + Markdown）。
 
         Args:
             dashboard: 保存するDashboardオブジェクト
         """
         dashboard_path = self._get_dashboard_path()
         try:
+            # YAML Front Matter 用のデータ
+            front_matter_data = dashboard.model_dump(mode="json")
+
+            # Markdown コンテンツを生成
+            md_content = self._generate_markdown_body(dashboard)
+
+            # YAML Front Matter + Markdown を結合
+            yaml_str = yaml.dump(
+                front_matter_data,
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+            content = f"---\n{yaml_str}---\n\n{md_content}"
+
             with open(dashboard_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    dashboard.model_dump(mode="json"),
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
+                f.write(content)
         except OSError as e:
             logger.error(f"ダッシュボード保存エラー: {e}")
 
     def _read_dashboard(self) -> Dashboard:
-        """ダッシュボードをファイルから読み込む。
+        """ダッシュボードをファイルから読み込む（YAML Front Matter から）。
 
         Returns:
             Dashboardオブジェクト（ファイルがない場合は新規作成）
         """
         dashboard_path = self._get_dashboard_path()
+
         if dashboard_path.exists():
             try:
-                with open(dashboard_path, encoding="utf-8") as f:
-                    data = json.load(f)
+                content = dashboard_path.read_text(encoding="utf-8")
+                data = self._parse_yaml_front_matter(content)
+                if data:
                     return Dashboard(**data)
-            except (json.JSONDecodeError, OSError) as e:
+            except (yaml.YAMLError, OSError) as e:
                 logger.warning(f"ダッシュボード読み込みエラー: {e}")
+
+        # レガシー JSON ファイルからの移行
+        legacy_path = self._get_legacy_json_path()
+        if legacy_path.exists():
+            try:
+                import json
+
+                with open(legacy_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                    dashboard = Dashboard(**data)
+                    # 新形式で保存し直す
+                    self._write_dashboard(dashboard)
+                    # レガシーファイルを削除
+                    legacy_path.unlink()
+                    logger.info(f"レガシー JSON を Markdown に移行しました: {legacy_path}")
+                    return dashboard
+            except Exception as e:
+                logger.warning(f"レガシーファイル移行エラー: {e}")
+
         # ファイルがない場合は新規作成
         return Dashboard(
             workspace_id=self.workspace_id,
             workspace_path=self.workspace_path,
         )
+
+    def _parse_yaml_front_matter(self, content: str) -> dict | None:
+        """YAML Front Matter をパースする。
+
+        Args:
+            content: Markdown コンテンツ（YAML Front Matter 付き）
+
+        Returns:
+            パースされた辞書、失敗時は None
+        """
+        # YAML Front Matter のパターン: --- で始まり --- で終わる
+        pattern = r"^---\n(.*?)\n---"
+        match = re.match(pattern, content, re.DOTALL)
+        if match:
+            yaml_str = match.group(1)
+            return yaml.safe_load(yaml_str)
+        return None
+
+    def _generate_markdown_body(self, dashboard: Dashboard) -> str:
+        """Dashboard オブジェクトから Markdown 本体を生成する。
+
+        Args:
+            dashboard: Dashboard オブジェクト
+
+        Returns:
+            Markdown 文字列
+        """
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        lines = [
+            "# Multi-Agent Dashboard",
+            "",
+            f"**更新時刻**: {now}",
+            "",
+            "---",
+            "",
+            "## エージェント状態",
+            "",
+            "| ID | 役割 | 状態 | 現在のタスク | Worktree |",
+            "|:---|:---|:---|:---|:---|",
+        ]
+
+        status_emoji = {
+            "idle": "🟢",
+            "busy": "🔵",
+            "error": "🔴",
+            "offline": "⚫",
+        }
+
+        for agent in dashboard.agents:
+            emoji = status_emoji.get(str(agent.status).lower(), "⚪")
+            current_task = agent.current_task_id or "-"
+            worktree = agent.worktree_path or "-"
+            lines.append(
+                f"| `{agent.agent_id[:8]}` | {agent.role} | {emoji} {agent.status} | "
+                f"{current_task} | `{worktree}` |"
+            )
+
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## タスク状態",
+            "",
+            "| ID | タイトル | 状態 | 担当 | 進捗 |",
+            "|:---|:---|:---|:---|:---|",
+        ])
+
+        task_emoji = {
+            "pending": "⏳",
+            "in_progress": "🔄",
+            "completed": "✅",
+            "failed": "❌",
+            "blocked": "🚫",
+            "cancelled": "🗑️",
+        }
+
+        for task in dashboard.tasks:
+            emoji = task_emoji.get(str(task.status.value).lower(), "❓")
+            assigned = task.assigned_agent_id[:8] if task.assigned_agent_id else "-"
+            lines.append(
+                f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
+                f"`{assigned}` | {task.progress}% |"
+            )
+
+        # タスク詳細セクション（進行中のタスクのみ）
+        in_progress_tasks = [
+            t for t in dashboard.tasks if t.status == TaskStatus.IN_PROGRESS
+        ]
+        if in_progress_tasks:
+            lines.extend([
+                "",
+                "---",
+                "",
+                "## タスク詳細",
+            ])
+
+            for task in in_progress_tasks:
+                lines.extend([
+                    "",
+                    f"### {task.title}",
+                    "",
+                    f"**進捗**: {task.progress}%",
+                ])
+
+                # チェックリスト
+                if task.checklist:
+                    lines.extend([
+                        "",
+                        "**チェックリスト**:",
+                    ])
+                    for item in task.checklist:
+                        check = "x" if item.completed else " "
+                        lines.append(f"- [{check}] {item.text}")
+
+                # 最新ログ
+                if task.logs:
+                    lines.extend([
+                        "",
+                        "**最新ログ**:",
+                    ])
+                    for log in task.logs[-5:]:
+                        time_str = log.timestamp.strftime("%H:%M")
+                        lines.append(f"- {time_str} - {log.message}")
+
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 統計",
+            "",
+            f"- **総エージェント数**: {dashboard.total_agents}",
+            f"- **アクティブエージェント**: {dashboard.active_agents}",
+            f"- **総タスク数**: {dashboard.total_tasks}",
+            f"- **完了タスク**: {dashboard.completed_tasks}",
+            f"- **失敗タスク**: {dashboard.failed_tasks}",
+        ])
+
+        return "\n".join(lines)
 
     def get_dashboard(self) -> Dashboard:
         """現在のダッシュボードを取得する。
@@ -307,6 +486,49 @@ class DashboardManager:
             tasks = [t for t in tasks if t.assigned_agent_id == agent_id]
 
         return tasks
+
+    def update_task_checklist(
+        self,
+        task_id: str,
+        checklist: list[dict[str, bool | str]] | None = None,
+        log_message: str | None = None,
+    ) -> tuple[bool, str]:
+        """タスクのチェックリストとログを更新する。
+
+        Args:
+            task_id: タスクID
+            checklist: チェックリストアイテムのリスト [{"text": "...", "completed": True/False}, ...]
+            log_message: 追加するログメッセージ
+
+        Returns:
+            (成功フラグ, メッセージ) のタプル
+        """
+        dashboard = self._read_dashboard()
+
+        task = dashboard.get_task(task_id)
+        if not task:
+            return False, f"タスク {task_id} が見つかりません"
+
+        # チェックリストを更新
+        if checklist is not None:
+            task.checklist = [
+                ChecklistItem(text=item["text"], completed=item.get("completed", False))
+                for item in checklist
+            ]
+            # チェックリストから進捗を計算
+            if task.checklist:
+                completed_count = sum(1 for item in task.checklist if item.completed)
+                task.progress = int((completed_count / len(task.checklist)) * 100)
+
+        # ログを追加（最新5件を保持）
+        if log_message:
+            task.logs.append(TaskLog(message=log_message))
+            task.logs = task.logs[-5:]  # 最新5件のみ保持
+
+        self._write_dashboard(dashboard)
+
+        logger.info(f"タスク {task_id} のチェックリスト/ログを更新しました")
+        return True, "チェックリスト/ログを更新しました"
 
     # エージェントサマリー管理メソッド
 
@@ -520,78 +742,7 @@ class DashboardManager:
             Markdown形式のダッシュボード文字列
         """
         dashboard = self._read_dashboard()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        lines = [
-            "# Multi-Agent Dashboard",
-            "",
-            f"**更新時刻**: {now}",
-            "",
-            "---",
-            "",
-            "## エージェント状態",
-            "",
-            "| ID | 役割 | 状態 | 現在のタスク | Worktree |",
-            "|:---|:---|:---|:---|:---|",
-        ]
-
-        status_emoji = {
-            "idle": "🟢",
-            "busy": "🔵",
-            "error": "🔴",
-            "offline": "⚫",
-        }
-
-        for agent in dashboard.agents:
-            emoji = status_emoji.get(str(agent.status).lower(), "⚪")
-            current_task = agent.current_task_id or "-"
-            worktree = agent.worktree_path or "-"
-            lines.append(
-                f"| `{agent.agent_id[:8]}` | {agent.role} | {emoji} {agent.status} | "
-                f"{current_task} | `{worktree}` |"
-            )
-
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## タスク状態",
-            "",
-            "| ID | タイトル | 状態 | 担当 | 進捗 |",
-            "|:---|:---|:---|:---|:---|",
-        ])
-
-        task_emoji = {
-            "pending": "⏳",
-            "in_progress": "🔄",
-            "completed": "✅",
-            "failed": "❌",
-            "blocked": "🚫",
-            "cancelled": "🗑️",
-        }
-
-        for task in dashboard.tasks:
-            emoji = task_emoji.get(str(task.status.value).lower(), "❓")
-            assigned = task.assigned_agent_id[:8] if task.assigned_agent_id else "-"
-            lines.append(
-                f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
-                f"`{assigned}` | {task.progress}% |"
-            )
-
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## 統計",
-            "",
-            f"- **総エージェント数**: {dashboard.total_agents}",
-            f"- **アクティブエージェント**: {dashboard.active_agents}",
-            f"- **総タスク数**: {dashboard.total_tasks}",
-            f"- **完了タスク**: {dashboard.completed_tasks}",
-            f"- **失敗タスク**: {dashboard.failed_tasks}",
-        ])
-
-        return "\n".join(lines)
+        return self._generate_markdown_body(dashboard)
 
     def save_markdown_dashboard(self, project_root: Path, session_id: str) -> Path:
         """Markdownダッシュボードをファイルに保存する。

@@ -1,7 +1,10 @@
-# Admin タスク: {session_id}
+# Admin タスク（Non-Worktree モード）: {session_id}
 
 このタスクを実行してください。ロールの詳細（禁止事項 F001-F005、RACE-001 等）は
 `roles/admin.md` で確認済みの前提で進めます。
+
+**⚠️ このセッションは Non-Worktree モードで実行されています。**
+全ての Worker は同一ディレクトリで作業します。ファイル競合に注意してください。
 
 ## MCP ツールの呼び出し方法
 
@@ -18,8 +21,6 @@
 | `create_task` | `{mcp_tool_prefix}create_task` |
 | `create_agent` | `{mcp_tool_prefix}create_agent` |
 | `create_workers_batch` | `{mcp_tool_prefix}create_workers_batch` |
-| `create_worktree` | `{mcp_tool_prefix}create_worktree` |
-| `assign_worktree` | `{mcp_tool_prefix}assign_worktree` |
 | `assign_task_to_agent` | `{mcp_tool_prefix}assign_task_to_agent` |
 | `send_task` | `{mcp_tool_prefix}send_task` |
 | `send_message` | `{mcp_tool_prefix}send_message` |
@@ -36,8 +37,7 @@ Admin ID: `{agent_id}`
 **呼び出し例:**
 ```
 {mcp_tool_prefix}create_task(title="タスク名", description="説明", caller_agent_id="{agent_id}")
-{mcp_tool_prefix}create_agent(role="worker", working_dir="/path/to/worktree", caller_agent_id="{agent_id}")
-{mcp_tool_prefix}create_worktree(branch_name="xxx", caller_agent_id="{agent_id}")
+{mcp_tool_prefix}create_agent(role="worker", working_dir="{working_dir}", caller_agent_id="{agent_id}")
 {mcp_tool_prefix}send_task(agent_id="xxx", task_content="内容", session_id="{session_id}", caller_agent_id="{agent_id}")
 ```
 
@@ -49,8 +49,19 @@ Admin ID: `{agent_id}`
 
 - **プロジェクト**: {project_name}
 - **作業ブランチ**: {branch_name}
+- **作業ディレクトリ**: {working_dir}
 - **Worker 数**: {worker_count}
 - **開始時刻**: {timestamp}
+- **モード**: Non-Worktree（同一ディレクトリ）
+
+## Non-Worktree モードの注意事項
+
+**⚠️ 全 Worker が同一ディレクトリで作業するため、以下に注意:**
+
+1. **ファイル競合を避ける**: 各 Worker に異なるファイル/モジュールを割り当てる
+2. **順次実行を検討**: 同じファイルを編集するタスクは並列実行しない
+3. **ブランチ管理**: Worker は同一ブランチで作業（`{branch_name}`）
+4. **コミット調整**: Worker 間でコミットが競合しないよう、タスク完了時のみコミット
 
 ## 実行手順
 
@@ -65,8 +76,11 @@ Admin ID: `{agent_id}`
 
 **⚠️ 重要: 必ず `create_task` を呼んでください。呼ばないと Dashboard が更新されず、Owner が進捗を追跡できません。**
 
+**⚠️ Non-Worktree 注意: 同じファイルを編集するタスクは異なる Worker に割り当てない**
+
 ```python
 # 各サブタスクを登録（必須！）
+# ファイル競合を避けるようにタスクを分割
 for task in subtasks:
     create_task(
         title=task["title"],
@@ -77,24 +91,27 @@ for task in subtasks:
 
 - 計画書から並列実行可能なサブタスクを抽出
 - **各サブタスクを必ず `create_task` で Dashboard に登録**
-- タスクを登録しないと `list_tasks` が空のままになる
+- **同一ファイルを編集するタスクは同じ Worker に割り当てる**
 
 ### 3. Worker 一括作成・タスク割り当て・タスク送信
+
+**Non-Worktree モードでは worktree 作成が自動的にスキップされます。**
 
 **`create_workers_batch` を使用して Worker 作成からタスク送信まで全て並列実行:**
 
 ```python
 # Worker 設定を準備（タスク数分）
+# Non-Worktree モードでは branch は使用されないが、識別用に指定
 # task_id と task_content を含めると、タスク割り当て・送信も並列実行される
 worker_configs = [
     {{
-        "branch": "{branch_name}-worker-1",
+        "branch": "worker-1",
         "task_title": "タスク1",
         "task_id": task_id_1,      # create_task で取得した ID
         "task_content": "タスク1の詳細内容..."
     }},
     {{
-        "branch": "{branch_name}-worker-2",
+        "branch": "worker-2",
         "task_title": "タスク2",
         "task_id": task_id_2,
         "task_content": "タスク2の詳細内容..."
@@ -103,10 +120,10 @@ worker_configs = [
 ]
 
 # 全 Worker を並列で作成・タスク割り当て・タスク送信
-# worktree → agent → assign_task → send_task が Worker ごとに並列実行
+# worktree スキップ → agent → assign_task → send_task が Worker ごとに並列実行
 result = create_workers_batch(
     worker_configs=worker_configs,
-    repo_path="{project_path}",
+    repo_path="{working_dir}",
     base_branch="{branch_name}",
     session_id="{session_id}",
     caller_agent_id="{agent_id}"
@@ -118,9 +135,8 @@ for worker in result["workers"]:
 ```
 
 **注意事項:**
-- `create_workers_batch` は worktree 作成 → agent 作成 → タスク割り当て → タスク送信を Worker ごとに並列実行
-- 作成後に `assign_worktree`、`assign_task_to_agent`、`send_task` の呼び出しは不要
-- ブランチ名は `{branch_name}-worker-N` 形式（N は Worker 番号）
+- Non-Worktree モードでは全 Worker が `{working_dir}` で作業
+- ファイル競合を避けるため、異なるファイルを編集するタスクを各 Worker に割り当て
 - `task_id` と `task_content` を省略した場合は Worker 作成のみ実行
 
 ### 4. 進捗監視
@@ -167,13 +183,13 @@ for task in qa_tasks:
 # 品質チェック Worker を並列で作成・タスク送信まで一括実行
 qa_worker_configs = [
     {{
-        "branch": "{branch_name}-qa-1",
+        "branch": "qa-1",
         "task_title": "ビルド・テスト実行",
         "task_id": qa_task_id_1,
         "task_content": "npm test / pytest 等でビルドとテストを実行"
     }},
     {{
-        "branch": "{branch_name}-qa-2",
+        "branch": "qa-2",
         "task_title": "動作確認",
         "task_id": qa_task_id_2,
         "task_content": "アプリ起動と主要機能の動作確認"
@@ -183,7 +199,7 @@ qa_worker_configs = [
 
 result = create_workers_batch(
     worker_configs=qa_worker_configs,
-    repo_path="{project_path}",
+    repo_path="{working_dir}",
     base_branch="{branch_name}",
     session_id="{session_id}",
     caller_agent_id="{agent_id}"
@@ -310,7 +326,7 @@ while True:
 ## 完了条件
 
 - 全 Worker のタスクが completed 状態
-- 全ての変更が {branch_name} にマージ済み
+- 全ての変更が {branch_name} にコミット済み
 - コンフリクトがないこと
 - **品質チェック Worker からの報告で問題がないこと**:
   - ビルド・テストが成功

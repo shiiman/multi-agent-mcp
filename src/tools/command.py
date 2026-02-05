@@ -270,6 +270,7 @@ def register_tools(mcp: FastMCP) -> None:
                     worker_count=effective_worker_count,
                     memory_context=memory_context,
                     project_name=project_name,
+                    working_dir=str(project_root),
                     mcp_tool_prefix=mcp_prefix,
                 )
             else:

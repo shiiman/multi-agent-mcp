@@ -1,5 +1,6 @@
 """エージェント管理ツール。"""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -17,14 +18,21 @@ from src.managers.tmux_manager import (
     get_project_name,
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
+from src.config.workflow_guides import get_role_guide
 from src.tools.helpers import (
     check_tool_permission,
+    ensure_dashboard_manager,
+    ensure_global_memory_manager,
     ensure_ipc_manager,
+    ensure_memory_manager,
     ensure_metrics_manager,
+    ensure_persona_manager,
+    resolve_main_repo_root,
     save_agent_to_file,
     sync_agents_from_file,
 )
 from src.tools.model_profile import get_current_profile_settings
+from src.tools.task_templates import generate_7section_task
 
 logger = logging.getLogger(__name__)
 
@@ -653,4 +661,387 @@ def register_tools(mcp: FastMCP) -> None:
             "terminal": terminal_app.value,
             "working_dir": working_dir,
             "message": f"エージェント {agent_id} を初期化しました（{cli.value} で起動）",
+        }
+
+    @mcp.tool()
+    async def create_workers_batch(
+        worker_configs: list[dict],
+        repo_path: str,
+        base_branch: str,
+        session_id: str | None = None,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """複数の Worker を並列で作成し、オプションでタスク割り当て・送信も実行する。
+
+        Worktree 作成、エージェント作成、タスク割り当て、タスク送信を並列で実行し、
+        セットアップ時間を大幅に短縮する。
+
+        ※ Owner と Admin のみ使用可能。
+
+        Args:
+            worker_configs: Worker 設定のリスト。各設定は以下のキーを持つ:
+                - branch: ブランチ名（worktree 用、必須）
+                - task_title: タスク名（オプション、ログ用）
+                - task_id: 割り当てるタスクID（オプション、assign_task_to_agent 用）
+                - task_content: 送信するタスク内容（オプション、send_task 用）
+            repo_path: メインリポジトリのパス
+            base_branch: ベースブランチ名（worktree 作成時の基点）
+            session_id: セッションID（task_content 指定時は必須）
+            caller_agent_id: 呼び出し元エージェントID（必須）
+
+        Returns:
+            作成結果（success, workers, failed_count, message）
+            workers: 作成された Worker 情報のリスト
+            failed_count: 失敗した Worker 数
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+        settings = app_ctx.settings
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "create_workers_batch", caller_agent_id)
+        if role_error:
+            return role_error
+
+        if not worker_configs:
+            return {
+                "success": False,
+                "error": "worker_configs が空です",
+            }
+
+        # 現在のプロファイル設定を取得
+        profile_settings = get_current_profile_settings(app_ctx)
+        profile_max_workers = profile_settings["max_workers"]
+
+        # Worker 数の上限チェック
+        agents = app_ctx.agents
+        current_worker_count = sum(1 for a in agents.values() if a.role == AgentRole.WORKER)
+        requested_count = len(worker_configs)
+
+        if current_worker_count + requested_count > profile_max_workers:
+            return {
+                "success": False,
+                "error": f"Worker 数が上限を超えます（現在: {current_worker_count}, "
+                         f"要求: {requested_count}, 上限: {profile_max_workers}）",
+            }
+
+        # worktree 無効モードのチェック
+        enable_worktree = settings.enable_worktree
+
+        async def create_single_worker(config: dict, worker_index: int) -> dict[str, Any]:
+            """単一の Worker を作成する内部関数。"""
+            branch = config.get("branch")
+            task_title = config.get("task_title", f"Worker {worker_index + 1}")
+
+            if not branch:
+                return {
+                    "success": False,
+                    "error": f"Worker {worker_index + 1}: branch が指定されていません",
+                    "worker_index": worker_index,
+                }
+
+            try:
+                # 1. Worktree 作成（有効な場合のみ）
+                worktree_path = repo_path
+                if enable_worktree:
+                    from src.tools.helpers import get_worktree_manager
+                    worktree = get_worktree_manager(app_ctx, repo_path)
+
+                    # worktree パスを生成
+                    worktree_dir = Path(repo_path).parent / f".worktrees/{branch}"
+                    success, message, actual_path = await worktree.create_worktree(
+                        str(worktree_dir), branch, create_branch=True, base_branch=base_branch
+                    )
+                    if not success:
+                        return {
+                            "success": False,
+                            "error": f"Worker {worker_index + 1}: Worktree 作成失敗 - {message}",
+                            "worker_index": worker_index,
+                        }
+                    worktree_path = actual_path
+                    logger.info(f"Worker {worker_index + 1}: Worktree 作成完了 - {worktree_path}")
+
+                # 2. Worker エージェント作成
+                # create_agent の内部ロジックを直接実行
+                tmux = app_ctx.tmux
+                project_name = get_project_name(repo_path)
+
+                # メインセッションを確保
+                if not await tmux.create_main_session(repo_path):
+                    return {
+                        "success": False,
+                        "error": f"Worker {worker_index + 1}: メインセッション作成失敗",
+                        "worker_index": worker_index,
+                    }
+
+                # 次の空きスロットを探す
+                slot = _get_next_worker_slot(agents, settings, project_name, profile_max_workers)
+                if slot is None:
+                    return {
+                        "success": False,
+                        "error": f"Worker {worker_index + 1}: 利用可能なスロットがありません",
+                        "worker_index": worker_index,
+                    }
+                window_index, pane_index = slot
+
+                # 追加ウィンドウが必要な場合は作成
+                if window_index > 0:
+                    success = await tmux.add_extra_worker_window(
+                        project_name=project_name,
+                        window_index=window_index,
+                        rows=settings.extra_worker_rows,
+                        cols=settings.extra_worker_cols,
+                    )
+                    if not success:
+                        return {
+                            "success": False,
+                            "error": f"Worker {worker_index + 1}: 追加ウィンドウ作成失敗",
+                            "worker_index": worker_index,
+                        }
+
+                # エージェントID を生成
+                agent_id = str(uuid.uuid4())[:8]
+
+                # ペインにタイトルを設定
+                await tmux.set_pane_title(
+                    project_name, window_index, pane_index, f"worker-{agent_id}"
+                )
+                tmux_session = f"{project_name}:{window_index}.{pane_index}"
+
+                # エージェント情報を登録
+                now = datetime.now()
+                agent = Agent(
+                    id=agent_id,
+                    role=AgentRole.WORKER,
+                    status=AgentStatus.IDLE,
+                    tmux_session=tmux_session,
+                    working_dir=worktree_path,
+                    worktree_path=worktree_path if enable_worktree else None,
+                    session_name=project_name,
+                    window_index=window_index,
+                    pane_index=pane_index,
+                    created_at=now,
+                    last_activity=now,
+                )
+                agents[agent_id] = agent
+
+                logger.info(
+                    f"Worker {worker_index + 1} (ID: {agent_id}) を作成しました: {tmux_session}"
+                )
+
+                # IPC マネージャーに登録
+                ipc_registered = False
+                if app_ctx.session_id:
+                    try:
+                        ipc = ensure_ipc_manager(app_ctx)
+                        ipc.register_agent(agent_id)
+                        ipc_registered = True
+
+                        # メトリクス記録開始
+                        metrics = ensure_metrics_manager(app_ctx)
+                        metrics.record_agent_start(agent_id, "worker")
+                    except ValueError as e:
+                        logger.warning(f"IPC/メトリクス登録をスキップ: {e}")
+
+                # エージェント情報をファイルに保存
+                file_saved = save_agent_to_file(app_ctx, agent)
+
+                # グローバルレジストリに登録
+                from src.tools.helpers import save_agent_to_registry
+                owner_agent = next(
+                    (a for a in agents.values() if a.role == AgentRole.OWNER),
+                    None,
+                )
+                owner_id = owner_agent.id if owner_agent else agent_id
+
+                if app_ctx.project_root:
+                    save_agent_to_registry(
+                        agent_id, owner_id, app_ctx.project_root, app_ctx.session_id
+                    )
+
+                # ダッシュボードにエージェント情報を追加
+                dashboard_updated = False
+                dashboard = None
+                if app_ctx.session_id and app_ctx.project_root:
+                    try:
+                        dashboard = ensure_dashboard_manager(app_ctx)
+                        dashboard.update_agent_summary(agent)
+                        dashboard.save_markdown_dashboard(
+                            app_ctx.project_root, app_ctx.session_id
+                        )
+                        dashboard_updated = True
+                    except Exception as e:
+                        logger.warning(f"ダッシュボード更新に失敗: {e}")
+
+                # タスク割り当て（task_id が指定されている場合）
+                task_assigned = False
+                task_id = config.get("task_id")
+                if task_id and dashboard:
+                    try:
+                        success, message = dashboard.assign_task(
+                            task_id=task_id,
+                            agent_id=agent_id,
+                            branch=branch,
+                            worktree_path=worktree_path,
+                        )
+                        task_assigned = success
+                        if not success:
+                            logger.warning(f"Worker {worker_index + 1}: タスク割り当て失敗 - {message}")
+                    except Exception as e:
+                        logger.warning(f"Worker {worker_index + 1}: タスク割り当てエラー - {e}")
+
+                # タスク送信（task_content が指定されている場合）
+                task_sent = False
+                task_content = config.get("task_content")
+                if task_content and session_id:
+                    try:
+                        # プロジェクトルートを取得
+                        project_root = Path(resolve_main_repo_root(worktree_path))
+
+                        # メモリから関連情報を検索
+                        memory_context = ""
+                        memory_lines = []
+
+                        try:
+                            memory_manager = ensure_memory_manager(app_ctx)
+                            project_results = memory_manager.search(task_content, limit=3)
+                            if project_results:
+                                memory_lines.append("**プロジェクトメモリ:**")
+                                for entry in project_results:
+                                    memory_lines.append(f"- **{entry.key}**: {entry.content[:200]}...")
+                        except Exception:
+                            pass
+
+                        try:
+                            global_memory = ensure_global_memory_manager()
+                            global_results = global_memory.search(task_content, limit=2)
+                            if global_results:
+                                if memory_lines:
+                                    memory_lines.append("")
+                                memory_lines.append("**グローバルメモリ:**")
+                                for entry in global_results:
+                                    memory_lines.append(f"- **{entry.key}**: {entry.content[:200]}...")
+                        except Exception:
+                            pass
+
+                        if memory_lines:
+                            memory_context = "\n".join(memory_lines)
+
+                        # ペルソナを取得
+                        persona_manager = ensure_persona_manager(app_ctx)
+                        persona = persona_manager.get_optimal_persona(task_content)
+
+                        # 7セクション構造のタスクを生成
+                        final_task_content = generate_7section_task(
+                            task_id=session_id,
+                            agent_id=agent_id,
+                            task_description=task_content,
+                            persona_name=persona.name,
+                            persona_prompt=persona.system_prompt_addition,
+                            memory_context=memory_context,
+                            project_name=project_root.name,
+                            worktree_path=worktree_path if enable_worktree else None,
+                            branch_name=branch,
+                            admin_id=caller_agent_id,
+                        )
+
+                        # ロールテンプレートを先頭に追加
+                        role_guide = get_role_guide("worker")
+                        if role_guide:
+                            final_task_content = (
+                                role_guide.content + "\n\n---\n\n# タスク指示\n\n" + final_task_content
+                            )
+
+                        # タスクファイル作成
+                        if dashboard:
+                            task_file = dashboard.write_task_file(
+                                project_root, session_id, agent_id, final_task_content
+                            )
+
+                            # AI CLI コマンドを構築して送信
+                            agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
+                            agent_model = profile_settings.get("worker_model")
+
+                            read_command = app_ctx.ai_cli.build_stdin_command(
+                                cli=agent_cli,
+                                task_file_path=str(task_file),
+                                worktree_path=worktree_path if enable_worktree else None,
+                                project_root=str(project_root),
+                                model=agent_model,
+                            )
+
+                            success = await tmux.send_keys_to_pane(
+                                project_name, window_index, pane_index, read_command
+                            )
+                            if success:
+                                agent.status = AgentStatus.BUSY
+                                agent.last_activity = datetime.now()
+                                dashboard.save_markdown_dashboard(project_root, session_id)
+                                task_sent = True
+                                logger.info(f"Worker {worker_index + 1} (ID: {agent_id}) にタスクを送信しました")
+                            else:
+                                logger.warning(f"Worker {worker_index + 1}: タスク送信失敗")
+                    except Exception as e:
+                        logger.warning(f"Worker {worker_index + 1}: タスク送信エラー - {e}")
+
+                return {
+                    "success": True,
+                    "worker_index": worker_index,
+                    "agent_id": agent_id,
+                    "branch": branch,
+                    "worktree_path": worktree_path,
+                    "tmux_session": tmux_session,
+                    "task_title": task_title,
+                    "ipc_registered": ipc_registered,
+                    "file_persisted": file_saved,
+                    "dashboard_updated": dashboard_updated,
+                    "task_assigned": task_assigned,
+                    "task_sent": task_sent,
+                }
+
+            except Exception as e:
+                logger.exception(f"Worker {worker_index + 1} 作成中にエラー: {e}")
+                return {
+                    "success": False,
+                    "error": f"Worker {worker_index + 1}: {str(e)}",
+                    "worker_index": worker_index,
+                }
+
+        # 全 Worker を並列で作成
+        logger.info(f"{len(worker_configs)} 個の Worker を並列で作成開始")
+        results = await asyncio.gather(
+            *[create_single_worker(config, i) for i, config in enumerate(worker_configs)],
+            return_exceptions=True
+        )
+
+        # 結果を整理
+        workers = []
+        failed_count = 0
+        errors = []
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                failed_count += 1
+                errors.append(f"Worker {i + 1}: 例外発生 - {str(result)}")
+            elif result.get("success"):
+                workers.append(result)
+            else:
+                failed_count += 1
+                errors.append(result.get("error", f"Worker {i + 1}: 不明なエラー"))
+
+        success = failed_count == 0
+        message = (
+            f"{len(workers)} 個の Worker を作成しました"
+            if success
+            else f"{len(workers)} 個の Worker を作成（{failed_count} 個失敗）"
+        )
+
+        logger.info(message)
+
+        return {
+            "success": success,
+            "workers": workers,
+            "failed_count": failed_count,
+            "errors": errors if errors else None,
+            "message": message,
         }

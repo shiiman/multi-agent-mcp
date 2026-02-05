@@ -17,6 +17,20 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"  # キャンセル
 
 
+class ChecklistItem(BaseModel):
+    """チェックリストアイテム。"""
+
+    text: str = Field(..., description="アイテムのテキスト")
+    completed: bool = Field(default=False, description="完了フラグ")
+
+
+class TaskLog(BaseModel):
+    """タスクログエントリ。"""
+
+    timestamp: datetime = Field(default_factory=datetime.now, description="タイムスタンプ")
+    message: str = Field(..., description="ログメッセージ")
+
+
 class TaskInfo(BaseModel):
     """タスク情報。"""
 
@@ -32,6 +46,12 @@ class TaskInfo(BaseModel):
     branch: str | None = Field(None, description="関連ブランチ")
     worktree_path: str | None = Field(None, description="worktreeパス")
     progress: int = Field(default=0, ge=0, le=100, description="進捗率（0-100）")
+    checklist: list[ChecklistItem] = Field(
+        default_factory=list, description="チェックリスト"
+    )
+    logs: list[TaskLog] = Field(
+        default_factory=list, description="進捗ログ（最新5件を保持）"
+    )
     created_at: datetime = Field(
         default_factory=datetime.now, description="作成日時"
     )

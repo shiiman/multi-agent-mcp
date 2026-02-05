@@ -17,6 +17,7 @@ def generate_admin_task(
     worker_count: int,
     memory_context: str,
     project_name: str,
+    working_dir: str | None = None,
     mcp_tool_prefix: str = "mcp__multi-agent-mcp__",
     settings: Settings | None = None,
 ) -> str:
@@ -30,6 +31,7 @@ def generate_admin_task(
         worker_count: Worker 数
         memory_context: メモリから取得した関連情報
         project_name: プロジェクト名
+        working_dir: 作業ディレクトリ（Non-Worktree モード用）
         mcp_tool_prefix: MCP ツールの完全名プレフィックス
         settings: MCP 設定（省略時は新規作成）
 
@@ -47,21 +49,42 @@ def generate_admin_task(
     memory_context_display = memory_context if memory_context else "（関連情報なし）"
 
     loader = get_template_loader()
-    return loader.render(
-        "tasks",
-        "admin_task",
-        session_id=session_id,
-        agent_id=agent_id,
-        plan_content=plan_content,
-        branch_name=branch_name,
-        worker_count=worker_count,
-        memory_context=memory_context_display,
-        project_name=project_name,
-        mcp_tool_prefix=mcp_tool_prefix,
-        timestamp=timestamp,
-        max_iterations=max_iterations,
-        same_issue_limit=same_issue_limit,
-    )
+
+    # enable_worktree 設定に応じてテンプレートを切り替え
+    if settings.enable_worktree:
+        return loader.render(
+            "tasks",
+            "admin_task",
+            session_id=session_id,
+            agent_id=agent_id,
+            plan_content=plan_content,
+            branch_name=branch_name,
+            worker_count=worker_count,
+            memory_context=memory_context_display,
+            project_name=project_name,
+            project_path=working_dir or ".",  # create_workers_batch 用
+            mcp_tool_prefix=mcp_tool_prefix,
+            timestamp=timestamp,
+            max_iterations=max_iterations,
+            same_issue_limit=same_issue_limit,
+        )
+    else:
+        return loader.render(
+            "tasks",
+            "admin_task_no_worktree",
+            session_id=session_id,
+            agent_id=agent_id,
+            plan_content=plan_content,
+            branch_name=branch_name,
+            working_dir=working_dir or ".",
+            worker_count=worker_count,
+            memory_context=memory_context_display,
+            project_name=project_name,
+            mcp_tool_prefix=mcp_tool_prefix,
+            timestamp=timestamp,
+            max_iterations=max_iterations,
+            same_issue_limit=same_issue_limit,
+        )
 
 
 def generate_7section_task(

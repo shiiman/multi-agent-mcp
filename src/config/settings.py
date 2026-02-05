@@ -109,6 +109,11 @@ class Settings(BaseSettings):
     mcp_dir: str = ".multi-agent-mcp"
     """MCP 設定ディレクトリ名（デフォルト: .multi-agent-mcp）"""
 
+    # Worktree 設定
+    enable_worktree: bool = True
+    """git worktree を使用するか（デフォルト: True）。
+    False にすると Worker は全て同一ディレクトリで作業する。"""
+
     # エージェント設定
     max_workers: int = 6
     """Workerエージェントの最大数（デフォルト: メインウィンドウに収まる6）"""

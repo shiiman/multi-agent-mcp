@@ -53,17 +53,17 @@ multi-agent-mcp/
 │   │       ├── ghostty.py     # Ghostty terminal support
 │   │       ├── iterm2.py      # iTerm2 terminal support
 │   │       └── terminal_app.py # macOS Terminal.app support
-│   └── tools/                 # MCP tool definitions (86 tools)
+│   └── tools/                 # MCP tool definitions (89 tools)
 │       ├── __init__.py        # register_all_tools()
 │       ├── helpers.py         # Common helper functions
-│       ├── session.py         # Session management (5 tools)
-│       ├── agent.py           # Agent management (5 tools)
+│       ├── session.py         # Session management (4 tools)
+│       ├── agent.py           # Agent management (6 tools)
 │       ├── command.py         # Command execution (5 tools)
 │       ├── worktree.py        # Git worktree (7 tools)
 │       ├── ipc.py             # IPC/messaging (5 tools)
-│       ├── dashboard.py       # Dashboard/task management (9 tools)
+│       ├── dashboard.py       # Dashboard/task management (10 tools)
 │       ├── gtrconfig.py       # Gtrconfig (3 tools)
-│       ├── template.py        # Templates (2 tools)
+│       ├── template.py        # Templates (4 tools)
 │       ├── scheduler.py       # Scheduler (3 tools)
 │       ├── healthcheck.py     # Healthcheck (5 tools)
 │       ├── metrics.py         # Metrics (4 tools)
@@ -71,10 +71,11 @@ multi-agent-mcp/
 │       ├── persona.py         # Persona (3 tools)
 │       ├── memory.py          # Memory management (19 tools)
 │       ├── screenshot.py      # Screenshot management (4 tools)
-│       └── model_profile.py   # Model profile (3 tools)
+│       ├── model_profile.py   # Model profile (3 tools)
+│       └── task_templates.py  # Task template generation (helper module)
 ├── templates/                 # Templates for agents and scripts
 │   ├── roles/                 # Role-based workflow guides (owner, admin, worker)
-│   ├── tasks/                 # Task instruction templates (admin_task, worker_task)
+│   ├── tasks/                 # Task instruction templates (admin_task, admin_task_no_worktree, worker_task)
 │   └── scripts/               # Script templates
 │       └── bash/              # Bash scripts (workspace_setup.sh)
 ├── tests/                     # Pytest test files
@@ -176,23 +177,29 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MCP_MAX_WORKERS` | Maximum number of worker agents | 6 |
-| `MCP_TMUX_PREFIX` | Prefix for tmux session names | mcp-agent |
-| `MCP_WORKSPACE_BASE_DIR` | Base directory for workspaces | /tmp/mcp-workspaces |
+| `MCP_TMUX_PREFIX` | Prefix for tmux session names | multi-agent-mcp |
+| `MCP_ENABLE_WORKTREE` | Enable git worktree for workers | true |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck interval (no response = unhealthy) | 60 |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | claude |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | claude-sonnet-4-20250514 |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | claude-opus-4-20250514 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | claude-sonnet-4-20250514 |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
+| `MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER` | Standard thinking multiplier | 1.0 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | claude |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | claude-opus-4-20250514 |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | claude-sonnet-4-20250514 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | claude-opus-4-20250514 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER` | Performance thinking multiplier | 2.0 |
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
 | `MCP_OWNER_THINKING_TOKENS` | Owner thinking tokens | 0 |
 | `MCP_ADMIN_THINKING_TOKENS` | Admin thinking tokens | 1000 |
 | `MCP_WORKER_THINKING_TOKENS` | Worker thinking tokens | 10000 |
+| `MCP_QUALITY_CHECK_MAX_ITERATIONS` | Max quality check iterations | 5 |
+| `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | Same issue repeat limit | 3 |
+| `MCP_MEMORY_MAX_ENTRIES` | Max memory entries | 1000 |
+| `MCP_MEMORY_TTL_DAYS` | Memory entry TTL in days | 90 |
 
 ## Common Patterns
 

@@ -231,8 +231,9 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def report_task_progress(
         task_id: str,
-        progress: int,
+        progress: int | None = None,
         message: str | None = None,
+        checklist: list[dict] | None = None,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -241,12 +242,15 @@ def register_tools(mcp: FastMCP) -> None:
         Worker は 10% ごとに進捗を報告することで、Admin と Owner が
         リアルタイムで作業状況を把握できます。
 
+        チェックリストを使用する場合、進捗率は自動計算されます。
+
         ※ Worker のみ使用可能。
 
         Args:
             task_id: タスクID
-            progress: 進捗率（0-100、10% 単位で報告推奨）
-            message: 進捗メッセージ（現在の作業内容など）
+            progress: 進捗率（0-100、10% 単位で報告推奨。checklist使用時は自動計算）
+            message: 進捗メッセージ（現在の作業内容など、ログに追加されます）
+            checklist: チェックリスト [{"text": "項目名", "completed": true/false}, ...]
             caller_agent_id: 呼び出し元エージェントID（Worker のID）
 
         Returns:
@@ -259,25 +263,44 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
-        # progress の検証
-        if not (0 <= progress <= 100):
+        # progress の検証（checklist がある場合は自動計算されるためスキップ可）
+        if progress is not None and not (0 <= progress <= 100):
             return {
                 "success": False,
                 "error": f"無効な進捗率です: {progress}（有効: 0-100）",
             }
 
-        # Dashboard を更新
-        try:
-            dashboard = ensure_dashboard_manager(app_ctx)
-            success, update_msg = dashboard.update_task_status(
-                task_id=task_id,
-                status=TaskStatus.IN_PROGRESS,
-                progress=progress,
-            )
-            if not success:
-                logger.warning(f"Dashboard の進捗更新に失敗: {update_msg}")
-        except Exception as e:
-            logger.warning(f"Dashboard の進捗更新に失敗: {e}")
+        dashboard = ensure_dashboard_manager(app_ctx)
+
+        # チェックリストがある場合は update_task_checklist を使用
+        if checklist is not None or message is not None:
+            try:
+                success, update_msg = dashboard.update_task_checklist(
+                    task_id=task_id,
+                    checklist=checklist,
+                    log_message=message,
+                )
+                if not success:
+                    logger.warning(f"チェックリスト/ログ更新に失敗: {update_msg}")
+            except Exception as e:
+                logger.warning(f"チェックリスト/ログ更新に失敗: {e}")
+
+        # progress が明示的に指定された場合はステータスも更新
+        if progress is not None:
+            try:
+                success, update_msg = dashboard.update_task_status(
+                    task_id=task_id,
+                    status=TaskStatus.IN_PROGRESS,
+                    progress=progress,
+                )
+                if not success:
+                    logger.warning(f"Dashboard の進捗更新に失敗: {update_msg}")
+            except Exception as e:
+                logger.warning(f"Dashboard の進捗更新に失敗: {e}")
+
+        # 最新のタスク情報を取得
+        task = dashboard.get_task(task_id)
+        actual_progress = task.progress if task else (progress or 0)
 
         # Admin にも進捗を通知（IPC メッセージ）
         admin_notified = False
@@ -289,12 +312,12 @@ def register_tools(mcp: FastMCP) -> None:
                     sender_id=caller_agent_id,
                     receiver_id=admin_ids[0],
                     message_type=MessageType.TASK_PROGRESS,
-                    subject=f"進捗報告: {task_id} ({progress}%)",
-                    content=message or f"タスク {task_id} の進捗: {progress}%",
+                    subject=f"進捗報告: {task_id} ({actual_progress}%)",
+                    content=message or f"タスク {task_id} の進捗: {actual_progress}%",
                     priority=MessagePriority.NORMAL,
                     metadata={
                         "task_id": task_id,
-                        "progress": progress,
+                        "progress": actual_progress,
                         "reporter": caller_agent_id,
                     },
                 )
@@ -317,10 +340,10 @@ def register_tools(mcp: FastMCP) -> None:
         return {
             "success": True,
             "task_id": task_id,
-            "progress": progress,
+            "progress": actual_progress,
             "admin_notified": admin_notified,
             "markdown_updated": markdown_updated,
-            "message": f"進捗 {progress}% を報告しました",
+            "message": f"進捗 {actual_progress}% を報告しました",
         }
 
     @mcp.tool()

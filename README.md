@@ -104,7 +104,7 @@ uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp mu
 claude mcp list
 ```
 
-## 提供するTools（88個）
+## 提供するTools（89個）
 
 ### セッション管理（4個）
 
@@ -115,7 +115,7 @@ claude mcp list
 | `check_all_tasks_completed` | 全タスクの完了状態をチェック |
 | `cleanup_on_completion` | 全タスク完了時にワークスペースをクリーンアップ |
 
-### エージェント管理（4個）
+### エージェント管理（6個）
 
 | Tool | 説明 |
 |------|------|
@@ -123,6 +123,8 @@ claude mcp list
 | `list_agents` | 全エージェントの一覧を取得 |
 | `get_agent_status` | 指定エージェントの詳細ステータスを取得 |
 | `terminate_agent` | エージェントを終了 |
+| `initialize_agent` | エージェントにロールテンプレートを渡してAI CLIを起動 |
+| `create_workers_batch` | 複数のWorkerを並列で作成しタスクを割り当て |
 
 ### コマンド実行（5個）
 
@@ -156,7 +158,7 @@ claude mcp list
 | `clear_messages` | メッセージをクリア |
 | `register_agent_to_ipc` | エージェントをIPCシステムに登録 |
 
-### ダッシュボード/タスク管理（9個）
+### ダッシュボード/タスク管理（10個）
 
 | Tool | 説明 |
 |------|------|
@@ -164,6 +166,7 @@ claude mcp list
 | `update_task_status` | タスクのステータスを更新（Admin専用） |
 | `assign_task_to_agent` | タスクをエージェントに割り当て（Admin専用） |
 | `list_tasks` | タスク一覧を取得 |
+| `report_task_progress` | Workerがタスクの進捗を報告 |
 | `report_task_completion` | WorkerがAdminにタスク完了を報告（Worker専用） |
 | `get_task` | タスクの詳細を取得 |
 | `remove_task` | タスクを削除 |
@@ -178,12 +181,14 @@ claude mcp list
 | `analyze_project_for_gtrconfig` | プロジェクト構造を解析して推奨設定を提案 |
 | `generate_gtrconfig` | .gtrconfigを自動生成 |
 
-### テンプレート（2個）
+### テンプレート（4個）
 
 | Tool | 説明 |
 |------|------|
 | `list_workspace_templates` | 利用可能なテンプレート一覧を取得 |
 | `get_workspace_template` | 特定テンプレートの詳細を取得 |
+| `get_role_guide` | 特定ロールのワークフローガイドを取得 |
+| `list_role_guides` | 利用可能なロールガイド一覧を取得 |
 
 ### スケジューラー（3個）
 
@@ -304,24 +309,30 @@ cleanup_workspace()
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
 | `MCP_MAX_WORKERS` | 6 | Workerの最大数 |
-| `MCP_TMUX_PREFIX` | mcp-agent | tmuxセッション名のプレフィックス |
-| `MCP_WORKSPACE_BASE_DIR` | /tmp/mcp-workspaces | ワークスペースのベースディレクトリ |
+| `MCP_TMUX_PREFIX` | multi-agent-mcp | tmuxセッション名のプレフィックス |
+| `MCP_ENABLE_WORKTREE` | true | git worktreeを使用するか |
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 60 | ヘルスチェック間隔（秒）- 応答なしで異常判断 |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | claude | standardプロファイルのAI CLI |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | claude-sonnet-4-20250514 | standardプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | claude-opus-4-20250514 | standardプロファイルのAdminモデル |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | claude-sonnet-4-20250514 | standardプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | 6 | standardプロファイルのWorker上限 |
+| `MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER` | 1.0 | standardプロファイルの思考倍率 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | claude | performanceプロファイルのAI CLI |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | claude-opus-4-20250514 | performanceプロファイルのAdminモデル |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | claude-sonnet-4-20250514 | performanceプロファイルのWorkerモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | claude-opus-4-20250514 | performanceプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | 16 | performanceプロファイルのWorker上限 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER` | 2.0 | performanceプロファイルの思考倍率 |
 | `MCP_PROJECT_ROOT` | - | プロジェクトルート（.env読み込み用） |
 | `MCP_OWNER_THINKING_TOKENS` | 0 | Ownerの思考トークン数 |
 | `MCP_ADMIN_THINKING_TOKENS` | 1000 | Adminの思考トークン数 |
 | `MCP_WORKER_THINKING_TOKENS` | 10000 | Workerの思考トークン数 |
+| `MCP_QUALITY_CHECK_MAX_ITERATIONS` | 5 | 品質チェックの最大イテレーション回数 |
+| `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | 3 | 同一問題の繰り返し上限 |
+| `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリの最大エントリ数 |
+| `MCP_MEMORY_TTL_DAYS` | 90 | メモリエントリの保持期間（日） |
 
 ## ディレクトリ構造
 

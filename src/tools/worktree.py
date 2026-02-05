@@ -6,6 +6,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from src.config.settings import Settings
 from src.context import AppContext
 from src.tools.helpers import check_tool_permission, get_worktree_manager
 
@@ -46,6 +47,18 @@ def register_tools(mcp: FastMCP) -> None:
         role_error = check_tool_permission(app_ctx, "create_worktree", caller_agent_id)
         if role_error:
             return role_error
+
+        # worktree 無効モードの場合はスキップ
+        settings = Settings()
+        if not settings.enable_worktree:
+            logger.info(f"worktree が無効のためスキップ: {branch} (MCP_ENABLE_WORKTREE=false)")
+            return {
+                "success": True,
+                "worktree_path": repo_path,  # メインリポジトリを使用
+                "branch": branch,
+                "message": "worktree が無効のためスキップしました（同一ディレクトリで作業）",
+                "skipped": True,
+            }
 
         worktree = get_worktree_manager(app_ctx, repo_path)
 
@@ -136,6 +149,17 @@ def register_tools(mcp: FastMCP) -> None:
         role_error = check_tool_permission(app_ctx, "remove_worktree", caller_agent_id)
         if role_error:
             return role_error
+
+        # worktree 無効モードの場合はスキップ
+        settings = Settings()
+        if not settings.enable_worktree:
+            logger.info(f"worktree が無効のため削除をスキップ: {worktree_path}")
+            return {
+                "success": True,
+                "worktree_path": worktree_path,
+                "message": "worktree が無効のため削除をスキップしました",
+                "skipped": True,
+            }
 
         worktree = get_worktree_manager(app_ctx, repo_path)
 

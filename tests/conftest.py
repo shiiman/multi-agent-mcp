@@ -44,9 +44,28 @@ def settings(temp_dir):
 async def tmux_manager(settings):
     """TmuxManagerインスタンスを作成する。テスト後にセッションをクリーンアップ。"""
     manager = TmuxManager(settings)
-    yield manager
-    # テスト後にテスト用セッションをクリーンアップ
-    await manager.cleanup_all_sessions()
+    try:
+        yield manager
+    finally:
+        # テスト後にテスト用セッションを確実にクリーンアップ
+        await manager.cleanup_all_sessions()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_tmux_sessions_at_end():
+    """テストセッション終了時に残ったtmuxセッションをクリーンアップ。"""
+    yield
+    # セッション終了時に test-mcp-agent プレフィックスのセッションを全て削除
+    import subprocess
+    result = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        for session in result.stdout.strip().split("\n"):
+            if session.startswith("test-mcp-agent"):
+                subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)
 
 
 @pytest.fixture
