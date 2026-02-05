@@ -330,51 +330,30 @@ def register_tools(mcp: FastMCP) -> None:
             logger.warning(f"Admin への進捗通知に失敗: {e}")
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
-        # 🔴 Admin が busy の場合はリトライして待機（Admin はすぐに idle になるため）
+        # BUSY/IDLE に関係なく常に通知を送信
         notification_sent = False
         if admin_notified and admin_ids:
             try:
-                settings = Settings()
-                retry_interval = settings.ipc_notification_retry_interval
-                max_retries = settings.ipc_notification_max_retries
-
                 tmux = app_ctx.tmux
                 admin_id_for_notify = admin_ids[0]
 
-                for retry in range(max_retries):
-                    # ファイルから最新の状態を取得
-                    sync_agents_from_file(app_ctx)
-                    agents = app_ctx.agents
+                # ファイルから最新の状態を取得
+                sync_agents_from_file(app_ctx)
+                agents = app_ctx.agents
 
-                    admin_agent = agents.get(admin_id_for_notify)
-                    if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
-                        logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id_for_notify}")
-                        break
-
-                    # Admin が idle の場合のみ tmux 通知を送信
-                    if admin_agent.status == AgentStatus.IDLE.value or admin_agent.status == AgentStatus.IDLE:
-                        # Admin の状態を busy に変更してロック
-                        admin_agent.status = AgentStatus.BUSY
-                        admin_agent.last_activity = datetime.now()
-                        save_agent_to_file(app_ctx, admin_agent)
-
-                        notification_text = f"echo '[IPC] 新しいメッセージ: task_progress from {caller_agent_id}'"
-                        await tmux.send_keys_to_pane(
-                            admin_agent.session_name,
-                            admin_agent.window_index or 0,
-                            admin_agent.pane_index,
-                            notification_text,
-                        )
-                        notification_sent = True
-                        logger.info(f"Admin への tmux 通知を送信: {admin_id_for_notify}")
-                        break
-                    else:
-                        # Admin が busy なので待機してリトライ
-                        logger.info(f"Admin が busy のため {retry_interval} 秒待機 (リトライ {retry + 1}/{max_retries}): {admin_id_for_notify}")
-                        await asyncio.sleep(retry_interval)
+                admin_agent = agents.get(admin_id_for_notify)
+                if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
+                    logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id_for_notify}")
                 else:
-                    # 最大リトライ回数に達した場合
-                    logger.warning(f"Admin への tmux 通知のリトライ上限に達しました（IPC ファイルは作成済み）: {admin_id_for_notify}")
+                    notification_text = f"echo '[IPC] 新しいメッセージ: task_progress from {caller_agent_id}'"
+                    await tmux.send_keys_to_pane(
+                        admin_agent.session_name,
+                        admin_agent.window_index or 0,
+                        admin_agent.pane_index,
+                        notification_text,
+                    )
+                    notification_sent = True
+                    logger.info(f"Admin への tmux 通知を送信: {admin_id_for_notify}")
             except Exception as e:
                 logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
 
@@ -486,51 +465,42 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
-        # 🔴 Admin が busy の場合はリトライして待機（Admin はすぐに idle になるため）
+        # BUSY/IDLE に関係なく常に通知を送信
         notification_sent = False
         try:
-            settings = Settings()
-            retry_interval = settings.ipc_notification_retry_interval
-            max_retries = settings.ipc_notification_max_retries
-
             tmux = app_ctx.tmux
 
-            for retry in range(max_retries):
-                # ファイルから最新の状態を取得
-                sync_agents_from_file(app_ctx)
-                agents = app_ctx.agents
+            # ファイルから最新の状態を取得
+            sync_agents_from_file(app_ctx)
+            agents = app_ctx.agents
 
-                admin_agent = agents.get(admin_id)
-                if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
-                    logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id}")
-                    break
-
-                # Admin が idle の場合のみ tmux 通知を送信
-                if admin_agent.status == AgentStatus.IDLE.value or admin_agent.status == AgentStatus.IDLE:
-                    # Admin の状態を busy に変更してロック
-                    admin_agent.status = AgentStatus.BUSY
-                    admin_agent.last_activity = datetime.now()
-                    save_agent_to_file(app_ctx, admin_agent)
-
-                    notification_text = f"echo '[IPC] 新しいメッセージ: {msg_type.value} from {caller_agent_id}'"
-                    await tmux.send_keys_to_pane(
-                        admin_agent.session_name,
-                        admin_agent.window_index or 0,
-                        admin_agent.pane_index,
-                        notification_text,
-                    )
-                    notification_sent = True
-                    logger.info(f"Admin への tmux 通知を送信: {admin_id}")
-                    break
-                else:
-                    # Admin が busy なので待機してリトライ
-                    logger.info(f"Admin が busy のため {retry_interval} 秒待機 (リトライ {retry + 1}/{max_retries}): {admin_id}")
-                    await asyncio.sleep(retry_interval)
+            admin_agent = agents.get(admin_id)
+            if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
+                logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id}")
             else:
-                # 最大リトライ回数に達した場合
-                logger.warning(f"Admin への tmux 通知のリトライ上限に達しました（IPC ファイルは作成済み）: {admin_id}")
+                notification_text = f"echo '[IPC] 新しいメッセージ: {msg_type.value} from {caller_agent_id}'"
+                await tmux.send_keys_to_pane(
+                    admin_agent.session_name,
+                    admin_agent.window_index or 0,
+                    admin_agent.pane_index,
+                    notification_text,
+                )
+                notification_sent = True
+                logger.info(f"Admin への tmux 通知を送信: {admin_id}")
         except Exception as e:
             logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
+
+        # 🔴 Worker 自身を IDLE にリセット
+        if caller_agent_id:
+            try:
+                worker_agent = agents.get(caller_agent_id)
+                if worker_agent and worker_agent.role == AgentRole.WORKER.value:
+                    worker_agent.status = AgentStatus.IDLE
+                    worker_agent.last_activity = datetime.now()
+                    save_agent_to_file(app_ctx, worker_agent)
+                    logger.info(f"Worker {caller_agent_id} を IDLE にリセットしました")
+            except Exception as e:
+                logger.warning(f"Worker ステータス更新に失敗: {e}")
 
         # 自動メモリ保存（タスク結果を記録）
         memory_saved = False

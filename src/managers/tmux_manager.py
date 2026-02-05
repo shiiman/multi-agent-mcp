@@ -72,7 +72,6 @@ class TmuxManager:
             settings: アプリケーション設定
         """
         self.settings = settings
-        self.prefix = settings.tmux_prefix
         self.default_terminal = settings.default_terminal
 
     async def _run(self, *args: str) -> tuple[int, str, str]:
@@ -101,15 +100,15 @@ class TmuxManager:
             return 1, "", str(e)
 
     def _session_name(self, name: str) -> str:
-        """セッション名にプレフィックスを付与する。
+        """セッション名を返す（プレフィックスなし）。
 
         Args:
-            name: 元のセッション名
+            name: セッション名
 
         Returns:
-            プレフィックス付きセッション名
+            セッション名（そのまま返す）
         """
-        return f"{self.prefix}-{name}"
+        return name
 
     def _get_window_name(self, window_index: int) -> str:
         """ウィンドウインデックスからウィンドウ名を取得する。
@@ -223,7 +222,9 @@ class TmuxManager:
         if code != 0:
             return []
         sessions = [s.strip() for s in stdout.strip().split("\n") if s.strip()]
-        return [s for s in sessions if s.startswith(self.prefix)]
+        # プレフィックスなしのため、全セッションを返す
+        # 注意: cleanup_all_sessions() で使用する場合は慎重に
+        return sessions
 
     async def session_exists(self, session: str) -> bool:
         """セッションが存在するか確認する。
@@ -247,9 +248,8 @@ class TmuxManager:
         sessions = await self.list_sessions()
         count = 0
         for session in sessions:
-            # プレフィックスを除去して kill_session を呼び出す
-            name = session.replace(f"{self.prefix}-", "", 1)
-            if await self.kill_session(name):
+            # プレフィックスなしのため、そのまま kill_session を呼び出す
+            if await self.kill_session(session):
                 count += 1
         return count
 

@@ -24,6 +24,10 @@ def generate_env_template() -> str:
     return '''# Multi-Agent MCP プロジェクト設定
 # 環境変数で上書きされます（環境変数 > .env > デフォルト）
 
+# ========== 基本設定 ==========
+# MCP 設定ディレクトリ名
+MCP_MCP_DIR=.multi-agent-mcp
+
 # ========== エージェント設定 ==========
 # Worker エージェントの最大数
 MCP_MAX_WORKERS=6
@@ -33,10 +37,13 @@ MCP_MAX_WORKERS=6
 MCP_ENABLE_WORKTREE=true
 
 # ========== tmux 設定 ==========
-# tmux セッション名のプレフィックス
-MCP_TMUX_PREFIX=multi-agent-mcp
+# メインウィンドウ名（Admin + Worker 1-6）
+MCP_WINDOW_NAME_MAIN=main
 
-# メインウィンドウの Worker エリア設定（左右40:60分離）
+# 追加 Worker ウィンドウ名のプレフィックス（workers-2, workers-3, ...）
+MCP_WINDOW_NAME_WORKER_PREFIX=workers-
+
+# メインウィンドウの Worker エリア設定（左右50:50分離）
 MCP_MAIN_WORKER_ROWS=2
 MCP_MAIN_WORKER_COLS=3
 MCP_WORKERS_PER_MAIN_WINDOW=6
@@ -73,6 +80,14 @@ MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER=2.0
 # ========== コスト設定 ==========
 # コスト警告の閾値（USD）
 MCP_COST_WARNING_THRESHOLD_USD=10.0
+
+# 1回の API 呼び出しあたりの推定トークン数
+MCP_ESTIMATED_TOKENS_PER_CALL=2000
+
+# 1000 トークンあたりのコスト（USD）
+MCP_COST_PER_1K_TOKENS_CLAUDE=0.015
+MCP_COST_PER_1K_TOKENS_CODEX=0.01
+MCP_COST_PER_1K_TOKENS_GEMINI=0.005
 
 # ========== ヘルスチェック設定 ==========
 # ヘルスチェックの間隔（秒）- Admin が Worker の状態を確認する間隔
@@ -504,12 +519,11 @@ def register_tools(mcp: FastMCP) -> None:
 
         # 既存の tmux セッションが存在するかチェック（重複起動防止）
         project_name = get_project_name(working_dir)
-        expected_session = f"{tmux.prefix}-{project_name}"
-        session_exists = await tmux.session_exists(expected_session)
+        session_exists = await tmux.session_exists(project_name)
         if session_exists:
             return {
                 "success": False,
-                "error": f"tmux セッション '{expected_session}' は既に存在します。重複初期化は許可されていません。",
+                "error": f"tmux セッション '{project_name}' は既に存在します。重複初期化は許可されていません。",
             }
 
         # session_id を設定（後続の create_agent 等で使用）
@@ -583,9 +597,9 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx.project_root = working_dir
         logger.info(f"project_root を設定しました: {working_dir}")
 
-        # セッション名を計算（mcp-agent-{project_name} 形式）
+        # セッション名を計算（プロジェクト名をそのまま使用）
         project_name = get_project_name(working_dir)
-        session_name = f"{tmux.prefix}-{project_name}"
+        session_name = project_name
 
         if open_terminal:
             # ターミナルを開いてセッション作成

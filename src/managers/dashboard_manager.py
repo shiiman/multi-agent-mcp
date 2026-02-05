@@ -1029,7 +1029,44 @@ class DashboardManager:
         Returns:
             保存したファイルのパス（{session_id}/dashboard/dashboard.md）
         """
-        # 🔴 ダッシュボード統合: dashboard/dashboard.md に保存
+        import json
+        from datetime import datetime
+
         dashboard = self._read_dashboard()
+
+        # 🔴 agents.json からエージェント情報を同期
+        session_dir = self.dashboard_dir.parent  # {mcp_dir}/{session_id}/
+        agents_file = session_dir / "agents.json"
+        if agents_file.exists():
+            try:
+                with open(agents_file, encoding="utf-8") as f:
+                    agents_data = json.load(f)
+
+                dashboard.agents = []
+                for agent_id, agent_dict in agents_data.items():
+                    # last_activity を datetime に変換
+                    last_activity = agent_dict.get("last_activity")
+                    if isinstance(last_activity, str):
+                        try:
+                            last_activity = datetime.fromisoformat(last_activity)
+                        except ValueError:
+                            last_activity = None
+
+                    summary = AgentSummary(
+                        agent_id=agent_dict.get("id", agent_id),
+                        role=agent_dict.get("role"),
+                        status=agent_dict.get("status"),
+                        current_task_id=agent_dict.get("current_task"),
+                        worktree_path=agent_dict.get("worktree_path"),
+                        branch=None,
+                        last_activity=last_activity,
+                    )
+                    dashboard.agents.append(summary)
+
+                dashboard.calculate_stats()
+                logger.debug(f"agents.json から {len(dashboard.agents)} 件のエージェントを同期")
+            except Exception as e:
+                logger.warning(f"agents.json の読み込みに失敗: {e}")
+
         self._write_dashboard(dashboard)
         return self._get_dashboard_path()

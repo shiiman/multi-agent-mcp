@@ -305,10 +305,22 @@ cleanup_workspace()
 
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
+| `MCP_MCP_DIR` | .multi-agent-mcp | MCP設定ディレクトリ名 |
 | `MCP_MAX_WORKERS` | 6 | Workerの最大数 |
-| `MCP_TMUX_PREFIX` | multi-agent-mcp | tmuxセッション名のプレフィックス |
 | `MCP_ENABLE_WORKTREE` | true | git worktreeを使用するか |
+| `MCP_WINDOW_NAME_MAIN` | main | メインウィンドウ名（Admin + Worker 1-6） |
+| `MCP_WINDOW_NAME_WORKER_PREFIX` | workers- | 追加Workerウィンドウ名のプレフィックス |
+| `MCP_MAIN_WORKER_ROWS` | 2 | メインウィンドウのWorkerエリア行数 |
+| `MCP_MAIN_WORKER_COLS` | 3 | メインウィンドウのWorkerエリア列数 |
+| `MCP_WORKERS_PER_MAIN_WINDOW` | 6 | メインウィンドウのWorker数 |
+| `MCP_EXTRA_WORKER_ROWS` | 2 | 追加ウィンドウの行数 |
+| `MCP_EXTRA_WORKER_COLS` | 5 | 追加ウィンドウの列数 |
+| `MCP_WORKERS_PER_EXTRA_WINDOW` | 10 | 追加ウィンドウのWorker数 |
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
+| `MCP_ESTIMATED_TOKENS_PER_CALL` | 2000 | 1回のAPI呼び出しあたりの推定トークン数 |
+| `MCP_COST_PER_1K_TOKENS_CLAUDE` | 0.015 | Claudeの1000トークンあたりのコスト（USD） |
+| `MCP_COST_PER_1K_TOKENS_CODEX` | 0.01 | Codexの1000トークンあたりのコスト（USD） |
+| `MCP_COST_PER_1K_TOKENS_GEMINI` | 0.005 | Geminiの1000トークンあたりのコスト（USD） |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 60 | ヘルスチェック間隔（秒）- 応答なしで異常判断 |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
@@ -330,6 +342,7 @@ cleanup_workspace()
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | 3 | 同一問題の繰り返し上限 |
 | `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリの最大エントリ数 |
 | `MCP_MEMORY_TTL_DAYS` | 90 | メモリエントリの保持期間（日） |
+| `MCP_SCREENSHOT_EXTENSIONS` | [".png",".jpg",...] | スクリーンショットとして認識する拡張子 |
 
 ## ディレクトリ構造
 

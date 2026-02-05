@@ -119,9 +119,6 @@ class Settings(BaseSettings):
     """Workerエージェントの最大数（デフォルト: メインウィンドウに収まる6）"""
 
     # tmux設定
-    tmux_prefix: str = "multi-agent-mcp"
-    """tmuxセッション名のプレフィックス"""
-
     window_name_main: str = "main"
     """メインウィンドウ名（Admin + Worker 1-6）"""
 
@@ -142,10 +139,10 @@ class Settings(BaseSettings):
     extra_worker_rows: int = 2
     """追加ウィンドウの行数"""
 
-    extra_worker_cols: int = 6
+    extra_worker_cols: int = 5
     """追加ウィンドウの列数"""
 
-    workers_per_extra_window: int = 12
+    workers_per_extra_window: int = 10
     """追加ウィンドウのWorker数（extra_worker_rows × extra_worker_cols）"""
 
     # コスト設定
@@ -256,19 +253,6 @@ class Settings(BaseSettings):
         description="メモリエントリの保持期間（日）",
     )
     """メモリエントリの保持期間（デフォルト: 90日）"""
-
-    # IPC 通知設定
-    ipc_notification_retry_interval: int = Field(
-        default=10,
-        description="Admin への IPC 通知リトライ間隔（秒）",
-    )
-    """Admin が busy の場合の待機時間（デフォルト: 10秒）"""
-
-    ipc_notification_max_retries: int = Field(
-        default=6,
-        description="Admin への IPC 通知の最大リトライ回数",
-    )
-    """最大リトライ回数（デフォルト: 6回、約60秒）"""
 
     # コスト推定設定
     estimated_tokens_per_call: int = Field(
