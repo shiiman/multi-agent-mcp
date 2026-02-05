@@ -304,6 +304,17 @@ broadcast_command("git status", "worker")
 cleanup_workspace()
 ```
 
+## ドキュメント
+
+各システムの詳細な解説は以下を参照してください：
+
+| ドキュメント | 説明 |
+| ------------ | ---- |
+| [IPC システム](docs/ipc.md) | エージェント間メッセージ通信の仕組み |
+| [Memory システム](docs/memory.md) | 知識の永続化・共有・アーカイブ機能 |
+| [Worktree システム](docs/worktree.md) | Git worktree による分離作業環境 |
+| [Dashboard システム](docs/dashboard.md) | タスク状態管理とダッシュボード表示 |
+
 ## 環境変数
 
 | 変数 | デフォルト | 説明 |

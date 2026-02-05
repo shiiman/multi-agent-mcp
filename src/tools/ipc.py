@@ -254,47 +254,6 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    async def clear_messages(
-        agent_id: str,
-        caller_agent_id: str | None = None,
-        ctx: Context = None,
-    ) -> dict[str, Any]:
-        """エージェントのメッセージをクリアする。
-
-        ※ Owner と Admin のみ使用可能。
-
-        Args:
-            agent_id: エージェントID
-            caller_agent_id: 呼び出し元エージェントID（必須）
-
-        Returns:
-            クリア結果（success, agent_id, deleted_count, message）
-        """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "clear_messages", caller_agent_id)
-        if role_error:
-            return role_error
-
-        ipc = ensure_ipc_manager(app_ctx)
-
-        if agent_id not in ipc.get_all_agent_ids():
-            return {
-                "success": False,
-                "error": f"エージェント {agent_id} のキューが見つかりません",
-            }
-
-        deleted_count = ipc.clear_messages(agent_id)
-
-        return {
-            "success": True,
-            "agent_id": agent_id,
-            "deleted_count": deleted_count,
-            "message": f"{deleted_count} 件のメッセージを削除しました",
-        }
-
-    @mcp.tool()
     async def register_agent_to_ipc(
         agent_id: str,
         caller_agent_id: str | None = None,

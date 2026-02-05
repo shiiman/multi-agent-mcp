@@ -362,7 +362,7 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
             raise ValueError(
                 "session_id が設定されていません。init_tmux_workspace で session_id を指定してください。"
             )
-        ipc_dir = os.path.join(base_dir, get_mcp_dir(), session_id, ".ipc")
+        ipc_dir = os.path.join(base_dir, get_mcp_dir(), session_id, "ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager
@@ -464,7 +464,7 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
         # session_id を確保（config.json から読み取り）
         session_id = ensure_session_id(app_ctx)
         if session_id:
-            memory_dir = os.path.join(project_root, get_mcp_dir(), session_id, ".memory")
+            memory_dir = os.path.join(project_root, get_mcp_dir(), session_id, "memory")
         else:
             memory_dir = os.path.join(project_root, get_mcp_dir(), "memory")
         app_ctx.memory_manager = MemoryManager(storage_dir=memory_dir)

@@ -176,25 +176,25 @@ class TestMemoryManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = MemoryManager.from_project_root(tmpdir)
 
-            # 保存先パスが正しいことを確認
-            expected_path = Path(tmpdir) / ".multi-agent-mcp" / "memory" / "memory.json"
-            assert manager.storage_path == expected_path
+            # 保存先ディレクトリが正しいことを確認
+            expected_dir = Path(tmpdir) / ".multi-agent-mcp" / "memory"
+            assert manager.storage_dir == expected_dir
 
             # 保存・読み込みが動作することを確認
             manager.save("test_key", "test_content")
             assert manager.get("test_key").content == "test_content"
 
-            # ファイルが作成されていることを確認
-            assert expected_path.exists()
+            # ディレクトリが作成されていることを確認
+            assert expected_dir.exists()
 
     def test_from_global(self) -> None:
         """from_global クラスメソッドのテスト。"""
         manager = MemoryManager.from_global()
 
-        # 保存先パスが正しいことを確認
+        # 保存先ディレクトリが正しいことを確認
         home_dir = Path.home()
-        expected_path = home_dir / ".multi-agent-mcp" / "memory" / "memory.json"
-        assert manager.storage_path == expected_path
+        expected_dir = home_dir / ".multi-agent-mcp" / "memory"
+        assert manager.storage_dir == expected_dir
 
         # デフォルト値が設定されていることを確認
         assert manager.max_entries == 1000
@@ -270,8 +270,8 @@ class TestMemoryManager:
         """アーカイブパスのテスト。"""
         manager = MemoryManager(temp_storage)
 
-        expected_archive_path = temp_storage.parent / "memory_archive.json"
-        assert manager.archive_path == expected_archive_path
+        expected_archive_dir = temp_storage / "archive"
+        assert manager.archive_dir == expected_archive_dir
 
     def test_prune_archives_entries(self, temp_storage: Path) -> None:
         """prune がエントリをアーカイブに移動することをテスト。"""
@@ -289,8 +289,8 @@ class TestMemoryManager:
         assert archived_count == 1
         assert len(manager.list_all()) == 2
 
-        # アーカイブファイルが作成されていることを確認
-        assert manager.archive_path.exists()
+        # アーカイブディレクトリが作成されていることを確認
+        assert manager.archive_dir.exists()
 
         # アーカイブからエントリを検索できることを確認
         archive_entries = manager.list_archive()
@@ -350,7 +350,7 @@ class TestMemoryManager:
         summary = manager.get_archive_summary()
         assert summary["total_entries"] == 1
         assert "tag1" in summary["unique_tags"]
-        assert summary["archive_path"] is not None
+        assert summary["archive_dir"] is not None
 
     def test_list_archive_with_limit(self, temp_storage: Path) -> None:
         """アーカイブ一覧の件数制限テスト。"""

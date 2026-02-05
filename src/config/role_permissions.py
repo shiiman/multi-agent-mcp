@@ -71,7 +71,6 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
     "send_message": ["owner", "admin", "worker"],
     "read_messages": ["owner", "admin", "worker"],
     "get_unread_count": ["owner", "admin", "worker"],
-    "clear_messages": ["owner", "admin"],
     # ========== ダッシュボード ==========
     "get_dashboard": ["owner", "admin", "worker"],
     "get_dashboard_summary": ["owner", "admin", "worker"],

@@ -1,39 +1,48 @@
 """プロセス間通信（IPC）管理モジュール。
 
-ファイルベースのメッセージキューを使用してエージェント間通信を実現する。
+個別ファイルベースのメッセージキューを使用してエージェント間通信を実現する。
+
+保存先: {project_root}/{mcp_dir}/{session_id}/ipc/{agent_id}/
+形式: YAML Front Matter + Markdown（各メッセージは個別の .md ファイル）
 """
 
-import fcntl
-import json
 import logging
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 from src.models.message import (
     Message,
     MessagePriority,
-    MessageQueue,
     MessageType,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class IPCManager:
-    """ファイルベースのプロセス間通信を管理するクラス。
+def _sanitize_filename(value: str) -> str:
+    """ファイル名として安全な形式に変換する。"""
+    safe = re.sub(r'[<>:"/\\|?*]', '_', value)
+    safe = safe.strip(' .')
+    return safe or 'message'
 
-    各エージェントのメッセージキューをJSONファイルとして管理する。
+
+class IPCManager:
+    """個別ファイルベースのプロセス間通信を管理するクラス。
+
+    各エージェントのメッセージをディレクトリ内の個別ファイルとして管理する。
     """
 
-    def __init__(self, ipc_dir: str) -> None:
+    def __init__(self, ipc_dir: str | Path) -> None:
         """IPCManagerを初期化する。
 
         Args:
             ipc_dir: IPCファイルを保存するディレクトリ
         """
         self.ipc_dir = Path(ipc_dir)
-        self.queues: dict[str, MessageQueue] = {}
 
     def initialize(self) -> None:
         """IPC環境を初期化する。"""
@@ -43,114 +52,125 @@ class IPCManager:
     def cleanup(self) -> None:
         """IPC環境をクリーンアップする。"""
         if self.ipc_dir.exists():
-            for file in self.ipc_dir.glob("*.json"):
-                try:
-                    file.unlink()
-                except OSError as e:
-                    logger.warning(f"ファイル削除エラー: {file}: {e}")
+            import shutil
+            shutil.rmtree(self.ipc_dir)
         logger.info("IPC環境をクリーンアップしました")
 
-    def _get_queue_path(self, agent_id: str) -> Path:
-        """エージェントのキューファイルパスを取得する。"""
-        return self.ipc_dir / f"queue_{agent_id}.json"
+    def _get_agent_dir(self, agent_id: str) -> Path:
+        """エージェントのメッセージディレクトリを取得する。"""
+        return self.ipc_dir / _sanitize_filename(agent_id)
 
-    def _load_queue(self, agent_id: str) -> MessageQueue:
-        """エージェントのメッセージキューをロードする。
+    def _get_message_path(self, agent_id: str, message_id: str, created_at: datetime) -> Path:
+        """メッセージのファイルパスを取得する。"""
+        agent_dir = self._get_agent_dir(agent_id)
+        timestamp = created_at.strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"{timestamp}_{_sanitize_filename(message_id)[:8]}.md"
+        return agent_dir / filename
 
-        🔴 マルチプロセス対応: 常にファイルから読み込む
-        （各 MCP サーバープロセスは独立しているため、メモリキャッシュは同期されない）
-        """
-        queue_path = self._get_queue_path(agent_id)
-        if queue_path.exists():
-            try:
-                with open(queue_path, encoding="utf-8") as f:
-                    data = json.load(f)
-                    queue = MessageQueue(**data)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning(f"キューファイルの読み込みエラー: {e}")
-                queue = MessageQueue(agent_id=agent_id)
-        else:
-            queue = MessageQueue(agent_id=agent_id)
-
-        self.queues[agent_id] = queue
-        return queue
-
-    def _save_queue(self, queue: MessageQueue) -> None:
-        """メッセージキューをファイルに保存する。"""
-        queue_path = self._get_queue_path(queue.agent_id)
+    def _parse_message_file(self, file_path: Path) -> Message | None:
+        """Markdown ファイルからメッセージを読み込む。"""
         try:
-            with open(queue_path, "w", encoding="utf-8") as f:
-                json.dump(queue.model_dump(mode="json"), f, ensure_ascii=False)
-        except OSError as e:
-            logger.error(f"キューファイルの保存エラー: {e}")
+            content = file_path.read_text(encoding="utf-8")
+
+            if not content.startswith("---"):
+                return None
+
+            parts = content.split("---", 2)
+            if len(parts) < 3:
+                return None
+
+            front_matter = yaml.safe_load(parts[1])
+            if not front_matter or "id" not in front_matter:
+                return None
+
+            body = parts[2].strip()
+
+            return Message(
+                id=front_matter["id"],
+                sender_id=front_matter["sender_id"],
+                receiver_id=front_matter.get("receiver_id"),
+                message_type=MessageType(front_matter["message_type"]),
+                priority=MessagePriority(front_matter.get("priority", "normal")),
+                subject=front_matter.get("subject", ""),
+                content=body,
+                metadata=front_matter.get("metadata", {}),
+                created_at=datetime.fromisoformat(front_matter["created_at"]),
+                read_at=datetime.fromisoformat(front_matter["read_at"]) if front_matter.get("read_at") else None,
+            )
+        except Exception as e:
+            logger.warning(f"メッセージの読み込みに失敗 ({file_path}): {e}")
+            return None
+
+    def _write_message_file(self, agent_id: str, message: Message) -> Path:
+        """メッセージを Markdown ファイルとして保存する。"""
+        agent_dir = self._get_agent_dir(agent_id)
+        agent_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path = self._get_message_path(agent_id, message.id, message.created_at)
+
+        front_matter = {
+            "id": message.id,
+            "sender_id": message.sender_id,
+            "receiver_id": message.receiver_id,
+            "message_type": message.message_type.value,
+            "priority": message.priority.value,
+            "subject": message.subject,
+            "created_at": message.created_at.isoformat(),
+            "read_at": message.read_at.isoformat() if message.read_at else None,
+        }
+        if message.metadata:
+            front_matter["metadata"] = message.metadata
+
+        yaml_str = yaml.dump(front_matter, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        content = f"---\n{yaml_str}---\n\n{message.content}\n"
+
+        file_path.write_text(content, encoding="utf-8")
+        return file_path
+
+    def _update_message_file(self, file_path: Path, message: Message) -> None:
+        """既存のメッセージファイルを更新する。"""
+        front_matter = {
+            "id": message.id,
+            "sender_id": message.sender_id,
+            "receiver_id": message.receiver_id,
+            "message_type": message.message_type.value,
+            "priority": message.priority.value,
+            "subject": message.subject,
+            "created_at": message.created_at.isoformat(),
+            "read_at": message.read_at.isoformat() if message.read_at else None,
+        }
+        if message.metadata:
+            front_matter["metadata"] = message.metadata
+
+        yaml_str = yaml.dump(front_matter, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        content = f"---\n{yaml_str}---\n\n{message.content}\n"
+
+        file_path.write_text(content, encoding="utf-8")
 
     def register_agent(self, agent_id: str) -> None:
-        """エージェントのメッセージキューを登録する。
+        """エージェントのメッセージディレクトリを登録する。
+
+        ディレクトリを作成するだけで、既存のメッセージは上書きしない。
 
         Args:
             agent_id: エージェントID
         """
-        if agent_id not in self.queues:
-            queue = MessageQueue(agent_id=agent_id)
-            self.queues[agent_id] = queue
-            self._save_queue(queue)
-            logger.info(f"エージェント {agent_id} のキューを登録しました")
+        agent_dir = self._get_agent_dir(agent_id)
+        if not agent_dir.exists():
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"エージェント {agent_id} のディレクトリを登録しました")
 
     def unregister_agent(self, agent_id: str) -> None:
-        """エージェントのメッセージキューを削除する。
+        """エージェントのメッセージディレクトリを削除する。
 
         Args:
             agent_id: エージェントID
         """
-        if agent_id in self.queues:
-            del self.queues[agent_id]
-
-        queue_path = self._get_queue_path(agent_id)
-        if queue_path.exists():
-            try:
-                queue_path.unlink()
-            except OSError as e:
-                logger.warning(f"キューファイル削除エラー: {e}")
-
-        logger.info(f"エージェント {agent_id} のキューを削除しました")
-
-    def _append_message_atomic(self, agent_id: str, message: Message) -> None:
-        """メッセージをアトミックにキューに追加する。
-
-        🔴 マルチプロセス対応: ファイルロックを使用して race condition を防止
-        """
-        queue_path = self._get_queue_path(agent_id)
-        lock_path = queue_path.with_suffix(".lock")
-
-        # ロックファイルを作成/開く
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock_path, "w") as lock_file:
-            try:
-                # 排他ロックを取得
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-
-                # ファイルから最新のキューを読み込む
-                if queue_path.exists():
-                    try:
-                        with open(queue_path, encoding="utf-8") as f:
-                            data = json.load(f)
-                            queue = MessageQueue(**data)
-                    except (json.JSONDecodeError, OSError) as e:
-                        logger.warning(f"キューファイルの読み込みエラー: {e}")
-                        queue = MessageQueue(agent_id=agent_id)
-                else:
-                    queue = MessageQueue(agent_id=agent_id)
-
-                # メッセージを追加
-                queue.messages.append(message)
-
-                # ファイルに保存
-                with open(queue_path, "w", encoding="utf-8") as f:
-                    json.dump(queue.model_dump(mode="json"), f, ensure_ascii=False)
-
-            finally:
-                # ロックを解放
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        agent_dir = self._get_agent_dir(agent_id)
+        if agent_dir.exists():
+            import shutil
+            shutil.rmtree(agent_dir)
+            logger.info(f"エージェント {agent_id} のディレクトリを削除しました")
 
     def send_message(
         self,
@@ -164,7 +184,7 @@ class IPCManager:
     ) -> Message:
         """メッセージを送信する。
 
-        🔴 マルチプロセス対応: ファイルロックを使用してアトミックに保存
+        各メッセージは受信者のディレクトリに個別ファイルとして保存される。
 
         Args:
             sender_id: 送信元エージェントID
@@ -191,19 +211,15 @@ class IPCManager:
         )
 
         if receiver_id is None:
-            # ブロードキャスト: 全エージェントのキューに追加
-            for agent_id in self.queues:
-                if agent_id != sender_id:  # 送信者自身には送らない
-                    self._append_message_atomic(agent_id, message)
-            logger.info(
-                f"ブロードキャストメッセージを送信: {sender_id} -> all"
-            )
+            # ブロードキャスト: 全エージェントのディレクトリに追加
+            for agent_id in self.get_all_agent_ids():
+                if agent_id != sender_id:
+                    self._write_message_file(agent_id, message)
+            logger.info(f"ブロードキャストメッセージを送信: {sender_id} -> all")
         else:
-            # 特定エージェントへの送信（アトミック操作）
-            self._append_message_atomic(receiver_id, message)
-            logger.info(
-                f"メッセージを送信: {sender_id} -> {receiver_id}"
-            )
+            # 特定エージェントへの送信
+            self._write_message_file(receiver_id, message)
+            logger.info(f"メッセージを送信: {sender_id} -> {receiver_id}")
 
         return message
 
@@ -223,27 +239,37 @@ class IPCManager:
             mark_as_read: 既読としてマークするか
 
         Returns:
-            メッセージのリスト
+            メッセージのリスト（時系列順）
         """
-        queue = self._load_queue(agent_id)
-        messages = queue.messages
+        agent_dir = self._get_agent_dir(agent_id)
+        if not agent_dir.exists():
+            return []
+
+        messages: list[tuple[Path, Message]] = []
+        for file_path in agent_dir.glob("*.md"):
+            message = self._parse_message_file(file_path)
+            if message:
+                messages.append((file_path, message))
+
+        # 時系列順にソート
+        messages.sort(key=lambda x: x[1].created_at)
 
         # フィルタリング
         if unread_only:
-            messages = [m for m in messages if not m.is_read]
+            messages = [(p, m) for p, m in messages if not m.is_read]
 
         if message_type is not None:
-            messages = [m for m in messages if m.message_type == message_type]
+            messages = [(p, m) for p, m in messages if m.message_type == message_type]
 
         # 既読マーク
         if mark_as_read:
             now = datetime.now()
-            for msg in messages:
+            for file_path, msg in messages:
                 if not msg.is_read:
                     msg.read_at = now
-            self._save_queue(queue)
+                    self._update_message_file(file_path, msg)
 
-        return messages
+        return [m for _, m in messages]
 
     def get_unread_count(self, agent_id: str) -> int:
         """未読メッセージ数を取得する。
@@ -254,36 +280,17 @@ class IPCManager:
         Returns:
             未読メッセージ数
         """
-        queue = self._load_queue(agent_id)
-        return queue.unread_count
+        agent_dir = self._get_agent_dir(agent_id)
+        if not agent_dir.exists():
+            return 0
 
-    def clear_messages(self, agent_id: str, older_than: datetime | None = None) -> int:
-        """メッセージをクリアする。
+        count = 0
+        for file_path in agent_dir.glob("*.md"):
+            message = self._parse_message_file(file_path)
+            if message and not message.is_read:
+                count += 1
 
-        Args:
-            agent_id: エージェントID
-            older_than: この日時より古いメッセージのみ削除（Noneで全削除）
-
-        Returns:
-            削除されたメッセージ数
-        """
-        queue = self._load_queue(agent_id)
-        original_count = len(queue.messages)
-
-        if older_than is None:
-            queue.messages = []
-        else:
-            queue.messages = [
-                m for m in queue.messages if m.created_at >= older_than
-            ]
-
-        deleted_count = original_count - len(queue.messages)
-        self._save_queue(queue)
-
-        logger.info(
-            f"エージェント {agent_id} のメッセージを {deleted_count} 件削除"
-        )
-        return deleted_count
+        return count
 
     def get_all_agent_ids(self) -> list[str]:
         """登録済み全エージェントIDを取得する。
@@ -291,14 +298,13 @@ class IPCManager:
         Returns:
             エージェントIDのリスト
         """
-        # メモリから取得
-        agent_ids = list(self.queues.keys())
+        if not self.ipc_dir.exists():
+            return []
 
-        # ファイルからも確認
-        for queue_file in self.ipc_dir.glob("queue_*.json"):
-            agent_id = queue_file.stem.replace("queue_", "")
-            if agent_id not in agent_ids:
-                agent_ids.append(agent_id)
+        agent_ids = []
+        for agent_dir in self.ipc_dir.iterdir():
+            if agent_dir.is_dir():
+                agent_ids.append(agent_dir.name)
 
         return agent_ids
 

@@ -4,7 +4,7 @@
 
 保存先:
 - Layer 2 (グローバル): ~/{mcp_dir}/memory/
-- Layer 3 (プロジェクト): {project_root}/{mcp_dir}/{session_id}/.memory/
+- Layer 3 (プロジェクト): {project_root}/{mcp_dir}/{session_id}/memory/
 
 形式: YAML Front Matter + Markdown（各エントリは個別の .md ファイル）
 
@@ -130,7 +130,7 @@ class MemoryManager:
             MemoryManager インスタンス
         """
         if session_id:
-            storage_dir = Path(project_root) / get_mcp_dir() / session_id / ".memory"
+            storage_dir = Path(project_root) / get_mcp_dir() / session_id / "memory"
         else:
             storage_dir = Path(project_root) / get_mcp_dir() / "memory"
         return cls(storage_dir, max_entries=max_entries, ttl_days=ttl_days)

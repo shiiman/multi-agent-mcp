@@ -104,23 +104,6 @@ class TestIPCManager:
         assert len(messages2) == 1
         assert messages1[0].content == "Broadcast message"
 
-    def test_clear_messages(self, ipc_manager):
-        """メッセージクリアをテスト。"""
-        ipc_manager.register_agent("sender")
-        ipc_manager.register_agent("receiver")
-
-        ipc_manager.send_message(
-            sender_id="sender",
-            receiver_id="receiver",
-            message_type=MessageType.REQUEST,
-            content="Test",
-        )
-
-        deleted_count = ipc_manager.clear_messages("receiver")
-
-        assert deleted_count == 1
-        assert len(ipc_manager.read_messages("receiver")) == 0
-
     def test_filter_by_message_type(self, ipc_manager):
         """メッセージタイプでのフィルタリングをテスト。"""
         ipc_manager.register_agent("sender")

@@ -71,7 +71,7 @@ def cleanup_tmux_sessions_at_end():
 @pytest.fixture
 def ipc_manager(temp_dir):
     """IPCManagerインスタンスを作成する。"""
-    ipc_dir = temp_dir / ".ipc"
+    ipc_dir = temp_dir / "ipc"
     manager = IPCManager(str(ipc_dir))
     manager.initialize()
     yield manager
