@@ -1,13 +1,17 @@
 """ダッシュボード/タスク管理ツール。"""
 
+import asyncio
 import logging
+from datetime import datetime
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
 logger = logging.getLogger(__name__)
 
+from src.config.settings import Settings
 from src.context import AppContext
+from src.models.agent import AgentStatus
 from src.models.dashboard import TaskStatus
 from src.models.message import MessagePriority, MessageType
 from src.tools.helpers import (
@@ -16,8 +20,8 @@ from src.tools.helpers import (
     ensure_dashboard_manager,
     ensure_ipc_manager,
     ensure_memory_manager,
-    ensure_metrics_manager,
     find_agents_by_role,
+    save_agent_to_file,
     sync_agents_from_file,
 )
 
@@ -325,6 +329,55 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception as e:
             logger.warning(f"Admin への進捗通知に失敗: {e}")
 
+        # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
+        # 🔴 Admin が busy の場合はリトライして待機（Admin はすぐに idle になるため）
+        notification_sent = False
+        if admin_notified and admin_ids:
+            try:
+                settings = Settings()
+                retry_interval = settings.ipc_notification_retry_interval
+                max_retries = settings.ipc_notification_max_retries
+
+                tmux = app_ctx.tmux
+                admin_id_for_notify = admin_ids[0]
+
+                for retry in range(max_retries):
+                    # ファイルから最新の状態を取得
+                    sync_agents_from_file(app_ctx)
+                    agents = app_ctx.agents
+
+                    admin_agent = agents.get(admin_id_for_notify)
+                    if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
+                        logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id_for_notify}")
+                        break
+
+                    # Admin が idle の場合のみ tmux 通知を送信
+                    if admin_agent.status == AgentStatus.IDLE.value or admin_agent.status == AgentStatus.IDLE:
+                        # Admin の状態を busy に変更してロック
+                        admin_agent.status = AgentStatus.BUSY
+                        admin_agent.last_activity = datetime.now()
+                        save_agent_to_file(app_ctx, admin_agent)
+
+                        notification_text = f"echo '[IPC] 新しいメッセージ: task_progress from {caller_agent_id}'"
+                        await tmux.send_keys_to_pane(
+                            admin_agent.session_name,
+                            admin_agent.window_index or 0,
+                            admin_agent.pane_index,
+                            notification_text,
+                        )
+                        notification_sent = True
+                        logger.info(f"Admin への tmux 通知を送信: {admin_id_for_notify}")
+                        break
+                    else:
+                        # Admin が busy なので待機してリトライ
+                        logger.info(f"Admin が busy のため {retry_interval} 秒待機 (リトライ {retry + 1}/{max_retries}): {admin_id_for_notify}")
+                        await asyncio.sleep(retry_interval)
+                else:
+                    # 最大リトライ回数に達した場合
+                    logger.warning(f"Admin への tmux 通知のリトライ上限に達しました（IPC ファイルは作成済み）: {admin_id_for_notify}")
+            except Exception as e:
+                logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
+
         # Markdown ダッシュボードも更新
         markdown_updated = False
         if app_ctx.session_id and app_ctx.project_root:
@@ -433,23 +486,49 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
+        # 🔴 Admin が busy の場合はリトライして待機（Admin はすぐに idle になるため）
         notification_sent = False
         try:
-            sync_agents_from_file(app_ctx)
-            agents = app_ctx.agents
+            settings = Settings()
+            retry_interval = settings.ipc_notification_retry_interval
+            max_retries = settings.ipc_notification_max_retries
+
             tmux = app_ctx.tmux
 
-            admin_agent = agents.get(admin_id)
-            if admin_agent and admin_agent.session_name and admin_agent.pane_index is not None:
-                notification_text = f"[IPC] 新しいメッセージ: {msg_type.value} from {caller_agent_id}"
-                await tmux.send_keys_to_pane(
-                    admin_agent.session_name,
-                    admin_agent.window_index or 0,
-                    admin_agent.pane_index,
-                    f"echo '{notification_text}'",
-                )
-                notification_sent = True
-                logger.info(f"Admin への tmux 通知を送信: {admin_id}")
+            for retry in range(max_retries):
+                # ファイルから最新の状態を取得
+                sync_agents_from_file(app_ctx)
+                agents = app_ctx.agents
+
+                admin_agent = agents.get(admin_id)
+                if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
+                    logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id}")
+                    break
+
+                # Admin が idle の場合のみ tmux 通知を送信
+                if admin_agent.status == AgentStatus.IDLE.value or admin_agent.status == AgentStatus.IDLE:
+                    # Admin の状態を busy に変更してロック
+                    admin_agent.status = AgentStatus.BUSY
+                    admin_agent.last_activity = datetime.now()
+                    save_agent_to_file(app_ctx, admin_agent)
+
+                    notification_text = f"echo '[IPC] 新しいメッセージ: {msg_type.value} from {caller_agent_id}'"
+                    await tmux.send_keys_to_pane(
+                        admin_agent.session_name,
+                        admin_agent.window_index or 0,
+                        admin_agent.pane_index,
+                        notification_text,
+                    )
+                    notification_sent = True
+                    logger.info(f"Admin への tmux 通知を送信: {admin_id}")
+                    break
+                else:
+                    # Admin が busy なので待機してリトライ
+                    logger.info(f"Admin が busy のため {retry_interval} 秒待機 (リトライ {retry + 1}/{max_retries}): {admin_id}")
+                    await asyncio.sleep(retry_interval)
+            else:
+                # 最大リトライ回数に達した場合
+                logger.warning(f"Admin への tmux 通知のリトライ上限に達しました（IPC ファイルは作成済み）: {admin_id}")
         except Exception as e:
             logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
 
@@ -466,19 +545,6 @@ def register_tools(mcp: FastMCP) -> None:
             memory_saved = True
         except Exception:
             pass  # メモリ保存失敗は致命的ではない
-
-        # 自動メトリクス更新
-        metrics_updated = False
-        try:
-            metrics = ensure_metrics_manager(app_ctx)
-            metrics.record_task_completion(
-                task_id=task_id,
-                agent_id=caller_agent_id,
-                status=status,
-            )
-            metrics_updated = True
-        except Exception:
-            pass  # メトリクス更新失敗は致命的ではない
 
         # Markdown ダッシュボードも更新
         markdown_updated = False
@@ -500,7 +566,6 @@ def register_tools(mcp: FastMCP) -> None:
             "dashboard_updated": dashboard_updated,
             "markdown_updated": markdown_updated,
             "memory_saved": memory_saved,
-            "metrics_updated": metrics_updated,
             "notification_sent": notification_sent,
         }
 
@@ -603,6 +668,13 @@ def register_tools(mcp: FastMCP) -> None:
         for agent in app_ctx.agents.values():
             dashboard.update_agent_summary(agent)
 
+        # 🔴 同期後に Dashboard ファイルも更新（マルチプロセス対応）
+        if app_ctx.session_id and app_ctx.project_root:
+            try:
+                dashboard.save_markdown_dashboard(app_ctx.project_root, app_ctx.session_id)
+            except Exception as e:
+                logger.warning(f"Dashboard ファイル更新に失敗: {e}")
+
         dashboard_data = dashboard.get_dashboard()
 
         return {
@@ -639,7 +711,138 @@ def register_tools(mcp: FastMCP) -> None:
         for agent in app_ctx.agents.values():
             dashboard.update_agent_summary(agent)
 
+        # 🔴 同期後に Dashboard ファイルも更新（マルチプロセス対応）
+        if app_ctx.session_id and app_ctx.project_root:
+            try:
+                dashboard.save_markdown_dashboard(app_ctx.project_root, app_ctx.session_id)
+            except Exception as e:
+                logger.warning(f"Dashboard ファイル更新に失敗: {e}")
+
         summary = dashboard.get_summary()
+
+        return {
+            "success": True,
+            "summary": summary,
+        }
+
+    # コスト管理ツール
+
+    @mcp.tool()
+    async def get_cost_estimate(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """現在のコスト推定を取得する。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
+
+        Returns:
+            コスト推定（success, estimate, warning）
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_cost_estimate", caller_agent_id)
+        if role_error:
+            return role_error
+
+        dashboard = ensure_dashboard_manager(app_ctx)
+        estimate = dashboard.get_cost_estimate()
+        warning = dashboard.check_cost_warning()
+
+        return {
+            "success": True,
+            "estimate": estimate,
+            "warning": warning,
+        }
+
+    @mcp.tool()
+    async def set_cost_warning_threshold(
+        threshold_usd: float,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """コスト警告の閾値を設定する。
+
+        ※ Owner のみ使用可能。
+
+        Args:
+            threshold_usd: 新しい閾値（USD）
+            caller_agent_id: 呼び出し元エージェントID（必須）
+
+        Returns:
+            設定結果（success, threshold, message）
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "set_cost_warning_threshold", caller_agent_id)
+        if role_error:
+            return role_error
+
+        dashboard = ensure_dashboard_manager(app_ctx)
+        dashboard.set_cost_warning_threshold(threshold_usd)
+
+        return {
+            "success": True,
+            "threshold": threshold_usd,
+            "message": f"コスト警告閾値を ${threshold_usd:.2f} に設定しました",
+        }
+
+    @mcp.tool()
+    async def reset_cost_counter(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """コストカウンターをリセットする。
+
+        ※ Owner のみ使用可能。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
+
+        Returns:
+            リセット結果（success, deleted_count, message）
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "reset_cost_counter", caller_agent_id)
+        if role_error:
+            return role_error
+
+        dashboard = ensure_dashboard_manager(app_ctx)
+        deleted = dashboard.reset_cost_counter()
+
+        return {
+            "success": True,
+            "deleted_count": deleted,
+            "message": f"{deleted} 件の記録をリセットしました",
+        }
+
+    @mcp.tool()
+    async def get_cost_summary(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """コストサマリーを取得する。
+
+        Args:
+            caller_agent_id: 呼び出し元エージェントID（必須）
+
+        Returns:
+            コストサマリー（success, summary）
+        """
+        app_ctx: AppContext = ctx.request_context.lifespan_context
+
+        # ロールチェック
+        role_error = check_tool_permission(app_ctx, "get_cost_summary", caller_agent_id)
+        if role_error:
+            return role_error
+
+        dashboard = ensure_dashboard_manager(app_ctx)
+        summary = dashboard.get_cost_summary()
 
         return {
             "success": True,

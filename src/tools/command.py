@@ -17,6 +17,7 @@ from src.tools.helpers import (
     ensure_persona_manager,
     get_mcp_tool_prefix_from_config,
     resolve_main_repo_root,
+    save_agent_to_file,
     sync_agents_from_file,
 )
 from src.tools.model_profile import get_current_profile_settings
@@ -79,6 +80,8 @@ def register_tools(mcp: FastMCP) -> None:
         if success:
             agent.status = AgentStatus.BUSY
             agent.last_activity = datetime.now()
+            # ファイルに保存（MCP インスタンス間で共有）
+            save_agent_to_file(app_ctx, agent)
 
         return {
             "success": success,
@@ -341,6 +344,8 @@ def register_tools(mcp: FastMCP) -> None:
         if success:
             agent.status = AgentStatus.BUSY
             agent.last_activity = datetime.now()
+            # ファイルに保存（MCP インスタンス間で共有）
+            save_agent_to_file(app_ctx, agent)
             # ダッシュボード更新
             dashboard.save_markdown_dashboard(project_root, session_id)
 
@@ -478,6 +483,8 @@ def register_tools(mcp: FastMCP) -> None:
 
             if success:
                 agent.last_activity = now
+                # ファイルに保存（MCP インスタンス間で共有）
+                save_agent_to_file(app_ctx, agent)
 
         success_count = sum(1 for v in results.values() if v)
         total_count = len(results)

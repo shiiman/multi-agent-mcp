@@ -257,6 +257,44 @@ class Settings(BaseSettings):
     )
     """メモリエントリの保持期間（デフォルト: 90日）"""
 
+    # IPC 通知設定
+    ipc_notification_retry_interval: int = Field(
+        default=10,
+        description="Admin への IPC 通知リトライ間隔（秒）",
+    )
+    """Admin が busy の場合の待機時間（デフォルト: 10秒）"""
+
+    ipc_notification_max_retries: int = Field(
+        default=6,
+        description="Admin への IPC 通知の最大リトライ回数",
+    )
+    """最大リトライ回数（デフォルト: 6回、約60秒）"""
+
+    # コスト推定設定
+    estimated_tokens_per_call: int = Field(
+        default=2000,
+        description="1回のAPI呼び出しあたりの推定トークン数",
+    )
+    """1回のAPI呼び出しあたりの推定トークン数（デフォルト: 2000）"""
+
+    cost_per_1k_tokens_claude: float = Field(
+        default=0.015,
+        description="Claude の 1000 トークンあたりのコスト（USD）",
+    )
+    """Claude Sonnet 概算コスト（デフォルト: $0.015/1K tokens）"""
+
+    cost_per_1k_tokens_codex: float = Field(
+        default=0.01,
+        description="Codex の 1000 トークンあたりのコスト（USD）",
+    )
+    """OpenAI Codex 概算コスト（デフォルト: $0.01/1K tokens）"""
+
+    cost_per_1k_tokens_gemini: float = Field(
+        default=0.005,
+        description="Gemini の 1000 トークンあたりのコスト（USD）",
+    )
+    """Gemini Pro 概算コスト（デフォルト: $0.005/1K tokens）"""
+
 
 # Settings シングルトンキャッシュ
 _settings_instance: Settings | None = None

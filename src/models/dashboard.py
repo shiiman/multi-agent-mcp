@@ -73,6 +73,26 @@ class AgentSummary(BaseModel):
     last_activity: datetime | None = Field(None, description="最終活動日時")
 
 
+class ApiCallRecord(BaseModel):
+    """API呼び出し記録。"""
+
+    ai_cli: str = Field(..., description="使用したAI CLI（claude/codex/gemini）")
+    tokens: int = Field(..., description="推定トークン数")
+    timestamp: datetime = Field(default_factory=datetime.now, description="呼び出し時刻")
+    agent_id: str | None = Field(None, description="エージェントID")
+    task_id: str | None = Field(None, description="タスクID")
+
+
+class CostInfo(BaseModel):
+    """コスト情報。"""
+
+    total_api_calls: int = Field(default=0, description="総API呼び出し回数")
+    estimated_tokens: int = Field(default=0, description="推定総トークン数")
+    estimated_cost_usd: float = Field(default=0.0, description="推定総コスト（USD）")
+    warning_threshold_usd: float = Field(default=10.0, description="コスト警告閾値（USD）")
+    calls: list[ApiCallRecord] = Field(default_factory=list, description="呼び出し記録")
+
+
 class Dashboard(BaseModel):
     """ダッシュボード情報。"""
 
@@ -104,6 +124,9 @@ class Dashboard(BaseModel):
     active_worktrees: int = Field(
         default=0, description="アクティブworktree数"
     )
+
+    # コスト情報
+    cost: CostInfo = Field(default_factory=CostInfo, description="コスト情報")
 
     def get_task(self, task_id: str) -> TaskInfo | None:
         """タスクを取得する。"""

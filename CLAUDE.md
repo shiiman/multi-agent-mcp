@@ -14,8 +14,7 @@ This project provides an MCP server that allows Claude Code (or other AI CLIs) t
 - **AI CLI Selection**: Support for Claude Code, Codex, and Gemini CLI
 - **Task Scheduling**: Priority-based task queue with dependency management
 - **Health Monitoring**: Heartbeat-based agent health checks with auto-recovery
-- **Metrics Collection**: Track task completion, duration, and success rates
-- **Cost Estimation**: Estimate API costs across different AI providers
+- **Cost Tracking**: API cost tracking integrated into Dashboard
 
 ## Project Structure
 
@@ -42,10 +41,8 @@ multi-agent-mcp/
 │   │   ├── gtrconfig_manager.py # .gtrconfig detection/generation
 │   │   ├── scheduler_manager.py # Task priority queue
 │   │   ├── healthcheck_manager.py # Agent health monitoring
-│   │   ├── metrics_manager.py # Statistics collection
-│   │   ├── cost_manager.py    # API cost tracking
 │   │   ├── ipc_manager.py     # Inter-process communication
-│   │   ├── dashboard_manager.py # Dashboard state management
+│   │   ├── dashboard_manager.py # Dashboard state management (includes cost tracking)
 │   │   ├── memory_manager.py  # Persistent knowledge management
 │   │   ├── persona_manager.py # Task-based persona optimization
 │   │   └── terminal/          # Terminal app implementations
@@ -53,7 +50,7 @@ multi-agent-mcp/
 │   │       ├── ghostty.py     # Ghostty terminal support
 │   │       ├── iterm2.py      # iTerm2 terminal support
 │   │       └── terminal_app.py # macOS Terminal.app support
-│   └── tools/                 # MCP tool definitions (89 tools)
+│   └── tools/                 # MCP tool definitions (85 tools)
 │       ├── __init__.py        # register_all_tools()
 │       ├── helpers.py         # Common helper functions
 │       ├── session.py         # Session management (4 tools)
@@ -61,13 +58,11 @@ multi-agent-mcp/
 │       ├── command.py         # Command execution (5 tools)
 │       ├── worktree.py        # Git worktree (7 tools)
 │       ├── ipc.py             # IPC/messaging (5 tools)
-│       ├── dashboard.py       # Dashboard/task management (10 tools)
+│       ├── dashboard.py       # Dashboard/task/cost management (14 tools)
 │       ├── gtrconfig.py       # Gtrconfig (3 tools)
 │       ├── template.py        # Templates (4 tools)
 │       ├── scheduler.py       # Scheduler (3 tools)
 │       ├── healthcheck.py     # Healthcheck (5 tools)
-│       ├── metrics.py         # Metrics (4 tools)
-│       ├── cost.py            # Cost management (4 tools)
 │       ├── persona.py         # Persona (3 tools)
 │       ├── memory.py          # Memory management (19 tools)
 │       ├── screenshot.py      # Screenshot management (4 tools)

@@ -9,12 +9,10 @@ import pytest
 
 from src.config.settings import Settings
 from src.managers.ai_cli_manager import AiCliManager
-from src.managers.cost_manager import CostManager
 from src.managers.dashboard_manager import DashboardManager
 from src.managers.gtrconfig_manager import GtrconfigManager
 from src.managers.healthcheck_manager import HealthcheckManager
 from src.managers.ipc_manager import IPCManager
-from src.managers.metrics_manager import MetricsManager
 from src.managers.scheduler_manager import SchedulerManager
 from src.managers.tmux_manager import TmuxManager
 from src.managers.worktree_manager import WorktreeManager
@@ -155,18 +153,6 @@ def scheduler_manager(dashboard_manager, sample_agents):
 def healthcheck_manager(tmux_manager, sample_agents):
     """HealthcheckManagerインスタンスを作成する。"""
     return HealthcheckManager(tmux_manager, sample_agents, healthcheck_interval_seconds=60)
-
-
-@pytest.fixture
-def metrics_manager(temp_dir):
-    """MetricsManagerインスタンスを作成する。"""
-    return MetricsManager(str(temp_dir / ".metrics"))
-
-
-@pytest.fixture
-def cost_manager():
-    """CostManagerインスタンスを作成する。"""
-    return CostManager(warning_threshold_usd=10.0)
 
 
 @pytest.fixture

@@ -25,7 +25,6 @@ from src.tools.helpers import (
     ensure_global_memory_manager,
     ensure_ipc_manager,
     ensure_memory_manager,
-    ensure_metrics_manager,
     ensure_persona_manager,
     resolve_main_repo_root,
     save_agent_to_file,
@@ -274,24 +273,17 @@ def register_tools(mcp: FastMCP) -> None:
 
         # IPC マネージャーに自動登録（session_id が必要、Owner は init_tmux_workspace 後に登録）
         ipc_registered = False
-        metrics_tracking = False
         if app_ctx.session_id:
             try:
                 ipc = ensure_ipc_manager(app_ctx)
                 ipc.register_agent(agent_id)
                 ipc_registered = True
                 logger.info(f"エージェント {agent_id} を IPC に登録しました")
-
-                # メトリクス記録開始
-                metrics = ensure_metrics_manager(app_ctx)
-                metrics.record_agent_start(agent_id, agent_role.value)
-                metrics_tracking = True
-                logger.info(f"エージェント {agent_id} のメトリクス記録を開始しました")
             except ValueError as e:
-                logger.warning(f"IPC/メトリクス登録をスキップ（session_id 未設定）: {e}")
+                logger.warning(f"IPC 登録をスキップ（session_id 未設定）: {e}")
         else:
             logger.info(
-                f"エージェント {agent_id} の IPC/メトリクス登録をスキップしました"
+                f"エージェント {agent_id} の IPC 登録をスキップしました"
                 "（session_id 未設定、後で init_tmux_workspace で設定）"
             )
 
@@ -481,16 +473,23 @@ def register_tools(mcp: FastMCP) -> None:
             await tmux.set_pane_title(
                 agent.session_name, agent.window_index, agent.pane_index, "(empty)"
             )
-        # Owner の場合は tmux 操作なしでエージェント情報のみ削除
+        # Owner の場合は tmux 操作なしでエージェント情報のみ更新
 
-        del agents[agent_id]
+        # エージェントの状態を terminated に変更（削除せず履歴を残す）
+        agent.status = AgentStatus.OFFLINE
+        agent.last_activity = datetime.now()
 
-        logger.info(f"エージェント {agent_id} を終了しました")
+        # ファイルに保存（MCP インスタンス間で共有）
+        file_saved = save_agent_to_file(app_ctx, agent)
+
+        logger.info(f"エージェント {agent_id} を終了しました (status: offline, file_saved: {file_saved})")
 
         return {
             "success": True,
             "agent_id": agent_id,
             "message": f"エージェント {agent_id} を終了しました",
+            "status": "offline",
+            "file_persisted": file_saved,
         }
 
     @mcp.tool()
@@ -647,9 +646,12 @@ def register_tools(mcp: FastMCP) -> None:
         agent.status = AgentStatus.BUSY
         agent.last_activity = datetime.now()
 
+        # ファイルに保存（MCP インスタンス間で共有）
+        file_saved = save_agent_to_file(app_ctx, agent)
+
         logger.info(
             f"エージェント {agent_id}（{agent.role.value}）を初期化しました: "
-            f"CLI={cli.value}, prompt_source={prompt_source}"
+            f"CLI={cli.value}, prompt_source={prompt_source}, file_saved={file_saved}"
         )
 
         return {
@@ -661,6 +663,7 @@ def register_tools(mcp: FastMCP) -> None:
             "terminal": terminal_app.value,
             "working_dir": working_dir,
             "message": f"エージェント {agent_id} を初期化しました（{cli.value} で起動）",
+            "file_persisted": file_saved,
         }
 
     @mcp.tool()
@@ -753,9 +756,9 @@ def register_tools(mcp: FastMCP) -> None:
                     used_slots.add(slot)  # 確保済みとしてマーク
                     break
 
-            # メインウィンドウが満杯の場合は追加ウィンドウ（TODO: 実装が必要な場合）
+            # メインウィンドウが満杯の場合は警告（Worker の完了を待って再試行が必要）
             if slot is None:
-                logger.warning(f"Worker {i + 1}: 利用可能な pane がありません")
+                logger.warning(f"Worker {i + 1}: 利用可能な pane がありません（Worker の完了を待って再試行してください）")
 
             pre_assigned_slots.append(slot)
 
@@ -869,12 +872,8 @@ def register_tools(mcp: FastMCP) -> None:
                         ipc = ensure_ipc_manager(app_ctx)
                         ipc.register_agent(agent_id)
                         ipc_registered = True
-
-                        # メトリクス記録開始
-                        metrics = ensure_metrics_manager(app_ctx)
-                        metrics.record_agent_start(agent_id, "worker")
                     except ValueError as e:
-                        logger.warning(f"IPC/メトリクス登録をスキップ: {e}")
+                        logger.warning(f"IPC 登録をスキップ: {e}")
 
                 # エージェント情報をファイルに保存
                 file_saved = save_agent_to_file(app_ctx, agent)
@@ -1009,6 +1008,8 @@ def register_tools(mcp: FastMCP) -> None:
                             if success:
                                 agent.status = AgentStatus.BUSY
                                 agent.last_activity = datetime.now()
+                                # ファイルに保存（MCP インスタンス間で共有）
+                                save_agent_to_file(app_ctx, agent)
                                 dashboard.save_markdown_dashboard(project_root, session_id)
                                 task_sent = True
                                 logger.info(f"Worker {worker_index + 1} (ID: {agent_id}) にタスクを送信しました")

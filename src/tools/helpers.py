@@ -14,13 +14,11 @@ from src.context import AppContext
 
 logger = logging.getLogger(__name__)
 
-from src.managers.cost_manager import CostManager
 from src.managers.dashboard_manager import DashboardManager
 from src.managers.gtrconfig_manager import GtrconfigManager
 from src.managers.healthcheck_manager import HealthcheckManager
 from src.managers.ipc_manager import IPCManager
 from src.managers.memory_manager import MemoryManager
-from src.managers.metrics_manager import MetricsManager
 from src.managers.persona_manager import PersonaManager
 from src.managers.scheduler_manager import SchedulerManager
 from src.managers.worktree_manager import WorktreeManager
@@ -415,28 +413,6 @@ def ensure_healthcheck_manager(app_ctx: AppContext) -> HealthcheckManager:
             app_ctx.settings.healthcheck_interval_seconds,
         )
     return app_ctx.healthcheck_manager
-
-
-def ensure_metrics_manager(app_ctx: AppContext) -> MetricsManager:
-    """MetricsManagerが初期化されていることを確認する。
-
-    Raises:
-        ValueError: project_root が設定されていない場合
-    """
-    if app_ctx.metrics_manager is None:
-        base_dir = resolve_project_root(app_ctx, require_worktree_resolution=False)
-        metrics_dir = os.path.join(base_dir, get_mcp_dir(), ".metrics")
-        app_ctx.metrics_manager = MetricsManager(metrics_dir)
-    return app_ctx.metrics_manager
-
-
-def ensure_cost_manager(app_ctx: AppContext) -> CostManager:
-    """CostManagerが初期化されていることを確認する。"""
-    if app_ctx.cost_manager is None:
-        app_ctx.cost_manager = CostManager(
-            app_ctx.settings.cost_warning_threshold_usd
-        )
-    return app_ctx.cost_manager
 
 
 def ensure_persona_manager(app_ctx: AppContext) -> PersonaManager:

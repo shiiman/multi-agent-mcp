@@ -42,8 +42,9 @@ target-version = "py310"
 select = ["E", "F", "I", "N", "W"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
 dev = [

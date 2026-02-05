@@ -104,7 +104,7 @@ uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp mu
 claude mcp list
 ```
 
-## 提供するTools（89個）
+## 提供するTools（85個）
 
 ### セッション管理（4個）
 
@@ -158,7 +158,7 @@ claude mcp list
 | `clear_messages` | メッセージをクリア |
 | `register_agent_to_ipc` | エージェントをIPCシステムに登録 |
 
-### ダッシュボード/タスク管理（10個）
+### ダッシュボード/タスク管理（14個）
 
 | Tool | 説明 |
 |------|------|
@@ -172,6 +172,10 @@ claude mcp list
 | `remove_task` | タスクを削除 |
 | `get_dashboard` | ダッシュボード全体を取得 |
 | `get_dashboard_summary` | ダッシュボードのサマリーを取得 |
+| `get_cost_estimate` | 現在のコスト推定を取得 |
+| `set_cost_warning_threshold` | コスト警告の閾値を設定 |
+| `reset_cost_counter` | コストカウンターをリセット |
+| `get_cost_summary` | コストサマリーを取得 |
 
 ### Gtrconfig（3個）
 
@@ -207,24 +211,6 @@ claude mcp list
 | `get_unhealthy_agents` | 異常なエージェント一覧を取得 |
 | `attempt_recovery` | エージェントの復旧を試みる |
 | `record_heartbeat` | ハートビートを記録 |
-
-### メトリクス（4個）
-
-| Tool | 説明 |
-|------|------|
-| `get_task_metrics` | タスクのメトリクスを取得 |
-| `get_agent_metrics` | エージェントのメトリクスを取得 |
-| `get_workspace_metrics` | ワークスペース全体のメトリクスを取得 |
-| `get_metrics_summary` | メトリクスのサマリーを取得 |
-
-### コスト管理（4個）
-
-| Tool | 説明 |
-|------|------|
-| `get_cost_estimate` | 現在のコスト推定を取得 |
-| `set_cost_warning_threshold` | コスト警告の閾値を設定 |
-| `reset_cost_counter` | コストカウンターをリセット |
-| `get_cost_summary` | コストサマリーを取得 |
 
 ### ペルソナ（3個）
 

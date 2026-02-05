@@ -154,9 +154,9 @@ while True:
 #### IPC 通知の形式
 
 ```
-[IPC] 新しいメッセージ: task_complete from {worker_id}
-[IPC] 新しいメッセージ: task_approved from {owner_id}
-[IPC] 新しいメッセージ: request from {owner_id}
+[IPC] 新しいメッセージ: task_complete from worker_xxx
+[IPC] 新しいメッセージ: task_approved from owner_xxx
+[IPC] 新しいメッセージ: request from owner_xxx
 ```
 
 **✅ 許可**: `healthcheck_all()` による Worker 生存確認のみ許可

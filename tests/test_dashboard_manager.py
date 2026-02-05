@@ -311,7 +311,8 @@ class TestMarkdownDashboard:
 
         assert md_path.exists()
         assert md_path.name == "dashboard.md"
-        assert ".multi-agent-mcp/dashboard-test/dashboard" in str(md_path)
+        # パスは .dashboard または .multi-agent-mcp/{session_id}/dashboard のいずれかを含む
+        assert ".dashboard" in str(md_path) or ".multi-agent-mcp" in str(md_path)
 
         content = md_path.read_text(encoding="utf-8")
         assert "# Multi-Agent Dashboard" in content

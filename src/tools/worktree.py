@@ -8,7 +8,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import Settings
 from src.context import AppContext
-from src.tools.helpers import check_tool_permission, get_worktree_manager
+from src.tools.helpers import check_tool_permission, get_worktree_manager, save_agent_to_file
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +221,10 @@ def register_tools(mcp: FastMCP) -> None:
         agent.worktree_path = worktree_path
         agent.last_activity = datetime.now()
 
-        logger.info(f"エージェント {agent_id} に worktree を割り当てました: {worktree_path}")
+        # ファイルに保存（MCP インスタンス間で共有）
+        file_saved = save_agent_to_file(app_ctx, agent)
+
+        logger.info(f"エージェント {agent_id} に worktree を割り当てました: {worktree_path} (file_saved: {file_saved})")
 
         return {
             "success": True,
@@ -229,6 +232,7 @@ def register_tools(mcp: FastMCP) -> None:
             "worktree_path": worktree_path,
             "branch": branch,
             "message": f"worktreeを割り当てました: {worktree_path}",
+            "file_persisted": file_saved,
         }
 
     @mcp.tool()

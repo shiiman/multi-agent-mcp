@@ -5,13 +5,11 @@ from mcp.server.fastmcp import FastMCP
 from src.tools import (
     agent,
     command,
-    cost,
     dashboard,
     gtrconfig,
     healthcheck,
     ipc,
     memory,
-    metrics,
     model_profile,
     persona,
     scheduler,
@@ -43,7 +41,7 @@ def register_all_tools(mcp: FastMCP) -> None:
     # IPC/メッセージング
     ipc.register_tools(mcp)
 
-    # ダッシュボード/タスク管理
+    # ダッシュボード/タスク管理（コスト管理を含む）
     dashboard.register_tools(mcp)
 
     # Gtrconfig
@@ -57,12 +55,6 @@ def register_all_tools(mcp: FastMCP) -> None:
 
     # ヘルスチェック
     healthcheck.register_tools(mcp)
-
-    # メトリクス
-    metrics.register_tools(mcp)
-
-    # コスト
-    cost.register_tools(mcp)
 
     # ペルソナ
     persona.register_tools(mcp)

@@ -188,10 +188,30 @@ while True:
 
 #### 4.3. IPC 通知の形式
 
-Worker が完了報告すると、Admin の tmux ペインに以下の通知が表示されます：
+Worker からの各アクションに応じて、Admin の tmux ペインに以下の通知が表示されます：
+
+**進捗報告時:**
 
 ```
-[IPC] 新しいメッセージ: task_complete from {worker_id}
+[IPC] 新しいメッセージ: task_progress from worker_xxx
+```
+
+**完了報告時:**
+
+```
+[IPC] 新しいメッセージ: task_complete from worker_xxx
+```
+
+**失敗・ブロック時:**
+
+```
+[IPC] 新しいメッセージ: task_failed from worker_xxx
+```
+
+**質問・確認依頼時:**
+
+```
+[IPC] 新しいメッセージ: request from worker_xxx
 ```
 
 #### 4.4. IPC 通知を受けたら read_messages を実行
@@ -205,10 +225,19 @@ messages = read_messages(
     unread_only=True,
     caller_agent_id="{agent_id}"
 )
-# Worker からの task_complete メッセージを処理
+# Worker からのメッセージを処理
 for msg in messages:
-    if msg["message_type"] == "task_complete":
-        # タスク完了処理
+    if msg["message_type"] == "task_progress":
+        # 進捗報告 → ダッシュボード確認
+        pass
+    elif msg["message_type"] == "task_complete":
+        # タスク完了 → マージ処理へ
+        pass
+    elif msg["message_type"] == "task_failed":
+        # 失敗・ブロック → 再割り当てまたは相談
+        pass
+    elif msg["message_type"] == "request":
+        # Worker からの質問 → 対応
         pass
 ```
 
@@ -385,11 +414,11 @@ Owner に完了報告を送信しました。Owner からの承認または再�
 Owner が応答すると、Admin の tmux ペインに以下の通知が表示されます：
 
 ```
-[IPC] 新しいメッセージ: task_approved from {owner_id}
+[IPC] 新しいメッセージ: task_approved from owner_xxx
 ```
 または
 ```
-[IPC] 新しいメッセージ: request from {owner_id}
+[IPC] 新しいメッセージ: request from owner_xxx
 ```
 
 #### 8.4. IPC 通知を受けたら read_messages を実行
