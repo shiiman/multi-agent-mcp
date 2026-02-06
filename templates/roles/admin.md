@@ -189,8 +189,17 @@ Owner (1 agent)
 3. **Owner への定期報告**: 進捗を proactive に共有
 4. **ブロッカーの即時報告**: 問題発生時は Owner に即報告
 5. **idle Worker の再利用**: 新規 Worker 作成前に、必ず idle 状態の既存 Worker を確認・再利用する
+6. **最終判断責任**: Worker からの質問には Admin が必ず判断して明確な指示を返す
 
 ---
+
+## 🔴 DECISION-001: Worker からの質問に対する Admin 判断責務
+
+Worker はユーザーに質問しません。判断が必要な問い合わせは全て Admin に集約されます。
+
+- Admin は `request` を受けたら必ず判断し、具体的な次アクションを返す
+- `どちらでもよい` のような曖昧回答は禁止
+- 回答不能な場合のみ Owner にエスカレーションし、Worker を待機させる理由を明記する
 
 ## 🔴 REUSE-001: idle Worker の再利用（Worker 上限対策）
 

@@ -163,12 +163,8 @@ class TestGenerateAdminTask:
         assert "**Admin ID**: admin-xyz" in result
         assert 'retrieve_from_memory "ISSUE-456"' in result
 
-    def test_references_role_template(self):
-        """roles/admin.md への参照が含まれることをテスト。
-
-        Admin 専用ルール（F001-F005、RACE-001 等）は roles/admin.md に移動され、
-        admin_task.md からは参照のみを行う設計に変更。
-        """
+    def test_mentions_role_template(self):
+        """Admin タスクが役割テンプレート参照前提の文言を含むことをテスト。"""
         result = generate_admin_task(
             session_id="123",
             agent_id="admin-001",
@@ -178,8 +174,7 @@ class TestGenerateAdminTask:
             memory_context="",
             project_name="test-project",
         )
-        # roles/admin.md への参照があること
-        assert "roles/admin.md" in result
+        assert "役割テンプレートで確認済みの前提" in result
         assert "F001-F005" in result or "F001" in result
         # 品質イテレーションセクションでは F001 への言及が残っている
         assert "F001 違反" in result
