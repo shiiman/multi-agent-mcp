@@ -207,7 +207,7 @@ class TmuxWorkspaceMixin:
         Returns:
             成功した場合True
         """
-        window_name = f"workers-{window_index + 1}"
+        window_name = f"{self.settings.window_name_worker_prefix}{window_index + 1}"
 
         # ウィンドウが既に存在するか確認
         windows = await self.list_windows(project_name)

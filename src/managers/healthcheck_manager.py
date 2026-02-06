@@ -63,8 +63,8 @@ class HealthcheckManager:
         Args:
             tmux_manager: tmuxマネージャー
             agents: エージェントの辞書（agent_id -> Agent）
-            healthcheck_interval_seconds: ヘルスチェック間隔（秒）。現在は使用されていないが、
-                                          将来的な定期チェック用に保持。
+            healthcheck_interval_seconds: ヘルスチェック間隔（秒）。
+                                          monitor_and_recover_workers の inactivity 判定に使用。
         """
         self.tmux_manager = tmux_manager
         self.agents = agents

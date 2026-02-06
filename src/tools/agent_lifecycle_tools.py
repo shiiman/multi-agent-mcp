@@ -16,6 +16,7 @@ from src.tools.agent_helpers import (
     _post_create_agent,
     _resolve_tmux_session_name,
     _validate_agent_creation,
+    resolve_worker_number_from_slot,
 )
 from src.tools.helpers import (
     refresh_app_settings,
@@ -92,6 +93,20 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         )
         if not pane_result["success"]:
             return {"success": False, "error": pane_result["error"]}
+
+        if agent_role == AgentRole.WORKER and selected_cli is None:
+            try:
+                worker_no = resolve_worker_number_from_slot(
+                    settings,
+                    pane_result["window_index"],
+                    pane_result["pane_index"],
+                )
+                selected_cli = settings.get_worker_cli(worker_no)
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Worker CLI 設定の解決に失敗しました: {e}",
+                }
 
         # エージェント情報を登録
         now = datetime.now()
@@ -454,4 +469,3 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             "message": f"エージェント {agent_id} を初期化しました（{cli.value} で起動）",
             "file_persisted": file_saved,
         }
-

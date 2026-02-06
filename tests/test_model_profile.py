@@ -38,6 +38,8 @@ class TestSettingsModelProfile:
         assert settings.model_profile_standard_max_workers == 6
         assert settings.model_profile_standard_admin_thinking_tokens == 4000
         assert settings.model_profile_standard_worker_thinking_tokens == 4000
+        assert settings.model_profile_standard_admin_reasoning_effort.value == "medium"
+        assert settings.model_profile_standard_worker_reasoning_effort.value == "medium"
 
     def test_performance_profile_settings_defaults(self, settings):
         """performance プロファイルのデフォルト値をテスト。"""
@@ -46,6 +48,8 @@ class TestSettingsModelProfile:
         assert settings.model_profile_performance_max_workers == 16
         assert settings.model_profile_performance_admin_thinking_tokens == 30000
         assert settings.model_profile_performance_worker_thinking_tokens == 4000
+        assert settings.model_profile_performance_admin_reasoning_effort.value == "high"
+        assert settings.model_profile_performance_worker_reasoning_effort.value == "high"
 
     def test_switch_profile(self, settings):
         """プロファイルを切り替えられることをテスト。"""

@@ -310,17 +310,13 @@ cleanup_workspace()
 | `MCP_ENABLE_WORKTREE` | true | git worktreeを使用するか |
 | `MCP_WINDOW_NAME_MAIN` | main | メインウィンドウ名（Admin + Worker 1-6） |
 | `MCP_WINDOW_NAME_WORKER_PREFIX` | workers- | 追加Workerウィンドウ名のプレフィックス |
-| `MCP_MAIN_WORKER_ROWS` | 2 | メインウィンドウのWorkerエリア行数 |
-| `MCP_MAIN_WORKER_COLS` | 3 | メインウィンドウのWorkerエリア列数 |
-| `MCP_WORKERS_PER_MAIN_WINDOW` | 6 | メインウィンドウのWorker数 |
 | `MCP_EXTRA_WORKER_ROWS` | 2 | 追加ウィンドウの行数 |
 | `MCP_EXTRA_WORKER_COLS` | 5 | 追加ウィンドウの列数 |
 | `MCP_WORKERS_PER_EXTRA_WINDOW` | 10 | 追加ウィンドウのWorker数 |
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
 | `MCP_ESTIMATED_TOKENS_PER_CALL` | 2000 | 1回のAPI呼び出しあたりの推定トークン数 |
-| `MCP_COST_PER_1K_TOKENS_CLAUDE` | 0.015 | Claudeの1000トークンあたりのコスト（USD） |
-| `MCP_COST_PER_1K_TOKENS_CODEX` | 0.01 | Codexの1000トークンあたりのコスト（USD） |
-| `MCP_COST_PER_1K_TOKENS_GEMINI` | 0.005 | Geminiの1000トークンあたりのコスト（USD） |
+| `MCP_MODEL_COST_TABLE_JSON` | `{"claude:opus":0.03,...}` | モデル別1000トークン単価テーブル（JSON） |
+| `MCP_MODEL_COST_DEFAULT_PER_1K` | 0.01 | 未定義モデル向けの汎用単価（USD/1K） |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 60 | ヘルスチェック間隔（秒）- 応答なしで異常判断 |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
@@ -330,17 +326,29 @@ cleanup_workspace()
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | 6 | standardプロファイルのWorker上限 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | 4000 | standardプロファイルのAdmin思考トークン数 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | 4000 | standardプロファイルのWorker思考トークン数 |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT` | medium | standardプロファイルのAdmin推論強度 |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT` | medium | standardプロファイルのWorker推論強度 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | claude | performanceプロファイルのAI CLI |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | opus | performanceプロファイルのAdminモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | opus | performanceプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | 16 | performanceプロファイルのWorker上限 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | 30000 | performanceプロファイルのAdmin思考トークン数 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | 4000 | performanceプロファイルのWorker思考トークン数 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_REASONING_EFFORT` | high | performanceプロファイルのAdmin推論強度 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_REASONING_EFFORT` | high | performanceプロファイルのWorker推論強度 |
 | `MCP_PROJECT_ROOT` | - | プロジェクトルート（.env読み込み用） |
+| `MCP_CLI_DEFAULT_CLAUDE_ADMIN_MODEL` | opus | Claude CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | sonnet | Claude CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.3-codex | Codex CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.3-codex | Codex CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro | Gemini CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash | Gemini CLIのWorkerデフォルトモデル |
+| `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
+| `MCP_WORKER_CLI_UNIFORM` | claude | uniformモード時のWorker CLI |
+| `MCP_WORKER_CLI_1..16` | (empty) | per-workerモードでのWorker別CLI設定（未設定時はUNIFORMを利用） |
+| `MCP_WORKER_MODEL_MODE` | uniform | Workerモデル設定モード（uniform/per-worker） |
+| `MCP_WORKER_MODEL_UNIFORM` | (empty) | uniformモード時のWorkerモデル（未設定時はプロファイルのWORKER_MODEL） |
+| `MCP_WORKER_MODEL_1..16` | (empty) | per-workerモードでのWorker別モデル設定（未設定時はUNIFORM→プロファイル順で解決） |
 | `MCP_QUALITY_CHECK_MAX_ITERATIONS` | 5 | 品質チェックの最大イテレーション回数 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | 3 | 同一問題の繰り返し上限 |
 | `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリの最大エントリ数 |

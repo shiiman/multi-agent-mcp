@@ -309,6 +309,7 @@ class DashboardMarkdownMixin:
             role_map = {agent.agent_id: agent.role for agent in dashboard.agents}
             role_stats: dict[str, dict[str, float | int]] = {}
             agent_stats: dict[str, dict[str, int]] = {}
+            model_stats: dict[str, dict[str, float | int]] = {}
 
             for call in cost.calls:
                 role = role_map.get(call.agent_id, "unknown") if call.agent_id else "unknown"
@@ -329,6 +330,12 @@ class DashboardMarkdownMixin:
                 agent_data = agent_stats.setdefault(agent_key, {"calls": 0, "tokens": 0})
                 agent_data["calls"] += 1
                 agent_data["tokens"] += call.tokens
+
+                model_key = call.model or "unknown"
+                model_data = model_stats.setdefault(model_key, {"calls": 0, "tokens": 0, "cost": 0.0})
+                model_data["calls"] += 1
+                model_data["tokens"] += call.tokens
+                model_data["cost"] += call_cost
 
             lines.extend([
                 "",
@@ -366,6 +373,17 @@ class DashboardMarkdownMixin:
                     display = label
                 lines.append(
                     f"- `{display}`: {data['calls']} calls / {data['tokens']:,} tokens"
+                )
+
+            lines.extend(["", "**モデル別内訳**:"])
+            for model_name, data in sorted(
+                model_stats.items(),
+                key=lambda item: item[1]["calls"],
+                reverse=True,
+            ):
+                lines.append(
+                    f"- `{model_name}`: {int(data['calls'])} calls / "
+                    f"{int(data['tokens']):,} tokens / ${float(data['cost']):.4f}"
                 )
 
             if cost.total_cost_usd >= cost.warning_threshold_usd:

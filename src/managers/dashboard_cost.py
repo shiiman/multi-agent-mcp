@@ -22,6 +22,7 @@ class DashboardCostMixin:
     def record_api_call(
         self,
         ai_cli: str,
+        model: str | None = None,
         estimated_tokens: int | None = None,
         agent_id: str | None = None,
         task_id: str | None = None,
@@ -33,6 +34,7 @@ class DashboardCostMixin:
 
         Args:
             ai_cli: 使用したAI CLI（claude/codex/gemini）
+            model: 使用モデル
             estimated_tokens: 推定トークン数（Noneでデフォルト値）
             agent_id: エージェントID（オプション）
             task_id: タスクID（オプション）
@@ -43,7 +45,10 @@ class DashboardCostMixin:
         settings = Settings()
         normalized_cli = ai_cli.lower()
         tokens = estimated_tokens or settings.estimated_tokens_per_call
-        estimated_cost = (tokens / 1000) * self._get_cost_per_1k_tokens().get(normalized_cli, 0.01)
+        estimated_cost = (tokens / 1000) * self._get_cost_per_1k_tokens(
+            normalized_cli,
+            model,
+        )
 
         # 実測コストは Claude のみ許可
         source = (cost_source or ("actual" if actual_cost_usd is not None else "estimated")).lower()
@@ -59,6 +64,7 @@ class DashboardCostMixin:
         dashboard = self._read_dashboard()
         record = ApiCallRecord(
             ai_cli=normalized_cli,
+            model=model,
             tokens=tokens,
             estimated_cost_usd=estimated_cost,
             actual_cost_usd=actual_cost_usd,
@@ -81,19 +87,23 @@ class DashboardCostMixin:
             source,
         )
 
-    def _get_cost_per_1k_tokens(self) -> dict[str, float]:
-        """CLI 別の 1000 トークンあたりコストを取得する。"""
+    def _get_cost_per_1k_tokens(self, ai_cli: str, model: str | None) -> float:
+        """モデル別の 1000 トークンあたりコストを取得する。"""
         settings = Settings()
-        return {
-            "claude": settings.cost_per_1k_tokens_claude,
-            "codex": settings.cost_per_1k_tokens_codex,
-            "gemini": settings.cost_per_1k_tokens_gemini,
-        }
+        table = settings.get_model_cost_table()
+        lookup_model = model
+        if not lookup_model:
+            defaults = settings.get_cli_default_models().get(ai_cli, {})
+            lookup_model = defaults.get("worker")
+        if lookup_model:
+            key = f"{ai_cli}:{lookup_model}"
+            if key in table:
+                return table[key]
+        return settings.model_cost_default_per_1k
 
     def _calculate_call_cost(self, call: ApiCallRecord) -> float:
         """単一 API 呼び出しのコストを計算する。"""
-        rates = self._get_cost_per_1k_tokens()
-        rate = rates.get(call.ai_cli.lower(), 0.01)
+        rate = self._get_cost_per_1k_tokens(call.ai_cli.lower(), call.model)
         return (call.tokens / 1000) * rate
 
     def _count_calls_by_cli(self, calls: list[ApiCallRecord]) -> dict[str, int]:
@@ -252,6 +262,7 @@ class DashboardCostMixin:
         by_agent: dict[str, float] = {}
         by_task: dict[str, float] = {}
         by_cli: dict[str, dict] = {}
+        by_model: dict[str, dict] = {}
 
         for call in dashboard.cost.calls:
             call_cost = (
@@ -276,8 +287,16 @@ class DashboardCostMixin:
             by_cli[cli]["tokens"] += call.tokens
             by_cli[cli]["cost"] += call_cost
 
+            model_key = call.model or "unknown"
+            if model_key not in by_model:
+                by_model[model_key] = {"calls": 0, "tokens": 0, "cost": 0.0}
+            by_model[model_key]["calls"] += 1
+            by_model[model_key]["tokens"] += call.tokens
+            by_model[model_key]["cost"] += call_cost
+
         return {
             "by_agent": by_agent,
             "by_task": by_task,
             "by_cli": by_cli,
+            "by_model": by_model,
         }

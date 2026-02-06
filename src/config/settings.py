@@ -1,5 +1,6 @@
 """設定管理モジュール。"""
 
+import json
 import os
 from enum import Enum
 from pathlib import Path
@@ -80,6 +81,30 @@ class ModelProfile(str, Enum):
     """高性能プロファイル - 性能重視、Opus"""
 
 
+class ReasoningEffort(str, Enum):
+    """推論強度設定。"""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    NONE = "none"
+
+
+class WorkerCliMode(str, Enum):
+    """Worker CLI 設定モード。"""
+
+    UNIFORM = "uniform"
+    PER_WORKER = "per-worker"
+
+
+class WorkerModelMode(str, Enum):
+    """Worker モデル設定モード。"""
+
+    UNIFORM = "uniform"
+    PER_WORKER = "per-worker"
+
+
 # モデル定数（重複を避けるため一元管理）
 class ModelDefaults:
     """デフォルトモデル名の定数。"""
@@ -121,8 +146,8 @@ def resolve_model_for_cli(
 ) -> str | None:
     """CLI に応じてモデル名を解決する。
 
-    Claude 固有の省略名（opus, sonnet）が非 Claude CLI で使われた場合、
-    CLI のデフォルトモデルにフォールバックする。
+    CLI とモデル名の組み合わせを検証し、不一致の場合は
+    その CLI のデフォルトモデルへフォールバックする。
 
     Args:
         cli: AI CLI 名（"claude", "codex", "gemini"）
@@ -134,20 +159,25 @@ def resolve_model_for_cli(
     Returns:
         解決されたモデル名（None の場合は None を返す）
     """
+    defaults_map = cli_defaults if cli_defaults is not None else ModelDefaults.CLI_DEFAULTS
+    defaults = defaults_map.get(cli, {})
+
     if model is None:
-        return None
+        return defaults.get(role)
 
-    # Claude CLI の場合はそのまま返す
-    if cli == "claude":
-        return model
+    def _is_model_compatible(target_cli: str, model_name: str) -> bool:
+        value = model_name.strip().lower()
+        if target_cli == "claude":
+            return value in ModelDefaults.CLAUDE_ALIASES or value.startswith("claude")
+        if target_cli == "codex":
+            return "codex" in value or value.startswith("gpt-")
+        if target_cli == "gemini":
+            return value.startswith("gemini")
+        return True
 
-    # 非 Claude CLI で Claude 固有のモデル名が設定されている場合、CLI デフォルトに置換
-    if model in ModelDefaults.CLAUDE_ALIASES:
-        defaults_map = cli_defaults if cli_defaults is not None else ModelDefaults.CLI_DEFAULTS
-        defaults = defaults_map.get(cli, {})
+    if not _is_model_compatible(cli, model):
         return defaults.get(role, model)
 
-    # ユーザーが CLI 固有のモデル名を明示指定した場合はそのまま返す
     return model
 
 
@@ -197,16 +227,6 @@ class Settings(BaseSettings):
 
     window_name_worker_prefix: str = "workers-"
     """追加 Worker ウィンドウ名のプレフィックス（workers-2, workers-3, ...）"""
-
-    # tmux グリッド設定（メインウィンドウ: 左右50:50分離）
-    main_worker_rows: int = 2
-    """メインウィンドウのWorkerエリア行数"""
-
-    main_worker_cols: int = 3
-    """メインウィンドウのWorkerエリア列数"""
-
-    workers_per_main_window: int = 6
-    """メインウィンドウのWorker数（main_worker_rows × main_worker_cols）"""
 
     # tmux グリッド設定（追加ウィンドウ: Worker 7以降）
     extra_worker_rows: int = 2
@@ -265,6 +285,14 @@ class Settings(BaseSettings):
         default=4000,
         description="standard プロファイルの Worker 思考トークン数",
     )
+    model_profile_standard_admin_reasoning_effort: ReasoningEffort = Field(
+        default=ReasoningEffort.MEDIUM,
+        description="standard プロファイルの Admin reasoning effort",
+    )
+    model_profile_standard_worker_reasoning_effort: ReasoningEffort = Field(
+        default=ReasoningEffort.MEDIUM,
+        description="standard プロファイルの Worker reasoning effort",
+    )
 
     # performance プロファイル設定
     model_profile_performance_cli: AICli = Field(
@@ -291,6 +319,23 @@ class Settings(BaseSettings):
         default=4000,
         description="performance プロファイルの Worker 思考トークン数",
     )
+    model_profile_performance_admin_reasoning_effort: ReasoningEffort = Field(
+        default=ReasoningEffort.HIGH,
+        description="performance プロファイルの Admin reasoning effort",
+    )
+    model_profile_performance_worker_reasoning_effort: ReasoningEffort = Field(
+        default=ReasoningEffort.HIGH,
+        description="performance プロファイルの Worker reasoning effort",
+    )
+
+    cli_default_claude_admin_model: str = Field(
+        default=ModelDefaults.OPUS,
+        description="Claude CLI の Admin デフォルトモデル",
+    )
+    cli_default_claude_worker_model: str = Field(
+        default=ModelDefaults.SONNET,
+        description="Claude CLI の Worker デフォルトモデル",
+    )
 
     # CLI 別デフォルトモデル設定（Claude 固有名が非 Claude CLI で使われた場合のフォールバック）
     cli_default_codex_admin_model: str = Field(
@@ -316,6 +361,56 @@ class Settings(BaseSettings):
         description="Gemini CLI の Worker デフォルトモデル",
     )
     """Gemini CLI で Worker に使用するデフォルトモデル"""
+
+    worker_cli_mode: WorkerCliMode = Field(
+        default=WorkerCliMode.UNIFORM,
+        description="Worker CLI 設定モード（uniform/per-worker）",
+    )
+    worker_cli_uniform: AICli = Field(
+        default=AICli.CLAUDE,
+        description="uniform モード時の Worker CLI",
+    )
+    worker_cli_1: str | None = Field(default=None, description="Worker 1 の CLI")
+    worker_cli_2: str | None = Field(default=None, description="Worker 2 の CLI")
+    worker_cli_3: str | None = Field(default=None, description="Worker 3 の CLI")
+    worker_cli_4: str | None = Field(default=None, description="Worker 4 の CLI")
+    worker_cli_5: str | None = Field(default=None, description="Worker 5 の CLI")
+    worker_cli_6: str | None = Field(default=None, description="Worker 6 の CLI")
+    worker_cli_7: str | None = Field(default=None, description="Worker 7 の CLI")
+    worker_cli_8: str | None = Field(default=None, description="Worker 8 の CLI")
+    worker_cli_9: str | None = Field(default=None, description="Worker 9 の CLI")
+    worker_cli_10: str | None = Field(default=None, description="Worker 10 の CLI")
+    worker_cli_11: str | None = Field(default=None, description="Worker 11 の CLI")
+    worker_cli_12: str | None = Field(default=None, description="Worker 12 の CLI")
+    worker_cli_13: str | None = Field(default=None, description="Worker 13 の CLI")
+    worker_cli_14: str | None = Field(default=None, description="Worker 14 の CLI")
+    worker_cli_15: str | None = Field(default=None, description="Worker 15 の CLI")
+    worker_cli_16: str | None = Field(default=None, description="Worker 16 の CLI")
+
+    worker_model_mode: WorkerModelMode = Field(
+        default=WorkerModelMode.UNIFORM,
+        description="Worker モデル設定モード（uniform/per-worker）",
+    )
+    worker_model_uniform: str | None = Field(
+        default=None,
+        description="uniform モード時の Worker モデル（未設定なら profile の worker_model）",
+    )
+    worker_model_1: str | None = Field(default=None, description="Worker 1 のモデル")
+    worker_model_2: str | None = Field(default=None, description="Worker 2 のモデル")
+    worker_model_3: str | None = Field(default=None, description="Worker 3 のモデル")
+    worker_model_4: str | None = Field(default=None, description="Worker 4 のモデル")
+    worker_model_5: str | None = Field(default=None, description="Worker 5 のモデル")
+    worker_model_6: str | None = Field(default=None, description="Worker 6 のモデル")
+    worker_model_7: str | None = Field(default=None, description="Worker 7 のモデル")
+    worker_model_8: str | None = Field(default=None, description="Worker 8 のモデル")
+    worker_model_9: str | None = Field(default=None, description="Worker 9 のモデル")
+    worker_model_10: str | None = Field(default=None, description="Worker 10 のモデル")
+    worker_model_11: str | None = Field(default=None, description="Worker 11 のモデル")
+    worker_model_12: str | None = Field(default=None, description="Worker 12 のモデル")
+    worker_model_13: str | None = Field(default=None, description="Worker 13 のモデル")
+    worker_model_14: str | None = Field(default=None, description="Worker 14 のモデル")
+    worker_model_15: str | None = Field(default=None, description="Worker 15 のモデル")
+    worker_model_16: str | None = Field(default=None, description="Worker 16 のモデル")
 
     # スクリーンショット設定
     screenshot_extensions: list[str] = Field(
@@ -357,23 +452,70 @@ class Settings(BaseSettings):
     )
     """1回のAPI呼び出しあたりの推定トークン数（デフォルト: 2000）"""
 
-    cost_per_1k_tokens_claude: float = Field(
-        default=0.015,
-        description="Claude の 1000 トークンあたりのコスト（USD）",
+    model_cost_table_json: str = Field(
+        default='{"claude:opus":0.03,"claude:sonnet":0.015,'
+                '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro":0.005,'
+                '"gemini:gemini-3-flash":0.0025}',
+        description="モデル別 1K トークン単価テーブル（JSON）",
     )
-    """Claude Sonnet 概算コスト（デフォルト: $0.015/1K tokens）"""
-
-    cost_per_1k_tokens_codex: float = Field(
+    model_cost_default_per_1k: float = Field(
         default=0.01,
-        description="Codex の 1000 トークンあたりのコスト（USD）",
+        description="未定義モデル向け汎用単価（USD/1K tokens）",
     )
-    """OpenAI Codex 概算コスト（デフォルト: $0.01/1K tokens）"""
 
-    cost_per_1k_tokens_gemini: float = Field(
-        default=0.005,
-        description="Gemini の 1000 トークンあたりのコスト（USD）",
-    )
-    """Gemini Pro 概算コスト（デフォルト: $0.005/1K tokens）"""
+    def get_cli_default_models(self) -> dict[str, dict[str, str]]:
+        """CLI別のデフォルトモデルマッピングを返す。"""
+        return {
+            "claude": {
+                "admin": self.cli_default_claude_admin_model,
+                "worker": self.cli_default_claude_worker_model,
+            },
+            "codex": {
+                "admin": self.cli_default_codex_admin_model,
+                "worker": self.cli_default_codex_worker_model,
+            },
+            "gemini": {
+                "admin": self.cli_default_gemini_admin_model,
+                "worker": self.cli_default_gemini_worker_model,
+            },
+        }
+
+    def get_model_cost_table(self) -> dict[str, float]:
+        """モデル別コストテーブル（JSON）を辞書へ変換する。"""
+        try:
+            loaded = json.loads(self.model_cost_table_json)
+        except json.JSONDecodeError:
+            return {}
+        return {str(k): float(v) for k, v in loaded.items()}
+
+    def get_worker_cli(self, worker_index: int) -> AICli:
+        """Worker index(1..16) に対する CLI を取得する。"""
+        def _to_cli(value: str | AICli | None) -> AICli | None:
+            if value is None:
+                return None
+            if isinstance(value, AICli):
+                return value
+            return AICli(str(value).strip())
+
+        if self.worker_cli_mode == WorkerCliMode.UNIFORM:
+            return self.worker_cli_uniform
+        if not (1 <= worker_index <= 16):
+            raise ValueError(f"worker_index は 1..16 で指定してください: {worker_index}")
+        per_worker = getattr(self, f"worker_cli_{worker_index}")
+        parsed = _to_cli(per_worker)
+        return parsed or self.worker_cli_uniform
+
+    def get_worker_model(self, worker_index: int, profile_worker_model: str) -> str:
+        """Worker index(1..16) に対するモデルを取得する。
+
+        実運用では worker モデル個別指定は Worker CLI の per-worker モード時のみ有効。
+        """
+        if self.worker_cli_mode != WorkerCliMode.PER_WORKER:
+            return profile_worker_model
+        if not (1 <= worker_index <= 16):
+            raise ValueError(f"worker_index は 1..16 で指定してください: {worker_index}")
+        per_worker = getattr(self, f"worker_model_{worker_index}")
+        return per_worker or profile_worker_model
 
 
 # Settings シングルトンキャッシュ

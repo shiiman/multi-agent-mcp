@@ -114,6 +114,7 @@ class AiCliManager:
         role: str = "worker",
         role_template_path: str | None = None,
         thinking_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
         """AI CLIでstdinからタスクを読み込むコマンドを構築する。
 
@@ -126,6 +127,7 @@ class AiCliManager:
             role: エージェントのロール（"admin" or "worker"、モデル解決に使用）
             role_template_path: ロールテンプレートファイルパス（オプション）
             thinking_tokens: Extended Thinking のトークン数（0 で無効、None で省略）
+            reasoning_effort: 推論強度（low/medium/high/xhigh/none）
 
         Returns:
             実行コマンド文字列
@@ -136,19 +138,17 @@ class AiCliManager:
         cmd = self.get_command(cli)
 
         # Settings から CLI 別デフォルトモデルを構築
-        cli_defaults = {
-            "codex": {
-                "admin": self.settings.cli_default_codex_admin_model,
-                "worker": self.settings.cli_default_codex_worker_model,
-            },
-            "gemini": {
-                "admin": self.settings.cli_default_gemini_admin_model,
-                "worker": self.settings.cli_default_gemini_worker_model,
-            },
-        }
+        cli_defaults = self.settings.get_cli_default_models()
 
         # CLI に応じてモデル名を解決
         resolved_model = resolve_model_for_cli(cli.value, model, role, cli_defaults)
+
+        effort = (reasoning_effort or "none").lower()
+        valid_efforts = {"low", "medium", "high", "xhigh", "none"}
+        if effort not in valid_efforts:
+            raise ValueError(
+                "reasoning_effort は low/medium/high/xhigh/none のいずれかを指定してください"
+            )
 
         # 環境変数設定（プロジェクトルート + thinking tokens）
         env_parts = []
@@ -176,6 +176,10 @@ class AiCliManager:
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
+            if effort == "xhigh":
+                raise ValueError("Claude では reasoning_effort=xhigh は使用できません")
+            if effort in {"low", "medium", "high"}:
+                parts.extend(["--effort", effort])
             parts.append("--dangerously-skip-permissions")
             # Claude CLI はプロンプトを位置引数で受け取る（--prompt は未対応）。
             parts.append(quoted_prompt)
@@ -189,6 +193,8 @@ class AiCliManager:
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
+            if effort in {"low", "medium", "high", "xhigh"}:
+                parts.extend(["--reasoning-effort", effort])
             # Claude Code の --dangerously-skip-permissions 相当。
             # 外部サンドボックス前提で、Codex 側の確認プロンプトを抑止する。
             parts.append("--dangerously-bypass-approvals-and-sandbox")
@@ -205,6 +211,11 @@ class AiCliManager:
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
+            if effort != "none":
+                logger.warning(
+                    "Gemini CLI では reasoning_effort=%s は未対応のため無視します",
+                    effort,
+                )
             parts.append("--yolo")
             parts.extend(["--prompt", quoted_prompt])
             command = " ".join(parts)

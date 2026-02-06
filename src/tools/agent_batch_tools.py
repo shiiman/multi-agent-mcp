@@ -14,6 +14,7 @@ from src.tools.agent_helpers import (
     _create_worktree_for_worker,
     _post_create_agent,
     _send_task_to_worker,
+    resolve_worker_number_from_slot,
 )
 from src.tools.helpers import ensure_dashboard_manager, require_permission, save_agent_to_file
 from src.tools.model_profile import get_current_profile_settings
@@ -201,6 +202,8 @@ def register_batch_tools(mcp: FastMCP) -> None:
                         "worker_index": worker_index,
                     }
                 window_index, pane_index = assigned_slot
+                worker_no = resolve_worker_number_from_slot(settings, window_index, pane_index)
+                worker_cli = settings.get_worker_cli(worker_no)
 
                 if window_index > 0:
                     ok = await tmux.add_extra_worker_window(
@@ -233,7 +236,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     session_name=project_name,
                     window_index=window_index,
                     pane_index=pane_index,
-                    ai_cli=app_ctx.ai_cli.get_default_cli(),
+                    ai_cli=worker_cli,
                     created_at=now,
                     last_activity=now,
                 )
@@ -319,8 +322,12 @@ def register_batch_tools(mcp: FastMCP) -> None:
                 }
 
             worktree_path = worker.worktree_path or repo_path
-            if worker.ai_cli is None:
-                worker.ai_cli = app_ctx.ai_cli.get_default_cli()
+            worker_no = resolve_worker_number_from_slot(
+                settings,
+                worker.window_index or 0,
+                worker.pane_index or 0,
+            )
+            worker.ai_cli = settings.get_worker_cli(worker_no)
             if enable_worktree:
                 wt_path, wt_error = await _create_worktree_for_worker(
                     app_ctx, repo_path, branch, base_branch, worker_index

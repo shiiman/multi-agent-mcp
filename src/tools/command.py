@@ -20,6 +20,7 @@ from src.tools.helpers import (
     search_memory_context,
     sync_agents_from_file,
 )
+from src.tools.agent_helpers import resolve_worker_number_from_slot
 from src.tools.model_profile import get_current_profile_settings
 from src.tools.task_templates import generate_7section_task, generate_admin_task
 
@@ -161,6 +162,12 @@ def register_tools(mcp: FastMCP) -> None:
                 parsed = _extract_claude_statusline_cost(output)
                 if parsed:
                     actual_cost_usd, status_line = parsed
+                    profile_settings = get_current_profile_settings(app_ctx)
+                    model = (
+                        profile_settings.get("admin_model")
+                        if str(agent.role) == AgentRole.ADMIN.value
+                        else profile_settings.get("worker_model")
+                    )
                     dashboard = ensure_dashboard_manager(app_ctx)
                     latest_calls = dashboard.get_dashboard().cost.calls[-20:]
                     already_recorded = any(
@@ -170,6 +177,7 @@ def register_tools(mcp: FastMCP) -> None:
                     if not already_recorded:
                         dashboard.record_api_call(
                             ai_cli="claude",
+                            model=model,
                             estimated_tokens=app_ctx.settings.estimated_tokens_per_call,
                             agent_id=agent_id,
                             task_id=agent.current_task,
@@ -324,7 +332,16 @@ def register_tools(mcp: FastMCP) -> None:
         if agent.role == AgentRole.ADMIN.value:
             agent_model = profile_settings.get("admin_model")
         else:  # WORKER
-            agent_model = profile_settings.get("worker_model")
+            worker_model_default = profile_settings.get("worker_model")
+            try:
+                worker_no = resolve_worker_number_from_slot(
+                    app_ctx.settings,
+                    agent.window_index or 0,
+                    agent.pane_index or 0,
+                )
+                agent_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
+            except Exception:
+                agent_model = worker_model_default
 
         # ロール名を build_stdin_command に渡す
         agent_role_name = "admin" if agent.role == AgentRole.ADMIN.value else "worker"
@@ -332,19 +349,28 @@ def register_tools(mcp: FastMCP) -> None:
         # Extended Thinking トークン数をプロファイル設定から取得
         if agent.role == AgentRole.ADMIN.value:
             thinking_tokens = profile_settings.get("admin_thinking_tokens", 4000)
+            reasoning_effort = profile_settings.get("admin_reasoning_effort", "none")
         else:
             thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
+            reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
 
-        read_command = app_ctx.ai_cli.build_stdin_command(
-            cli=agent_cli,
-            task_file_path=str(task_file),
-            worktree_path=agent.worktree_path,
-            project_root=str(project_root),  # MCP_PROJECT_ROOT 環境変数用
-            model=agent_model,
-            role=agent_role_name,
-            role_template_path=str(get_role_template_path(agent_role_name)),
-            thinking_tokens=thinking_tokens,
-        )
+        try:
+            read_command = app_ctx.ai_cli.build_stdin_command(
+                cli=agent_cli,
+                task_file_path=str(task_file),
+                worktree_path=agent.worktree_path,
+                project_root=str(project_root),  # MCP_PROJECT_ROOT 環境変数用
+                model=agent_model,
+                role=agent_role_name,
+                role_template_path=str(get_role_template_path(agent_role_name)),
+                thinking_tokens=thinking_tokens,
+                reasoning_effort=reasoning_effort,
+            )
+        except ValueError as e:
+            return {
+                "success": False,
+                "error": f"CLIコマンド生成に失敗しました: {e}",
+            }
         # tmux ペインが設定されていない場合（Owner）はエラー
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
             return {
@@ -372,6 +398,7 @@ def register_tools(mcp: FastMCP) -> None:
                 )
                 dashboard.record_api_call(
                     ai_cli=agent_cli,
+                    model=agent_model,
                     estimated_tokens=thinking_tokens,
                     agent_id=agent_id,
                     task_id=session_id,

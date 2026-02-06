@@ -89,6 +89,7 @@ class ApiCallRecord(BaseModel):
     """API呼び出し記録。"""
 
     ai_cli: str = Field(..., description="使用したAI CLI（claude/codex/gemini）")
+    model: str | None = Field(default=None, description="使用モデル")
     tokens: int = Field(..., description="推定トークン数")
     estimated_cost_usd: float = Field(default=0.0, description="推定コスト（USD）")
     actual_cost_usd: float | None = Field(default=None, description="実測コスト（USD）")

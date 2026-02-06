@@ -99,7 +99,7 @@ def _resolve_tmux_session_name(agent: Agent) -> str | None:
 def _resolve_agent_cli_name(agent: Agent, app_ctx: AppContext) -> str:
     """Agent の CLI 名を文字列で返す。"""
     if agent.ai_cli:
-        return str(agent.ai_cli)
+        return agent.ai_cli.value if hasattr(agent.ai_cli, "value") else str(agent.ai_cli)
     return str(app_ctx.ai_cli.get_default_cli().value)
 
 
@@ -108,6 +108,14 @@ def _build_change_directory_command(cli_name: str, worktree_path: str) -> str:
     if cli_name == AICli.CLAUDE.value:
         return f"!cd {worktree_path}"
     return f"cd {worktree_path}"
+
+
+def resolve_worker_number_from_slot(settings: Settings, window_index: int, pane_index: int) -> int:
+    """tmux slot から Worker 番号（1..16）を計算する。"""
+    if window_index == 0:
+        return pane_index
+    workers_per_extra = settings.workers_per_extra_window
+    return 6 + ((window_index - 1) * workers_per_extra) + pane_index + 1
 
 
 def _validate_agent_creation(
@@ -401,8 +409,16 @@ async def _send_task_to_worker(
 
             # コスト記録（Worker CLI 起動）
             try:
+                worker_model_default = profile_settings.get("worker_model")
+                worker_no = resolve_worker_number_from_slot(
+                    app_ctx.settings,
+                    agent.window_index or 0,
+                    agent.pane_index or 0,
+                )
+                worker_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
                 dashboard.record_api_call(
                     ai_cli=agent_cli_name,
+                    model=worker_model,
                     estimated_tokens=profile_settings.get("worker_thinking_tokens", 4000),
                     agent_id=agent.id,
                     task_id=effective_task_id,
@@ -420,5 +436,3 @@ async def _send_task_to_worker(
     except Exception as e:
         logger.warning(f"Worker {worker_index + 1}: タスク送信エラー - {e}")
         return False
-
-

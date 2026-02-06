@@ -6,6 +6,7 @@ import src.config.settings as settings_module
 from src.config.settings import (
     AICli,
     ModelDefaults,
+    WorkerCliMode,
     get_mcp_dir,
     get_project_env_file,
     load_settings_for_project,
@@ -110,10 +111,14 @@ class TestGenerateEnvTemplate:
     def test_template_contains_cli_default_models(self):
         """テンプレートに CLI 別デフォルトモデル設定が含まれることをテスト。"""
         template = generate_env_template()
+        assert "MCP_CLI_DEFAULT_CLAUDE_ADMIN_MODEL" in template
+        assert "MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL" in template
         assert "MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_CODEX_WORKER_MODEL" in template
         assert "MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL" in template
+        assert ModelDefaults.OPUS in template
+        assert ModelDefaults.SONNET in template
         assert ModelDefaults.CODEX_DEFAULT in template
         assert ModelDefaults.GEMINI_DEFAULT in template
         assert ModelDefaults.GEMINI_LIGHT in template
@@ -125,11 +130,32 @@ class TestGenerateEnvTemplate:
         assert "MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS" in template
         assert "MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS" in template
         assert "MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_REASONING_EFFORT" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_WORKER_REASONING_EFFORT" in template
 
     def test_template_contains_cost_settings(self):
         """テンプレートにコスト設定が含まれることをテスト。"""
         template = generate_env_template()
         assert "MCP_COST_WARNING_THRESHOLD_USD" in template
+        assert "MCP_MODEL_COST_TABLE_JSON" in template
+        assert "MCP_MODEL_COST_DEFAULT_PER_1K" in template
+        assert "MCP_COST_PER_1K_TOKENS_" not in template
+
+    def test_template_contains_worker_cli_mode(self):
+        """テンプレートに Worker CLI モード設定が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_WORKER_CLI_MODE" in template
+        assert "MCP_WORKER_CLI_1" in template
+        assert "MCP_WORKER_CLI_16" in template
+        assert "MCP_WORKER_CLI_1=claude" in template
+
+    def test_template_contains_worker_model_mode(self):
+        """テンプレートに Worker モデル設定が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_WORKER_MODEL_1" in template
+        assert "MCP_WORKER_MODEL_16" in template
 
     def test_template_contains_healthcheck_settings(self):
         """テンプレートにヘルスチェック設定が含まれることをテスト。"""
@@ -186,6 +212,36 @@ class TestLoadSettingsForProject:
 
         assert settings.model_profile_standard_cli == AICli.CLAUDE
         assert settings.model_profile_standard_admin_model == ModelDefaults.OPUS
+
+
+class TestWorkerCliAndModelResolution:
+    """Worker CLI / モデル解決ロジックのテスト。"""
+
+    def test_get_worker_cli_uniform(self):
+        settings = load_settings_for_project(None)
+        settings.worker_cli_mode = WorkerCliMode.UNIFORM
+        settings.worker_cli_uniform = AICli.CODEX
+        assert settings.get_worker_cli(1) == AICli.CODEX
+        assert settings.get_worker_cli(16) == AICli.CODEX
+
+    def test_get_worker_cli_per_worker(self):
+        settings = load_settings_for_project(None)
+        settings.worker_cli_mode = WorkerCliMode.PER_WORKER
+        settings.worker_cli_uniform = AICli.CLAUDE
+        settings.worker_cli_2 = "gemini"
+        assert settings.get_worker_cli(1) == AICli.CLAUDE
+        assert settings.get_worker_cli(2) == AICli.GEMINI
+
+    def test_get_worker_model_depends_on_worker_cli_mode(self):
+        settings = load_settings_for_project(None)
+        settings.worker_cli_mode = WorkerCliMode.UNIFORM
+        settings.worker_model_1 = "gpt-5.3-codex"
+        assert settings.get_worker_model(1, "opus") == "opus"
+
+        settings.worker_cli_mode = WorkerCliMode.PER_WORKER
+        settings.worker_model_3 = "gemini-3-pro"
+        assert settings.get_worker_model(3, "opus") == "gemini-3-pro"
+        assert settings.get_worker_model(4, "opus") == "opus"
 
 
 class TestSetupMcpDirectories:

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config.settings import Settings
+from src.tools.helpers_git import resolve_main_repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,16 @@ def generate_env_template() -> str:
     # 長い変数名の値を事前に取得（E501 対策）
     std_admin_think = v(s.model_profile_standard_admin_thinking_tokens)
     std_worker_think = v(s.model_profile_standard_worker_thinking_tokens)
+    std_admin_effort = v(s.model_profile_standard_admin_reasoning_effort)
+    std_worker_effort = v(s.model_profile_standard_worker_reasoning_effort)
     perf_admin_think = v(
         s.model_profile_performance_admin_thinking_tokens
     )
     perf_worker_think = v(
         s.model_profile_performance_worker_thinking_tokens
     )
+    perf_admin_effort = v(s.model_profile_performance_admin_reasoning_effort)
+    perf_worker_effort = v(s.model_profile_performance_worker_reasoning_effort)
 
     return f"""# Multi-Agent MCP プロジェクト設定
 # 環境変数で上書きされます（環境変数 > .env > デフォルト）
@@ -66,11 +71,6 @@ MCP_WINDOW_NAME_MAIN={v(s.window_name_main)}
 # 追加 Worker ウィンドウ名のプレフィックス（workers-2, workers-3, ...）
 MCP_WINDOW_NAME_WORKER_PREFIX={v(s.window_name_worker_prefix)}
 
-# メインウィンドウの Worker エリア設定（左右50:50分離）
-MCP_MAIN_WORKER_ROWS={v(s.main_worker_rows)}
-MCP_MAIN_WORKER_COLS={v(s.main_worker_cols)}
-MCP_WORKERS_PER_MAIN_WINDOW={v(s.workers_per_main_window)}
-
 # 追加ウィンドウの設定（Worker 7 以降）
 MCP_EXTRA_WORKER_ROWS={v(s.extra_worker_rows)}
 MCP_EXTRA_WORKER_COLS={v(s.extra_worker_cols)}
@@ -84,28 +84,70 @@ MCP_DEFAULT_TERMINAL={v(s.default_terminal)}
 # 現在のプロファイル（standard / performance）
 MCP_MODEL_PROFILE_ACTIVE={v(s.model_profile_active)}
 
+# uniform: 全 Worker 同じCLI / per-worker: Worker 1..16 を個別設定
+MCP_WORKER_CLI_MODE={v(s.worker_cli_mode)}
+
 # standard プロファイル設定（バランス重視）
-# Admin は Opus、Worker は Sonnet（Claude CLI の場合）
-# CLI を変更した場合、Claude 固有モデル名は CLI デフォルトに解決されます
 MCP_MODEL_PROFILE_STANDARD_CLI={v(s.model_profile_standard_cli)}
 MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL={v(s.model_profile_standard_admin_model)}
 MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL={v(s.model_profile_standard_worker_model)}
 MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS={v(s.model_profile_standard_max_workers)}
 MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS={std_admin_think}
 MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS={std_worker_think}
+MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT={std_admin_effort}
+MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT={std_worker_effort}
 
 # performance プロファイル設定（性能重視）
-# Admin/Worker ともに Opus（Claude CLI の場合）
-# CLI を変更した場合、Claude 固有モデル名は CLI デフォルトに解決されます
 MCP_MODEL_PROFILE_PERFORMANCE_CLI={v(s.model_profile_performance_cli)}
 MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL={v(s.model_profile_performance_admin_model)}
 MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL={v(s.model_profile_performance_worker_model)}
 MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS={v(s.model_profile_performance_max_workers)}
 MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS={perf_admin_think}
 MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS={perf_worker_think}
+MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_REASONING_EFFORT={perf_admin_effort}
+MCP_MODEL_PROFILE_PERFORMANCE_WORKER_REASONING_EFFORT={perf_worker_effort}
+
+# ========== Worker CLI モード ==========
+# MCP_WORKER_CLI_MODEがper-workerの時のみ有効
+MCP_WORKER_CLI_1={v(s.worker_cli_1) if s.worker_cli_1 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_1={v(s.worker_model_1) if s.worker_model_1 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_2={v(s.worker_cli_2) if s.worker_cli_2 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_2={v(s.worker_model_2) if s.worker_model_2 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_3={v(s.worker_cli_3) if s.worker_cli_3 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_3={v(s.worker_model_3) if s.worker_model_3 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_4={v(s.worker_cli_4) if s.worker_cli_4 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_4={v(s.worker_model_4) if s.worker_model_4 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_5={v(s.worker_cli_5) if s.worker_cli_5 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_5={v(s.worker_model_5) if s.worker_model_5 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_6={v(s.worker_cli_6) if s.worker_cli_6 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_6={v(s.worker_model_6) if s.worker_model_6 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_7={v(s.worker_cli_7) if s.worker_cli_7 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_7={v(s.worker_model_7) if s.worker_model_7 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_8={v(s.worker_cli_8) if s.worker_cli_8 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_8={v(s.worker_model_8) if s.worker_model_8 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_9={v(s.worker_cli_9) if s.worker_cli_9 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_9={v(s.worker_model_9) if s.worker_model_9 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_10={v(s.worker_cli_10) if s.worker_cli_10 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_10={v(s.worker_model_10) if s.worker_model_10 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_11={v(s.worker_cli_11) if s.worker_cli_11 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_11={v(s.worker_model_11) if s.worker_model_11 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_12={v(s.worker_cli_12) if s.worker_cli_12 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_12={v(s.worker_model_12) if s.worker_model_12 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_13={v(s.worker_cli_13) if s.worker_cli_13 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_13={v(s.worker_model_13) if s.worker_model_13 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_14={v(s.worker_cli_14) if s.worker_cli_14 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_14={v(s.worker_model_14) if s.worker_model_14 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_15={v(s.worker_cli_15) if s.worker_cli_15 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_15={v(s.worker_model_15) if s.worker_model_15 else v(s.model_profile_performance_worker_model)}
+MCP_WORKER_CLI_16={v(s.worker_cli_16) if s.worker_cli_16 else v(s.worker_cli_uniform)}
+MCP_WORKER_MODEL_16={v(s.worker_model_16) if s.worker_model_16 else v(s.model_profile_performance_worker_model)}
 
 # ========== CLI 別デフォルトモデル ==========
-# Claude 固有モデル名（opus, sonnet 等）が非 Claude CLI で使われた場合のフォールバック先
+# CLIとMODELが誤った組み合わせになっていた場合、デフォルトモデルに置き換えられる
+# Claude CLI
+MCP_CLI_DEFAULT_CLAUDE_ADMIN_MODEL={v(s.cli_default_claude_admin_model)}
+MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL={v(s.cli_default_claude_worker_model)}
+
 # Codex CLI
 MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL={v(s.cli_default_codex_admin_model)}
 MCP_CLI_DEFAULT_CODEX_WORKER_MODEL={v(s.cli_default_codex_worker_model)}
@@ -121,10 +163,9 @@ MCP_COST_WARNING_THRESHOLD_USD={v(s.cost_warning_threshold_usd)}
 # 1回の API 呼び出しあたりの推定トークン数
 MCP_ESTIMATED_TOKENS_PER_CALL={v(s.estimated_tokens_per_call)}
 
-# 1000 トークンあたりのコスト（USD）
-MCP_COST_PER_1K_TOKENS_CLAUDE={v(s.cost_per_1k_tokens_claude)}
-MCP_COST_PER_1K_TOKENS_CODEX={v(s.cost_per_1k_tokens_codex)}
-MCP_COST_PER_1K_TOKENS_GEMINI={v(s.cost_per_1k_tokens_gemini)}
+# モデル別 1000トークン単価テーブル（JSON）
+MCP_MODEL_COST_TABLE_JSON={v(s.model_cost_table_json)}
+MCP_MODEL_COST_DEFAULT_PER_1K={v(s.model_cost_default_per_1k)}
 
 # ========== ヘルスチェック設定 ==========
 # ヘルスチェックの間隔（秒）- Admin が Worker の状態を確認する間隔
@@ -169,7 +210,12 @@ def _setup_mcp_directories(
     if settings is None:
         settings = Settings()
 
-    mcp_dir = Path(working_dir) / settings.mcp_dir
+    try:
+        project_root = Path(resolve_main_repo_root(working_dir))
+    except ValueError:
+        project_root = Path(working_dir).expanduser()
+
+    mcp_dir = project_root / settings.mcp_dir
     created_dirs = []
 
     # memory ディレクトリ作成
@@ -239,6 +285,5 @@ def _setup_mcp_directories(
         "env_path": str(env_file),
         "config_created": config_created,
         "config_path": str(config_file),
+        "project_root": str(project_root),
     }
-
-

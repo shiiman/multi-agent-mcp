@@ -189,11 +189,12 @@ class TestBuildStdinCommandWithModel:
         assert "opus" in cmd
 
     def test_build_stdin_command_no_model(self, ai_cli_manager):
-        """model=None の場合 --model が含まれないことをテスト。"""
+        """model=None の場合 CLI デフォルトモデルが使われることをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
         )
-        assert "--model" not in cmd
+        assert "--model" in cmd
+        assert ModelDefaults.CODEX_DEFAULT in cmd
 
     def test_build_stdin_command_codex_no_exec_even_for_large_task_path(
         self, ai_cli_manager, tmp_path
@@ -241,12 +242,19 @@ class TestResolveModelForCli:
         """明示指定されたモデル名は変換されないことをテスト。"""
         assert resolve_model_for_cli("codex", "gpt-5.3-codex", "worker") == "gpt-5.3-codex"
         assert resolve_model_for_cli("gemini", "gemini-3-pro", "admin") == "gemini-3-pro"
+        assert resolve_model_for_cli("claude", "claude-opus-4-6", "admin") == "claude-opus-4-6"
+
+    def test_explicit_model_mismatch_converted_to_cli_default(self):
+        """CLI とモデルが不一致なら CLI デフォルトへ置換されることをテスト。"""
+        assert resolve_model_for_cli("codex", "gemini-3-pro", "admin") == ModelDefaults.CODEX_DEFAULT
+        assert resolve_model_for_cli("gemini", "gpt-5.3-codex", "worker") == ModelDefaults.GEMINI_LIGHT
+        assert resolve_model_for_cli("claude", "gemini-3-pro", "worker") == ModelDefaults.SONNET
 
     def test_none_model_returns_none(self):
-        """model=None の場合 None を返すことをテスト。"""
-        assert resolve_model_for_cli("claude", None) is None
-        assert resolve_model_for_cli("codex", None) is None
-        assert resolve_model_for_cli("gemini", None) is None
+        """model=None の場合 CLI デフォルトを返すことをテスト。"""
+        assert resolve_model_for_cli("claude", None) == ModelDefaults.SONNET
+        assert resolve_model_for_cli("codex", None) == ModelDefaults.CODEX_DEFAULT
+        assert resolve_model_for_cli("gemini", None) == ModelDefaults.GEMINI_LIGHT
 
     def test_custom_cli_defaults_override(self):
         """cli_defaults を渡すとハードコード値を上書きできることをテスト。"""
@@ -323,6 +331,38 @@ class TestBuildStdinCommandWithThinkingTokens:
             thinking_tokens=thinking_tokens,
         )
         assert "MAX_THINKING_TOKENS=2000" in cmd
+
+
+class TestBuildStdinCommandWithReasoningEffort:
+    """build_stdin_command の reasoning effort テスト。"""
+
+    def test_claude_with_high_effort(self, ai_cli_manager):
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+            reasoning_effort="high",
+        )
+        assert "--effort high" in cmd
+
+    def test_claude_with_xhigh_raises(self, ai_cli_manager):
+        with pytest.raises(ValueError):
+            ai_cli_manager.build_stdin_command(
+                AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+                reasoning_effort="xhigh",
+            )
+
+    def test_codex_with_xhigh(self, ai_cli_manager):
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
+            reasoning_effort="xhigh",
+        )
+        assert "--reasoning-effort xhigh" in cmd
+
+    def test_none_effort_is_omitted(self, ai_cli_manager):
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
+            reasoning_effort="none",
+        )
+        assert "--reasoning-effort" not in cmd
 
 
 class TestAiCliManagerTerminal:

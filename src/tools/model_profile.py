@@ -30,6 +30,8 @@ def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str
             "max_workers": settings.model_profile_standard_max_workers,
             "admin_thinking_tokens": settings.model_profile_standard_admin_thinking_tokens,
             "worker_thinking_tokens": settings.model_profile_standard_worker_thinking_tokens,
+            "admin_reasoning_effort": settings.model_profile_standard_admin_reasoning_effort.value,
+            "worker_reasoning_effort": settings.model_profile_standard_worker_reasoning_effort.value,
         }
     else:  # PERFORMANCE
         return {
@@ -40,6 +42,8 @@ def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str
             "max_workers": settings.model_profile_performance_max_workers,
             "admin_thinking_tokens": settings.model_profile_performance_admin_thinking_tokens,
             "worker_thinking_tokens": settings.model_profile_performance_worker_thinking_tokens,
+            "admin_reasoning_effort": settings.model_profile_performance_admin_reasoning_effort.value,
+            "worker_reasoning_effort": settings.model_profile_performance_worker_reasoning_effort.value,
         }
 
 
@@ -83,6 +87,14 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "active_profile": settings.model_profile_active.value,
             "settings": current_settings,
+            "worker_cli": {
+                "mode": settings.worker_cli_mode.value,
+                "uniform": settings.worker_cli_uniform.value,
+            },
+            "worker_model": {
+                "mode": settings.worker_model_mode.value,
+                "uniform": settings.worker_model_uniform,
+            },
             "available_profiles": [p.value for p in ModelProfile],
         }
 
@@ -182,5 +194,13 @@ def register_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "active_profile": settings.model_profile_active.value,
+                "worker_cli": {
+                    "mode": settings.worker_cli_mode.value,
+                    "uniform": settings.worker_cli_uniform.value,
+                },
+                "worker_model": {
+                    "mode": settings.worker_model_mode.value,
+                    "uniform": settings.worker_model_uniform,
+                },
                 "profiles": all_profiles,
             }
