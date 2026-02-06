@@ -172,12 +172,13 @@ class AiCliManager:
 
         if cli == AICli.CLAUDE:
             # export MCP_PROJECT_ROOT=... && cd <path> &&
-            # claude --model <model> --dangerously-skip-permissions --prompt "<instruction>"
+            # claude --model <model> --dangerously-skip-permissions "<instruction>"
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
             parts.append("--dangerously-skip-permissions")
-            parts.extend(["--prompt", quoted_prompt])
+            # Claude CLI はプロンプトを位置引数で受け取る（--prompt は未対応）。
+            parts.append(quoted_prompt)
             command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
@@ -233,7 +234,7 @@ class AiCliManager:
         # CLI固有のオプション（worktree_path は呼び出し側で cwd として使用）
         if cli == AICli.CLAUDE:
             if prompt:
-                args.extend(["--prompt", prompt])
+                args.append(prompt)
         elif cli == AICli.CODEX:
             if prompt:
                 args.append(prompt)

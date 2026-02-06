@@ -695,6 +695,7 @@ class TestSendTaskToWorker:
             app_ctx=app_ctx,
             agent=worker,
             task_content="テスト実装を進めてください",
+            task_id="task-001",
             branch="feature/test",
             worktree_path=str(git_repo),
             session_id="issue-worker-role-separation",
@@ -714,3 +715,48 @@ class TestSendTaskToWorker:
         )
         task_text = task_path.read_text(encoding="utf-8")
         assert "# Multi-Agent MCP - Worker Agent" not in task_text
+        assert "# Task: task-001" in task_text
+        assert 'task_id="task-001"' in task_text
+
+    @pytest.mark.asyncio
+    async def test_send_task_to_worker_fails_without_task_id(self, mock_ctx, git_repo):
+        """task_id 未指定時は Worker 送信が失敗することをテスト。"""
+        from src.tools.agent import _send_task_to_worker
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+
+        worker = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.2",
+            session_name="test",
+            window_index=0,
+            pane_index=2,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-002"] = worker
+
+        profile_settings = {
+            "worker_model": "gpt-5.3-codex",
+            "worker_thinking_tokens": 4000,
+        }
+
+        success = await _send_task_to_worker(
+            app_ctx=app_ctx,
+            agent=worker,
+            task_content="テスト実装を進めてください",
+            task_id=None,
+            branch="feature/test",
+            worktree_path=str(git_repo),
+            session_id="issue-worker-role-separation",
+            worker_index=1,
+            enable_worktree=False,
+            profile_settings=profile_settings,
+            caller_agent_id="admin-001",
+        )
+
+        assert success is False

@@ -382,8 +382,33 @@ class TestMarkdownDashboard:
         dashboard_manager._write_dashboard(dashboard)
 
         md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "| ID | 名前 | 役割 | 状態 | 現在のタスク | worktree |" in md_content
+        assert "`worker-001`" in md_content
         assert "`worktrees/feature-worker-1`" in md_content
         assert str(temp_dir) not in md_content
+
+    def test_task_assignee_is_rendered_as_agent_label(self, dashboard_manager, temp_dir):
+        """タスク担当が agent_id ではなく表示名で描画されることをテスト。"""
+        dashboard = dashboard_manager.get_dashboard()
+        dashboard.agents.append(
+            AgentSummary(
+                agent_id="worker-001",
+                role="worker",
+                status="busy",
+                current_task_id=None,
+                worktree_path=str(temp_dir / "worktrees" / "feature-worker-1"),
+                branch=None,
+                last_activity=datetime.now(),
+            )
+        )
+        dashboard_manager._write_dashboard(dashboard)
+
+        dashboard_manager.create_task(
+            title="Assigned Task",
+            assigned_agent_id="worker-001",
+        )
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "`worker1`" in md_content
 
     def test_task_details_hidden_when_only_progress_exists(self, dashboard_manager):
         """補足情報なし（進捗のみ）のタスクでは詳細セクションを表示しないことをテスト。"""
@@ -451,8 +476,10 @@ class TestMarkdownDashboard:
         messages_path = md_path.parent / "messages.md"
         assert messages_path.exists()
         messages_content = messages_path.read_text(encoding="utf-8")
-        assert "`worker1`" in messages_content
-        assert "`admin`" in messages_content
+        assert "## メッセージ履歴" in messages_content
+        assert "## メッセージ本文" not in messages_content
+        assert "| 時刻 | 種類 | 送信元 | 宛先 | 件名 |" not in messages_content
+        assert "worker1 -> admin" in messages_content
         assert "<details open>" in messages_content
         assert "詳細本文のテストメッセージです。" in messages_content
 

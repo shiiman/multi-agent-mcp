@@ -263,8 +263,8 @@ class DashboardManager(DashboardCostMixin):
             "",
             "## エージェント状態",
             "",
-            "| 役割 | 名前 | 状態 | 現在のタスク | Worktree |",
-            "|:---|:---|:---|:---|:---|",
+            "| ID | 名前 | 役割 | 状態 | 現在のタスク | worktree |",
+            "|:---|:---|:---|:---|:---|:---|",
         ]
 
         for agent in dashboard.agents:
@@ -275,7 +275,7 @@ class DashboardManager(DashboardCostMixin):
                 agent.worktree_path, dashboard.workspace_path
             )
             lines.append(
-                f"| {agent.role} | `{name}` | {emoji} {agent.status} | "
+                f"| `{agent.agent_id}` | `{name}` | {agent.role} | {emoji} {agent.status} | "
                 f"{current_task} | `{worktree}` |"
             )
 
@@ -301,10 +301,15 @@ class DashboardManager(DashboardCostMixin):
             "| ID | タイトル | 状態 | 担当 | 進捗 |",
             "|:---|:---|:---|:---|:---|",
         ]
+        agent_labels = self._build_agent_label_map(dashboard)
 
         for task in dashboard.tasks:
             emoji = task_emoji.get(str(task.status.value).lower(), "❓")
-            assigned = task.assigned_agent_id[:8] if task.assigned_agent_id else "-"
+            assigned = self._format_agent_display(
+                task.assigned_agent_id,
+                agent_labels,
+                with_id=False,
+            ) if task.assigned_agent_id else "-"
             lines.append(
                 f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
                 f"`{assigned}` | {task.progress}% |"
@@ -380,27 +385,7 @@ class DashboardManager(DashboardCostMixin):
         }
         agent_labels = self._build_agent_label_map(dashboard)
 
-        lines.extend([
-            "## メッセージ履歴",
-            "",
-            "| 時刻 | 種類 | 送信元 | 宛先 | 件名 |",
-            "|:---|:---|:---|:---|:---|",
-        ])
-        for msg in dashboard.messages:
-            time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
-            emoji = type_emoji.get(msg.message_type, "📨")
-            sender = self._format_agent_display(msg.sender_id, agent_labels, with_id=False)
-            receiver = self._format_agent_display(msg.receiver_id, agent_labels, with_id=False)
-            subject = msg.subject if msg.subject else msg.content
-            subject = subject.replace("\n", " ").replace("|", "\\|")
-            if len(subject) > 100:
-                subject = f"{subject[:100]}..."
-            lines.append(
-                f"| {time_str} | {emoji} {msg.message_type} | "
-                f"`{sender}` | `{receiver}` | {subject} |"
-            )
-
-        lines.extend(["", "## メッセージ本文"])
+        lines.extend(["## メッセージ履歴"])
         for msg in dashboard.messages:
             time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
             emoji = type_emoji.get(msg.message_type, "📨")

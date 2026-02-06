@@ -321,6 +321,7 @@ async def _send_task_to_worker(
     app_ctx: AppContext,
     agent: Agent,
     task_content: str,
+    task_id: str | None,
     branch: str,
     worktree_path: str,
     session_id: str,
@@ -332,6 +333,13 @@ async def _send_task_to_worker(
     """Worker にタスクを送信する。"""
     try:
         project_root = Path(resolve_main_repo_root(worktree_path))
+        if not task_id:
+            logger.warning(
+                "Worker %s へのタスク送信を中止: task_id が未指定です",
+                worker_index + 1,
+            )
+            return False
+        effective_task_id = task_id
 
         # メモリから関連情報を検索
         memory_context = search_memory_context(app_ctx, task_content)
@@ -343,7 +351,7 @@ async def _send_task_to_worker(
         # 7セクション構造のタスクを生成
         mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
         final_task_content = generate_7section_task(
-            task_id=session_id,
+            task_id=effective_task_id,
             agent_id=agent.id,
             task_description=task_content,
             persona_name=persona.name,
@@ -394,7 +402,7 @@ async def _send_task_to_worker(
                     ai_cli=agent_cli or "claude",
                     estimated_tokens=profile_settings.get("worker_thinking_tokens", 4000),
                     agent_id=agent.id,
-                    task_id=session_id,
+                    task_id=effective_task_id,
                 )
             except Exception:
                 pass
@@ -1060,7 +1068,7 @@ def register_tools(mcp: FastMCP) -> None:
                 task_content = config.get("task_content")
                 if task_content and session_id:
                     task_sent = await _send_task_to_worker(
-                        app_ctx, agent, task_content, branch, worktree_path,
+                        app_ctx, agent, task_content, task_id, branch, worktree_path,
                         session_id, worker_index, enable_worktree,
                         profile_settings, caller_agent_id,
                     )

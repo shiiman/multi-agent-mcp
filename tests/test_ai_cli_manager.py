@@ -69,11 +69,12 @@ class TestBuildStdinCommand:
         )
         assert "claude" in cmd
         assert "--dangerously-skip-permissions" in cmd
-        assert "--prompt" in cmd
+        assert "--prompt" not in cmd
         # Claude CLI は --directory オプションがないため、cd で移動する
         assert "cd" in cmd
         assert "/path/to/worktree" in cmd
         assert "/tmp/task.md" in cmd
+        assert "あなたの役割は" in cmd
         assert "< /tmp/task.md" not in cmd
 
     def test_build_stdin_command_codex(self, ai_cli_manager):

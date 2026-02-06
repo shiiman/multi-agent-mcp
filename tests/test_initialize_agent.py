@@ -223,20 +223,20 @@ class TestBuildCliArgsWithPrompt:
     """プロンプト付き CLI 引数構築のテスト。"""
 
     def test_claude_with_prompt(self, ai_cli_manager):
-        """Claude CLI でプロンプトが --prompt オプションで渡されることをテスト。"""
+        """Claude CLI でプロンプトが位置引数で渡されることをテスト。"""
         args = ai_cli_manager._build_cli_args(
             AICli.CLAUDE, "/tmp/test", "テストプロンプト"
         )
-        assert "--prompt" in args
-        assert "テストプロンプト" in args
+        assert "--prompt" not in args
+        assert args[-1] == "テストプロンプト"
 
     def test_codex_with_prompt(self, ai_cli_manager):
-        """Codex CLI でプロンプトが --message オプションで渡されることをテスト。"""
+        """Codex CLI でプロンプトが位置引数で渡されることをテスト。"""
         args = ai_cli_manager._build_cli_args(
             AICli.CODEX, "/tmp/test", "テストプロンプト"
         )
-        assert "--message" in args
-        assert "テストプロンプト" in args
+        assert "--message" not in args
+        assert args[-1] == "テストプロンプト"
 
     def test_gemini_with_prompt(self, ai_cli_manager):
         """Gemini CLI でプロンプトが --prompt オプションで渡されることをテスト。"""
