@@ -58,14 +58,21 @@ class DashboardManager(DashboardCostMixin):
         self.dashboard_dir = Path(dashboard_dir)
 
     def initialize(self) -> None:
-        """ダッシュボード環境を初期化する。"""
+        """ダッシュボード環境を初期化する。
+
+        既存のダッシュボードファイルがある場合は上書きしない。
+        これにより、Worker の MCP プロセスが初回アクセス時に
+        Admin が作成済みのデータを消失させることを防ぐ。
+        """
         self.dashboard_dir.mkdir(parents=True, exist_ok=True)
-        # 初期ダッシュボードを作成して保存
-        dashboard = Dashboard(
-            workspace_id=self.workspace_id,
-            workspace_path=self.workspace_path,
-        )
-        self._write_dashboard(dashboard)
+        dashboard_path = self._get_dashboard_path()
+        if not dashboard_path.exists():
+            # ファイルがない場合のみ初期ダッシュボードを作成
+            dashboard = Dashboard(
+                workspace_id=self.workspace_id,
+                workspace_path=self.workspace_path,
+            )
+            self._write_dashboard(dashboard)
         logger.info(f"ダッシュボード環境を初期化しました: {self.dashboard_dir}")
 
     def cleanup(self) -> None:

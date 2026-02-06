@@ -252,6 +252,26 @@ def _setup_mcp_directories(
     }
 
 
+def _reset_app_context(app_ctx: AppContext) -> None:
+    """アプリケーションコンテキストのインメモリ状態をリセットする。
+
+    cleanup_workspace / cleanup_on_completion から呼び出される。
+    session_id, project_root, 各種 manager をリセットすることで、
+    次のセッションで古い値が使われることを防ぐ。
+    """
+    app_ctx.session_id = None
+    app_ctx.project_root = None
+    app_ctx.workspace_id = None
+    app_ctx.ipc_manager = None
+    app_ctx.dashboard_manager = None
+    app_ctx.scheduler_manager = None
+    app_ctx.healthcheck_manager = None
+    app_ctx.persona_manager = None
+    app_ctx.memory_manager = None
+    app_ctx.worktree_managers.clear()
+    app_ctx.gtrconfig_managers.clear()
+
+
 def register_tools(mcp: FastMCP) -> None:
     """セッション管理ツールを登録する。"""
 
@@ -322,6 +342,9 @@ def register_tools(mcp: FastMCP) -> None:
         terminated_count = await tmux.cleanup_all_sessions()
         agent_count = len(agents)
         agents.clear()
+
+        # インメモリ状態をリセット（次のセッションで古い値が使われることを防ぐ）
+        _reset_app_context(app_ctx)
 
         return {
             "success": True,
@@ -480,6 +503,9 @@ def register_tools(mcp: FastMCP) -> None:
         # ブランチ削除は WorktreeManager.remove_worktree が自動で行う
         # (gtr rm または native 実装で worker- ブランチを削除)
 
+        # インメモリ状態をリセット（次のセッションで古い値が使われることを防ぐ）
+        _reset_app_context(app_ctx)
+
         result = {
             "success": True,
             "terminated_sessions": terminated_count,
@@ -637,6 +663,14 @@ def register_tools(mcp: FastMCP) -> None:
         # project_root を設定（screenshot 等で使用）
         app_ctx.project_root = working_dir
         logger.info(f"project_root を設定しました: {working_dir}")
+
+        # Dashboard マネージャーを初期化（Owner のみが行う）
+        # Worker の MCP プロセスでは initialize() を呼ばないため、
+        # ここで明示的にディレクトリとファイルを作成する
+        from src.tools.helpers_managers import ensure_dashboard_manager
+
+        dashboard = ensure_dashboard_manager(app_ctx)
+        dashboard.initialize()
 
         # セッション名を計算（プロジェクト名をそのまま使用）
         project_name = get_project_name(working_dir)

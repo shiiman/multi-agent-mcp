@@ -145,7 +145,6 @@ def register_tools(mcp: FastMCP) -> None:
         task_content: str,
         session_id: str,
         auto_enhance: bool = True,
-        worker_count: int | None = None,
         branch_name: str | None = None,
         caller_agent_id: str | None = None,
         ctx: Context = None,
@@ -154,7 +153,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         長いマルチライン指示に対応。エージェントはファイル経由でタスクを実行。
         auto_enhance=True の場合:
-        - Admin: 計画書 + Worker管理手順を自動生成
+        - Admin: 計画書 + Worker管理手順を自動生成（Worker 数はプロファイル設定から自動決定）
         - Worker: 7セクション構造・ペルソナ・メモリを自動統合
 
         ※ Owner と Admin のみ使用可能。
@@ -164,7 +163,6 @@ def register_tools(mcp: FastMCP) -> None:
             task_content: タスク内容（Markdown形式）
             session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
             auto_enhance: 自動拡張を行うか（デフォルト: True）
-            worker_count: Worker 数（Admin 用、省略時はプロファイル設定を使用）
             branch_name: 作業ブランチ名（Admin 用、省略時は feature/{session_id}）
             caller_agent_id: 呼び出し元エージェントID（必須）
 
@@ -184,11 +182,9 @@ def register_tools(mcp: FastMCP) -> None:
         # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
         sync_agents_from_file(app_ctx)
 
-        # プロファイル設定から Worker 数のデフォルトを取得
+        # プロファイル設定から Worker 数を取得（MCP 側で一元管理）
         profile_settings = get_current_profile_settings(app_ctx)
-        effective_worker_count = (
-            worker_count if worker_count is not None else profile_settings["max_workers"]
-        )
+        effective_worker_count = profile_settings["max_workers"]
 
         agent = agents.get(agent_id)
         if not agent:
@@ -338,7 +334,6 @@ def register_tools(mcp: FastMCP) -> None:
             result["persona"] = persona_info
 
         if is_admin:
-            result["worker_count"] = effective_worker_count
             result["branch_name"] = branch_name or f"feature/{session_id}"
             result["model_profile"] = profile_settings["profile"]
 

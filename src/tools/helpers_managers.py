@@ -61,6 +61,9 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
     """DashboardManagerが初期化されていることを確認する。
 
     worktree 内で実行されている場合でも、メインリポジトリの Dashboard ディレクトリを使用する。
+    注意: initialize() は呼ばない。ディレクトリ・ファイル作成は
+    init_tmux_workspace（Owner のみ）で明示的に行う。
+    Worker の MCP プロセスからはファイル読み取りのみ安全に行える。
 
     Raises:
         ValueError: project_root または session_id が設定されていない場合
@@ -85,7 +88,6 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
             workspace_path=base_dir,
             dashboard_dir=dashboard_dir,
         )
-        app_ctx.dashboard_manager.initialize()
     return app_ctx.dashboard_manager
 
 

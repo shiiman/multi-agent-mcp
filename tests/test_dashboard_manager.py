@@ -1,8 +1,37 @@
 """DashboardManagerのテスト。"""
 
-
-
+from src.managers.dashboard_manager import DashboardManager
 from src.models.dashboard import TaskStatus
+
+
+class TestDashboardManagerInitialize:
+    """DashboardManager.initialize() のテスト。"""
+
+    def test_initialize_does_not_overwrite_existing(self, temp_dir):
+        """initialize() が既存の Dashboard ファイルを上書きしないことをテスト。"""
+        dashboard_dir = temp_dir / "dashboard"
+        manager = DashboardManager(
+            workspace_id="test-ws",
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        # 初回: ファイルが作成される
+        manager.initialize()
+        task = manager.create_task(title="Existing Task")
+        assert manager.get_task(task.id) is not None
+
+        # 2回目 initialize: 別プロセスを模擬
+        manager2 = DashboardManager(
+            workspace_id="test-ws",
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        manager2.initialize()
+
+        # 既存タスクが保持されていることを確認
+        preserved_task = manager2.get_task(task.id)
+        assert preserved_task is not None
+        assert preserved_task.title == "Existing Task"
 
 
 class TestDashboardManager:
