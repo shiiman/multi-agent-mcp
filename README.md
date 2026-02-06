@@ -325,13 +325,13 @@ cleanup_workspace()
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | claude | standardプロファイルのAI CLI |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | claude-opus-4-20250514 | standardプロファイルのAdminモデル |
-| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | claude-sonnet-4-20250514 | standardプロファイルのWorkerモデル |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | opus | standardプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | sonnet | standardプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | 6 | standardプロファイルのWorker上限 |
 | `MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER` | 1.0 | standardプロファイルの思考倍率 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | claude | performanceプロファイルのAI CLI |
-| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | claude-opus-4-20250514 | performanceプロファイルのAdminモデル |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | claude-opus-4-20250514 | performanceプロファイルのWorkerモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | opus | performanceプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | opus | performanceプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | 16 | performanceプロファイルのWorker上限 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER` | 2.0 | performanceプロファイルの思考倍率 |
 | `MCP_PROJECT_ROOT` | - | プロジェクトルート（.env読み込み用） |

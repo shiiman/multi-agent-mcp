@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import src.config.settings as settings_module
-from src.config.settings import get_mcp_dir, get_project_env_file
+from src.config.settings import ModelDefaults, get_mcp_dir, get_project_env_file
 from src.tools.session import generate_env_template
 
 
@@ -134,8 +134,8 @@ class TestGenerateEnvTemplate:
         # デフォルト値の確認
         assert "MCP_MAX_WORKERS=6" in template
         assert "MCP_MODEL_PROFILE_ACTIVE=standard" in template
-        assert "claude-sonnet-4-20250514" in template
-        assert "claude-opus-4-20250514" in template
+        assert ModelDefaults.SONNET in template
+        assert ModelDefaults.OPUS in template
 
 
 class TestSetupMcpDirectories:

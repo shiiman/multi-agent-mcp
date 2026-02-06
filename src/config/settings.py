@@ -71,11 +71,11 @@ class ModelProfile(str, Enum):
 class ModelDefaults:
     """デフォルトモデル名の定数。"""
 
-    OPUS = "claude-opus-4-20250514"
-    """Claude Opus 4 モデル"""
+    OPUS = "opus"
+    """Claude Opus モデル（Claude CLI が最新バージョンに自動解決）"""
 
-    SONNET = "claude-sonnet-4-20250514"
-    """Claude Sonnet 4 モデル"""
+    SONNET = "sonnet"
+    """Claude Sonnet モデル（Claude CLI が最新バージョンに自動解決）"""
 
 
 # AI CLI のデフォルトコマンドマッピング

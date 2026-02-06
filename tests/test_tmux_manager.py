@@ -95,9 +95,7 @@ class TestTmuxManager:
         try:
             sessions = await tmux_manager.list_sessions()
             # 作成したセッションが含まれているか確認
-            # list_sessions()はプレフィックス付きのセッション名のリストを返す
-            full_session_name = f"{tmux_manager.prefix}-{session_name}"
-            assert full_session_name in sessions
+            assert session_name in sessions
         finally:
             await tmux_manager.kill_session(session_name)
 

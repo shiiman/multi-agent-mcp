@@ -15,113 +15,132 @@ from src.tools.helpers import check_tool_permission, get_gtrconfig_manager, get_
 logger = logging.getLogger(__name__)
 
 
+def _format_env_value(value: object) -> str:
+    """Settings の値を .env 形式の文字列に変換する。"""
+    import json
+    from enum import Enum
+
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, Enum):
+        return str(value.value)
+    if isinstance(value, list):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
 def generate_env_template() -> str:
     """設定可能な変数とデフォルト値を含む .env テンプレートを生成する。
+
+    Settings クラスのデフォルト値から動的に生成するため、
+    値の管理は settings.py の一元管理となる。
 
     Returns:
         .env ファイルの内容
     """
-    return '''# Multi-Agent MCP プロジェクト設定
+    s = Settings()
+    v = _format_env_value
+    return f"""# Multi-Agent MCP プロジェクト設定
 # 環境変数で上書きされます（環境変数 > .env > デフォルト）
 
 # ========== 基本設定 ==========
 # MCP 設定ディレクトリ名
-MCP_MCP_DIR=.multi-agent-mcp
+MCP_MCP_DIR={v(s.mcp_dir)}
 
 # ========== エージェント設定 ==========
 # Worker エージェントの最大数
-MCP_MAX_WORKERS=6
+MCP_MAX_WORKERS={v(s.max_workers)}
 
 # ========== Worktree 設定 ==========
 # git worktree を使用するか（false で Non-Worktree モード）
-MCP_ENABLE_WORKTREE=true
+MCP_ENABLE_WORKTREE={v(s.enable_worktree)}
 
 # ========== tmux 設定 ==========
 # メインウィンドウ名（Admin + Worker 1-6）
-MCP_WINDOW_NAME_MAIN=main
+MCP_WINDOW_NAME_MAIN={v(s.window_name_main)}
 
 # 追加 Worker ウィンドウ名のプレフィックス（workers-2, workers-3, ...）
-MCP_WINDOW_NAME_WORKER_PREFIX=workers-
+MCP_WINDOW_NAME_WORKER_PREFIX={v(s.window_name_worker_prefix)}
 
 # メインウィンドウの Worker エリア設定（左右50:50分離）
-MCP_MAIN_WORKER_ROWS=2
-MCP_MAIN_WORKER_COLS=3
-MCP_WORKERS_PER_MAIN_WINDOW=6
+MCP_MAIN_WORKER_ROWS={v(s.main_worker_rows)}
+MCP_MAIN_WORKER_COLS={v(s.main_worker_cols)}
+MCP_WORKERS_PER_MAIN_WINDOW={v(s.workers_per_main_window)}
 
 # 追加ウィンドウの設定（Worker 7 以降）
-MCP_EXTRA_WORKER_ROWS=2
-MCP_EXTRA_WORKER_COLS=5
-MCP_WORKERS_PER_EXTRA_WINDOW=10
+MCP_EXTRA_WORKER_ROWS={v(s.extra_worker_rows)}
+MCP_EXTRA_WORKER_COLS={v(s.extra_worker_cols)}
+MCP_WORKERS_PER_EXTRA_WINDOW={v(s.workers_per_extra_window)}
 
 # ========== ターミナル設定 ==========
 # デフォルトのターミナルアプリ（auto / ghostty / iterm2 / terminal）
-MCP_DEFAULT_TERMINAL=auto
+MCP_DEFAULT_TERMINAL={v(s.default_terminal)}
 
 # ========== モデルプロファイル ==========
 # 現在のプロファイル（standard / performance）
-MCP_MODEL_PROFILE_ACTIVE=standard
+MCP_MODEL_PROFILE_ACTIVE={v(s.model_profile_active)}
 
 # standard プロファイル設定（バランス重視）
 # Admin は Opus、Worker は Sonnet
-MCP_MODEL_PROFILE_STANDARD_CLI=claude
-MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=claude-opus-4-20250514
-MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL=claude-sonnet-4-20250514
-MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS=6
-MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER=1.0
+MCP_MODEL_PROFILE_STANDARD_CLI={v(s.model_profile_standard_cli)}
+MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL={v(s.model_profile_standard_admin_model)}
+MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL={v(s.model_profile_standard_worker_model)}
+MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS={v(s.model_profile_standard_max_workers)}
+MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER={v(s.model_profile_standard_thinking_multiplier)}
 
 # performance プロファイル設定（性能重視）
 # Admin/Worker ともに Opus
-MCP_MODEL_PROFILE_PERFORMANCE_CLI=claude
-MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL=claude-opus-4-20250514
-MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL=claude-opus-4-20250514
-MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS=16
-MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER=2.0
+MCP_MODEL_PROFILE_PERFORMANCE_CLI={v(s.model_profile_performance_cli)}
+MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL={v(s.model_profile_performance_admin_model)}
+MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL={v(s.model_profile_performance_worker_model)}
+MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS={v(s.model_profile_performance_max_workers)}
+MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER={v(s.model_profile_performance_thinking_multiplier)}
 
 # ========== コスト設定 ==========
 # コスト警告の閾値（USD）
-MCP_COST_WARNING_THRESHOLD_USD=10.0
+MCP_COST_WARNING_THRESHOLD_USD={v(s.cost_warning_threshold_usd)}
 
 # 1回の API 呼び出しあたりの推定トークン数
-MCP_ESTIMATED_TOKENS_PER_CALL=2000
+MCP_ESTIMATED_TOKENS_PER_CALL={v(s.estimated_tokens_per_call)}
 
 # 1000 トークンあたりのコスト（USD）
-MCP_COST_PER_1K_TOKENS_CLAUDE=0.015
-MCP_COST_PER_1K_TOKENS_CODEX=0.01
-MCP_COST_PER_1K_TOKENS_GEMINI=0.005
+MCP_COST_PER_1K_TOKENS_CLAUDE={v(s.cost_per_1k_tokens_claude)}
+MCP_COST_PER_1K_TOKENS_CODEX={v(s.cost_per_1k_tokens_codex)}
+MCP_COST_PER_1K_TOKENS_GEMINI={v(s.cost_per_1k_tokens_gemini)}
 
 # ========== ヘルスチェック設定 ==========
 # ヘルスチェックの間隔（秒）- Admin が Worker の状態を確認する間隔
 # 応答がなければ即座に異常と判断
-MCP_HEALTHCHECK_INTERVAL_SECONDS=60
+MCP_HEALTHCHECK_INTERVAL_SECONDS={v(s.healthcheck_interval_seconds)}
 
 # ========== 品質チェック設定 ==========
 # 品質チェックの最大イテレーション回数
-MCP_QUALITY_CHECK_MAX_ITERATIONS=5
+MCP_QUALITY_CHECK_MAX_ITERATIONS={v(s.quality_check_max_iterations)}
 
 # 同一問題の繰り返し上限（この回数を超えたら Owner に相談）
-MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT=3
+MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT={v(s.quality_check_same_issue_limit)}
 
 # ========== Extended Thinking 設定 ==========
 # Owner の思考トークン数（0 = 即断即決モード）
-MCP_OWNER_THINKING_TOKENS=0
+MCP_OWNER_THINKING_TOKENS={v(s.owner_thinking_tokens)}
 
 # Admin の思考トークン数
-MCP_ADMIN_THINKING_TOKENS=1000
+MCP_ADMIN_THINKING_TOKENS={v(s.admin_thinking_tokens)}
 
 # Worker の思考トークン数
-MCP_WORKER_THINKING_TOKENS=10000
+MCP_WORKER_THINKING_TOKENS={v(s.worker_thinking_tokens)}
 
 # ========== メモリ設定 ==========
 # メモリの最大エントリ数
-MCP_MEMORY_MAX_ENTRIES=1000
+MCP_MEMORY_MAX_ENTRIES={v(s.memory_max_entries)}
 
 # メモリエントリの保持期間（日）
-MCP_MEMORY_TTL_DAYS=90
+MCP_MEMORY_TTL_DAYS={v(s.memory_ttl_days)}
 
 # ========== スクリーンショット設定 ==========
 # スクリーンショットとして認識する拡張子（JSON形式）
-MCP_SCREENSHOT_EXTENSIONS=[".png",".jpg",".jpeg",".gif",".webp"]
-'''
+MCP_SCREENSHOT_EXTENSIONS={v(s.screenshot_extensions)}
+"""
 
 
 def _setup_mcp_directories(

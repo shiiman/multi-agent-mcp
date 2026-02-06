@@ -167,6 +167,43 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 - **Admin**: Manages workers, handles complex decisions
 - **Worker**: Executes individual tasks
 
+## Multi-Agent Architecture Rules
+
+### IPC Notification (EVENT-DRIVEN)
+
+- Admin↔Worker communication is EVENT-DRIVEN via tmux `send_keys_to_pane()`.
+- When a message is sent, `src/tools/ipc.py` automatically sends `[IPC] 新しいメッセージ` via tmux to the receiver's pane.
+- Admin/Worker react to IPC notifications — NO polling loops (`while True: read_messages()` is FORBIDDEN).
+- Owner without tmux pane receives macOS native notification instead.
+- Healthcheck polling is the ONLY exception (checking agent liveness).
+
+### Agent State Management
+
+- Agent data is persisted to `agents.json` file via `save_agent_to_file()` / `load_agents_from_file()` in `src/tools/helpers.py`.
+- AgentManager holds in-memory cache but file is the source of truth across MCP instances.
+- `sync_agents_from_file()` synchronizes file → memory before cross-instance operations.
+- On terminate: change `status` to `TERMINATED` — NEVER delete the agent resource.
+- On IPC busy state: implement lock/wait mechanism — NEVER skip notifications.
+
+### Dashboard Persistence
+
+- Dashboard uses YAML Front Matter + Markdown format (`dashboard.md`).
+- NO in-memory caching — reads/writes file on every operation for multi-process safety.
+- `src/managers/dashboard_manager.py` handles all Dashboard I/O.
+
+### Testing Rules
+
+- ALWAYS run `uv run pytest` after making changes.
+- NEVER leave failing tests — fix immediately before moving to other work.
+- If tests fail, debug and fix before reporting success.
+- Verify fixes don't break existing tests.
+
+### Code Accuracy
+
+- Verify architectural claims against the actual codebase before documenting.
+- Do NOT leave misleading comments (e.g., describing polling when the system is event-driven).
+- If you find stale artifacts from previous sessions, flag the discrepancy.
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -178,13 +215,13 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck interval (no response = unhealthy) | 60 |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | claude |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | claude-opus-4-20250514 |
-| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | claude-sonnet-4-20250514 |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | opus |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | sonnet |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
 | `MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER` | Standard thinking multiplier | 1.0 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | claude |
-| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | claude-opus-4-20250514 |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | claude-opus-4-20250514 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | opus |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | opus |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER` | Performance thinking multiplier | 2.0 |
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
