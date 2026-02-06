@@ -126,7 +126,11 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # agents.json 側の current_task も同期する（Dashboard 再同期時の巻き戻りを防ぐ）
-        if success and task_status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+        if success and task_status in (
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        ):
             task = dashboard.get_task(task_id)
             if task and task.assigned_agent_id:
                 assigned = app_ctx.agents.get(task.assigned_agent_id)

@@ -1,5 +1,6 @@
 """コマンド実行ツール。"""
 
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,8 @@ from src.tools.helpers import (
 )
 from src.tools.model_profile import get_current_profile_settings
 from src.tools.task_templates import generate_7section_task, generate_admin_task
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_claude_statusline_cost(output: str) -> tuple[float, str] | None:

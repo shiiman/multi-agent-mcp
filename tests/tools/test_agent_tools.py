@@ -760,3 +760,211 @@ class TestSendTaskToWorker:
         )
 
         assert success is False
+
+
+class TestAgentHelperFunctions:
+    """agent helper 関数のテスト。"""
+
+    def test_validate_agent_creation_duplicate_owner(self):
+        """owner 重複時にエラーを返すことをテスト。"""
+        from src.tools.agent import _validate_agent_creation
+
+        now = datetime.now()
+        agents = {
+            "owner-001": Agent(
+                id="owner-001",
+                role=AgentRole.OWNER,
+                status=AgentStatus.IDLE,
+                tmux_session=None,
+                created_at=now,
+                last_activity=now,
+            )
+        }
+
+        role, cli, error = _validate_agent_creation(agents, "owner", None, 10)
+        assert role is None
+        assert cli is None
+        assert error is not None
+        assert "既に存在します" in error["error"]
+
+    def test_resolve_tmux_session_name_prefers_session_name(self):
+        """session_name が優先されることをテスト。"""
+        from src.tools.agent import _resolve_tmux_session_name
+
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="fallback:0.1",
+            session_name="primary",
+            created_at=now,
+            last_activity=now,
+        )
+        assert _resolve_tmux_session_name(agent) == "primary"
+
+    def test_resolve_tmux_session_name_falls_back_to_tmux_session(self):
+        """tmux_session からセッション名を抽出できることをテスト。"""
+        from src.tools.agent import _resolve_tmux_session_name
+
+        now = datetime.now()
+        agent = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="fallback:0.2",
+            created_at=now,
+            last_activity=now,
+        )
+        assert _resolve_tmux_session_name(agent) == "fallback"
+
+    def test_resolve_tmux_session_name_returns_none_without_values(self):
+        """session 情報がない場合は None を返すことをテスト。"""
+        from src.tools.agent import _resolve_tmux_session_name
+
+        now = datetime.now()
+        agent = Agent(
+            id="worker-003",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            created_at=now,
+            last_activity=now,
+        )
+        assert _resolve_tmux_session_name(agent) is None
+
+    def test_build_change_directory_command_by_cli(self):
+        """CLI に応じた cd コマンド分岐をテスト。"""
+        from src.tools.agent import _build_change_directory_command
+
+        assert _build_change_directory_command("claude", "/tmp/wt") == "!cd /tmp/wt"
+        assert _build_change_directory_command("codex", "/tmp/wt") == "cd /tmp/wt"
+
+
+class TestCreateWorkersBatchBehavior:
+    """create_workers_batch の追加挙動テスト。"""
+
+    @pytest.mark.asyncio
+    async def test_create_workers_batch_reuses_idle_worker(self, mock_ctx, git_repo, monkeypatch):
+        """idle Worker が再利用されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_workers_batch = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_workers_batch":
+                create_workers_batch = tool.fn
+                break
+        assert create_workers_batch is not None
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-idle"] = Agent(
+            id="worker-idle",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="repo:0.1",
+            session_name="repo",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        monkeypatch.setattr(
+            "src.tools.agent_batch_tools.get_current_profile_settings",
+            lambda _ctx: {"max_workers": 20, "worker_thinking_tokens": 4000},
+        )
+
+        result = await create_workers_batch(
+            worker_configs=[{"branch": "feature/reuse-only"}],
+            repo_path=str(git_repo),
+            base_branch="main",
+            reuse_idle_workers=True,
+            caller_agent_id="owner-001",
+            ctx=mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["failed_count"] == 0
+        assert result["workers"][0]["agent_id"] == "worker-idle"
+        assert result["workers"][0]["reused"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_workers_batch_reports_preassigned_slot_failure(
+        self, mock_ctx, git_repo, monkeypatch
+    ):
+        """事前スロット割り当て失敗時にエラーになることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_workers_batch = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_workers_batch":
+                create_workers_batch = tool.fn
+                break
+        assert create_workers_batch is not None
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_worktree = False
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        for i in range(6):
+            pane = i + 1
+            app_ctx.agents[f"worker-{pane:03d}"] = Agent(
+                id=f"worker-{pane:03d}",
+                role=AgentRole.WORKER,
+                status=AgentStatus.BUSY,
+                tmux_session=f"repo:0.{pane}",
+                session_name="repo",
+                window_index=0,
+                pane_index=pane,
+                working_dir=str(git_repo),
+                created_at=now,
+                last_activity=now,
+            )
+
+        monkeypatch.setattr(
+            "src.tools.agent_batch_tools.get_current_profile_settings",
+            lambda _ctx: {"max_workers": 20, "worker_thinking_tokens": 4000},
+        )
+
+        result = await create_workers_batch(
+            worker_configs=[{"branch": "feature/no-slot"}],
+            repo_path=str(git_repo),
+            base_branch="main",
+            reuse_idle_workers=False,
+            caller_agent_id="owner-001",
+            ctx=mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert result["failed_count"] == 1
+        assert "利用可能なスロットがありません" in result["errors"][0]

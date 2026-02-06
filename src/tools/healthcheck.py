@@ -336,7 +336,9 @@ def register_tools(mcp: FastMCP) -> None:
         ctx: Context = None,
     ) -> dict[str, Any]:
         """Worker を監視し、異常時に復旧を実行する。"""
-        app_ctx, role_error = require_permission(ctx, "monitor_and_recover_workers", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx, "monitor_and_recover_workers", caller_agent_id
+        )
         if role_error:
             return role_error
 

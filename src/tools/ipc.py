@@ -68,7 +68,9 @@ def _auto_update_dashboard_from_messages(
 
     for msg in task_messages:
         raw_task_id = msg.metadata.get("task_id")
-        normalized_task_id = msg.metadata.get("normalized_task_id") or _normalize_task_id(raw_task_id)
+        normalized_task_id = msg.metadata.get("normalized_task_id") or _normalize_task_id(
+            raw_task_id
+        )
         if not normalized_task_id:
             skipped_reasons.append("missing_task_id")
             continue
@@ -226,10 +228,17 @@ def _validate_admin_completion_gate(
     reasons: list[str] = []
     suggestions: list[str] = []
 
-    if summary["pending_tasks"] > 0 or summary["in_progress_tasks"] > 0 or summary["failed_tasks"] > 0:
+    if (
+        summary["pending_tasks"] > 0
+        or summary["in_progress_tasks"] > 0
+        or summary["failed_tasks"] > 0
+    ):
         reasons.append(
             "未完了タスクがあります"
-            f" (pending={summary['pending_tasks']}, in_progress={summary['in_progress_tasks']}, failed={summary['failed_tasks']})"
+            " "
+            f"(pending={summary['pending_tasks']}, "
+            f"in_progress={summary['in_progress_tasks']}, "
+            f"failed={summary['failed_tasks']})"
         )
         suggestions.append("未完了/失敗タスクを再計画し、Worker に再割り当てしてください。")
 

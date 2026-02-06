@@ -105,7 +105,9 @@ class CostInfo(BaseModel):
     total_api_calls: int = Field(default=0, description="総API呼び出し回数")
     estimated_tokens: int = Field(default=0, description="推定総トークン数")
     estimated_cost_usd: float = Field(default=0.0, description="推定総コスト（USD, 参考値）")
-    actual_cost_usd: float = Field(default=0.0, description="実測総コスト（USD, Claude statusLine）")
+    actual_cost_usd: float = Field(
+        default=0.0, description="実測総コスト（USD, Claude statusLine）"
+    )
     total_cost_usd: float = Field(default=0.0, description="合算コスト（実測優先 + 推定）")
     warning_threshold_usd: float = Field(default=10.0, description="コスト警告閾値（USD）")
     calls: list[ApiCallRecord] = Field(default_factory=list, description="呼び出し記録")

@@ -109,8 +109,56 @@ class TestCleanupSessionScope:
         app_ctx.tmux.cleanup_sessions.assert_awaited_once_with(["scoped-session"])
         app_ctx.tmux.cleanup_all_sessions.assert_not_awaited()
 
+
+class TestSessionHelpers:
+    """session helper 関数のテスト。"""
+
+    def test_collect_session_names_mixed_sources(self):
+        """session_name と tmux_session の混在から重複なく収集できることをテスト。"""
+        from src.tools.session import _collect_session_names
+
+        agents = {
+            "a": type("A", (), {"session_name": "alpha", "tmux_session": None})(),
+            "b": type("B", (), {"session_name": None, "tmux_session": "beta:0.1"})(),
+            "c": type("C", (), {"session_name": "alpha", "tmux_session": "ignored:0.2"})(),
+        }
+
+        assert _collect_session_names(agents) == ["alpha", "beta"]
+
+    def test_reset_app_context_clears_managers_and_maps(self, session_test_ctx):
+        """_reset_app_context が状態をクリアすることをテスト。"""
+        from src.tools.session import _reset_app_context
+
+        app_ctx = session_test_ctx
+        app_ctx.project_root = "/tmp/repo"
+        app_ctx.workspace_id = "ws-1"
+        app_ctx.worktree_managers["/tmp/repo"] = object()
+        app_ctx.gtrconfig_managers["/tmp/repo"] = object()
+
+        _reset_app_context(app_ctx)
+
+        assert app_ctx.session_id is None
+        assert app_ctx.project_root is None
+        assert app_ctx.workspace_id is None
+        assert app_ctx.dashboard_manager is None
+        assert app_ctx.worktree_managers == {}
+        assert app_ctx.gtrconfig_managers == {}
+
+    def test_check_completion_status_returns_error_without_dashboard(self, session_test_ctx):
+        """dashboard 未初期化時に error を返すことをテスト。"""
+        from src.tools.session import _check_completion_status
+
+        app_ctx = session_test_ctx
+        app_ctx.dashboard_manager = None
+        status = _check_completion_status(app_ctx)
+
+        assert status["is_all_completed"] is False
+        assert status["error"] == "ワークスペースが初期化されていません"
+
     @pytest.mark.asyncio
-    async def test_cleanup_on_completion_uses_scoped_sessions(self, session_mock_ctx, monkeypatch, git_repo):
+    async def test_cleanup_on_completion_uses_scoped_sessions(
+        self, session_mock_ctx, monkeypatch, git_repo
+    ):
         """cleanup_on_completion が対象セッションのみ終了することをテスト。"""
         from mcp.server.fastmcp import FastMCP
 

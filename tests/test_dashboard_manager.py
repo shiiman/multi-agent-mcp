@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 from src.managers.dashboard_manager import DashboardManager
-from src.models.dashboard import AgentSummary, MessageSummary, TaskStatus
+from src.models.dashboard import AgentSummary, TaskStatus
 
 
 class TestDashboardManagerInitialize:
@@ -197,6 +197,11 @@ class TestDashboardManager:
         assert success is False
         assert "見つかりません" in message
 
+    def test_parse_yaml_front_matter_invalid_returns_none(self, dashboard_manager):
+        """不正な front matter では None を返すことをテスト。"""
+        content = "# no front matter"
+        assert dashboard_manager._parse_yaml_front_matter(content) is None
+
 
 class TestTaskFileManagement:
     """タスクファイル管理機能のテスト。"""
@@ -252,6 +257,40 @@ class TestTaskFileManagement:
         )
 
         assert read_content == task_content
+
+
+class TestDashboardMarkdownSync:
+    """Markdown 同期処理の追加テスト。"""
+
+    def test_save_markdown_dashboard_ignores_invalid_last_activity(
+        self, dashboard_manager, temp_dir
+    ):
+        """agents.json の不正な last_activity を無視して保存できることをテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        session_dir = dashboard_manager.dashboard_dir.parent
+        agents_path = session_dir / "agents.json"
+        agents_path.parent.mkdir(parents=True, exist_ok=True)
+        agents_path.write_text(
+            json.dumps(
+                {
+                    "agent-001": {
+                        "id": "agent-001",
+                        "role": "worker",
+                        "status": "idle",
+                        "last_activity": "not-a-datetime",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        md_path = dashboard_manager.save_markdown_dashboard(project_root, "session-1")
+        assert md_path.exists()
+        dashboard = dashboard_manager.get_dashboard()
+        assert len(dashboard.agents) == 1
+        assert dashboard.agents[0].last_activity is None
 
     def test_read_task_file_not_exists(self, dashboard_manager, temp_dir):
         """存在しないタスクファイル読み取りをテスト。"""

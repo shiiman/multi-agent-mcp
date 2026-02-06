@@ -432,3 +432,65 @@ class TestTmuxManager:
 
         assert success is True
         assert "Terminal.app" in message
+
+    @pytest.mark.asyncio
+    async def test_create_main_session_runs_expected_split_sequence(
+        self, tmux_manager, monkeypatch
+    ):
+        """create_main_session の分割順序をテスト。"""
+        import src.managers.tmux_manager as tmux_module
+
+        monkeypatch.setattr(tmux_module, "get_project_name", lambda _wd: "test-project")
+
+        calls: list[tuple[str, ...]] = []
+
+        async def mock_run(*args):
+            calls.append(tuple(args))
+            return (0, "", "")
+
+        tmux_manager._run = mock_run
+        tmux_manager.session_exists = lambda _session: False  # type: ignore[assignment]
+
+        async def mock_session_exists(_session):
+            return False
+
+        tmux_manager.session_exists = mock_session_exists  # type: ignore[assignment]
+
+        success = await tmux_manager.create_main_session("/tmp/workspace")
+        assert success is True
+
+        split_calls = [c for c in calls if c and c[0] == "split-window"]
+        assert split_calls[0][1:] == ("-h", "-t", "test-project:main", "-p", "60")
+        assert split_calls[1][1:] == ("-h", "-t", "test-project:main.1", "-p", "67")
+        assert split_calls[2][1:] == ("-h", "-t", "test-project:main.2", "-p", "50")
+
+    def test_get_pane_for_role_boundary_workers(self, tmux_manager):
+        """Worker 6/7 の境界でウィンドウが切り替わることをテスト。"""
+        main_slot = tmux_manager.get_pane_for_role("worker", worker_index=5)
+        extra_slot = tmux_manager.get_pane_for_role("worker", worker_index=6)
+
+        assert main_slot == ("main", 0, 6)
+        assert extra_slot is not None
+        assert extra_slot[1] == 1
+
+    @pytest.mark.asyncio
+    async def test_add_extra_worker_window_returns_true_when_window_exists(
+        self, tmux_manager, monkeypatch
+    ):
+        """既存ウィンドウがある場合は作成せず True を返すことをテスト。"""
+        async def mock_list_windows(_session):
+            return [{"index": 1, "name": "workers-2", "panes": 12}]
+
+        tmux_manager.list_windows = mock_list_windows  # type: ignore[assignment]
+
+        called = {"run": 0}
+
+        async def mock_run(*_args):
+            called["run"] += 1
+            return (0, "", "")
+
+        tmux_manager._run = mock_run  # type: ignore[assignment]
+
+        success = await tmux_manager.add_extra_worker_window("repo", 1)
+        assert success is True
+        assert called["run"] == 0

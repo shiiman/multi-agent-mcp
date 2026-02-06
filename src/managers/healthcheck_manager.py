@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.managers.tmux_manager import TmuxManager
-    from src.models.agent import Agent, AgentRole, AgentStatus
+    from src.models.agent import Agent
 
 logger = logging.getLogger(__name__)
 
