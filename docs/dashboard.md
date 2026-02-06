@@ -53,8 +53,7 @@ Owner プロセス              Admin プロセス
 ├── dashboard/
 │   └── dashboard.md          # ダッシュボード本体
 └── tasks/
-    └── {agent_id}/           # Worker 別タスクファイル
-        └── task_{task_id}.md
+    └── {agent_id}.md         # Worker 別タスクファイル
 ```
 
 ### ダッシュボードファイルの形式
@@ -225,7 +224,7 @@ AI CLI ごとのトークンあたりコスト（デフォルト）:
 # 閾値を設定
 set_cost_warning_threshold(
     threshold_usd=5.0,
-    caller_agent_id="admin_xxx"
+    caller_agent_id="owner_xxx"
 )
 
 # コスト確認時に警告をチェック
@@ -249,25 +248,25 @@ if result.get("warning"):
 
 | ツール | 説明 | 使用者 |
 | ------ | ---- | ------ |
-| `create_task` | タスクを作成 | Admin |
+| `create_task` | タスクを作成 | Owner, Admin |
 | `update_task_status` | ステータスを更新 | Admin |
 | `assign_task_to_agent` | Worker に割り当て | Admin |
-| `list_tasks` | タスク一覧取得 | Admin, Owner |
-| `get_task` | タスク詳細取得 | Admin, Worker |
-| `remove_task` | タスク削除 | Admin |
+| `list_tasks` | タスク一覧取得 | Owner, Admin, Worker |
+| `get_task` | タスク詳細取得 | Owner, Admin, Worker |
+| `remove_task` | タスク削除 | Owner, Admin |
 | `report_task_progress` | 進捗報告（Worker用） | Worker |
 | `report_task_completion` | 完了報告（Worker用） | Worker |
-| `get_dashboard` | ダッシュボード全体取得 | Owner, Admin |
-| `get_dashboard_summary` | サマリーのみ取得 | Owner, Admin |
+| `get_dashboard` | ダッシュボード全体取得 | Owner, Admin, Worker |
+| `get_dashboard_summary` | サマリーのみ取得 | Owner, Admin, Worker |
 
 ### コスト管理ツール
 
 | ツール | 説明 | 使用者 |
 | ------ | ---- | ------ |
 | `get_cost_estimate` | 現在のコスト見積もり取得 | Owner, Admin |
-| `get_cost_summary` | コストサマリー取得 | Owner, Admin |
-| `set_cost_warning_threshold` | 警告閾値を設定 | Owner, Admin |
-| `reset_cost_counter` | コストカウンターをリセット | Owner, Admin |
+| `get_cost_summary` | コストサマリー取得 | Owner, Admin, Worker |
+| `set_cost_warning_threshold` | 警告閾値を設定 | Owner |
+| `reset_cost_counter` | コストカウンターをリセット | Owner |
 
 ## 重要なポイント
 
@@ -342,20 +341,6 @@ report_task_completion(
     caller_agent_id="worker_xxx"
 )
 ```
-
-## レガシー JSON からの移行
-
-古い JSON 形式のダッシュボードは自動的に Markdown 形式に変換されます:
-
-```
-dashboard.json (旧)
-       │
-       │ 自動検出・変換
-       ▼
-dashboard.md (新)
-```
-
-**注意**: 移行後、JSON ファイルは削除されます。
 
 ## Markdown 生成のカスタマイズ
 
@@ -444,7 +429,7 @@ print(f"閾値: ${result['warning_threshold_usd']}")
 # 閾値を下げてテスト
 set_cost_warning_threshold(
     threshold_usd=0.10,
-    caller_agent_id="admin_xxx"
+    caller_agent_id="owner_xxx"
 )
 ```
 
@@ -454,6 +439,6 @@ set_cost_warning_threshold(
 
 ```python
 # コストカウンターをリセット
-result = reset_cost_counter(caller_agent_id="admin_xxx")
+result = reset_cost_counter(caller_agent_id="owner_xxx")
 print(f"リセットされた呼び出し数: {result['reset_calls']}")
 ```

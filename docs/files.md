@@ -49,9 +49,9 @@ Multi-Agent MCP が保存・編集するファイルの一覧と、そのディ�
 │   │   └── *.png/jpg/jpeg/gif/webp
 │   └── {session_id}/                  # セッション別ディレクトリ
 │       ├── dashboard/
-│       │   ├── dashboard.md           # ダッシュボード
-│       │   └── tasks/
-│       │       └── TASK.md            # タスク指示
+│       │   └── dashboard.md           # ダッシュボード
+│       ├── tasks/                     # Worker別タスク指示ファイル
+│       │   └── {agent_id}.md
 │       ├── ipc/                       # プロセス間通信
 │       │   └── {agent_id}/
 │       │       └── {timestamp}_{msg_id}.md
@@ -211,11 +211,11 @@ agents:
 
 ### 4. タスクファイル
 
-#### `TASK.md`
+#### `{agent_id}.md`
 
 | 項目 | 内容 |
 | ---- | ---- |
-| パス | `{project}/.multi-agent-mcp/{session_id}/dashboard/tasks/TASK.md` |
+| パス | `{project}/.multi-agent-mcp/{session_id}/tasks/{agent_id}.md` |
 | フォーマット | Markdown |
 | 用途 | Worker へのタスク指示 |
 | 読み込み | なし（AI CLI が直接読み込む） |
@@ -325,7 +325,7 @@ read_at: null
 | 設定 | `.gtrconfig.example` | TOML | - | ✓ | `generate_gtrconfig` |
 | メモリ | `{key}.md` | YAML FM + MD | ✓ | ✓ | `save_to_memory` |
 | ダッシュボード | `dashboard.md` | YAML FM + MD | ✓ | ✓ | `create_task` |
-| タスク | `TASK.md` | Markdown | - | ✓ | `send_task` |
+| タスク | `{agent_id}.md` | Markdown | - | ✓ | `send_task` |
 | IPC | `{timestamp}_{msg_id}.md` | YAML FM + MD | ✓ | ✓ | `send_message` |
 | エージェント(グローバル) | `{agent_id}.json` | JSON | ✓ | ✓ | `save_agent_to_registry` |
 | エージェント(セッション) | `agents.json` | JSON | ✓ | ✓ | `save_agent_to_file` |
@@ -372,7 +372,7 @@ read_at: null
 
 | 変数 | デフォルト | 説明 |
 | ---- | ---------- | ---- |
-| `MCP_DIR` | `.multi-agent-mcp` | MCP 設定ディレクトリ名 |
+| `MCP_MCP_DIR` | `.multi-agent-mcp` | MCP 設定ディレクトリ名 |
 | `MCP_PROJECT_ROOT` | - | プロジェクトルートパス |
 | `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリ最大エントリ数 |
 | `MCP_MEMORY_TTL_DAYS` | 90 | メモリエントリの有効期限（日） |
@@ -383,3 +383,5 @@ read_at: null
 - [Dashboard/Task システム](./dashboard.md) - タスク管理の詳細
 - [Git Worktree](./worktree.md) - worktree 機能の詳細
 - [IPC](./ipc.md) - エージェント間通信の詳細
+- [Healthcheck システム](./healthcheck.md) - Worker 監視と自動復旧
+- [Merge ガイド](./merge.md) - 完了タスクブランチの統合

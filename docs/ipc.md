@@ -131,11 +131,17 @@ subprocess.run([
 
 | ツール | 説明 | 使用者 |
 |--------|------|--------|
-| `send_message` | メッセージ送信 | Worker, Admin |
-| `read_messages` | メッセージ読み取り | Admin, Worker |
-| `get_unread_count` | 未読数取得 | Admin, Worker |
-| `report_task_completion` | 完了報告（IPC 自動送信） | Worker |
-| `report_task_progress` | 進捗報告（IPC 自動送信） | Worker |
+| `send_message` | メッセージ送信（単一宛先/ブロードキャスト） | Owner, Admin, Worker |
+| `read_messages` | メッセージ読み取り（既読管理つき） | Owner, Admin, Worker |
+| `get_unread_count` | 未読数取得 | Owner, Admin, Worker |
+| `register_agent_to_ipc` | IPC ディレクトリを事前登録 | Owner, Admin |
+
+### 関連ツール（Dashboard 側）
+
+| ツール | 説明 | 使用者 |
+|--------|------|--------|
+| `report_task_completion` | 完了報告（Dashboard更新 + IPC自動送信） | Worker |
+| `report_task_progress` | 進捗報告（Dashboard更新 + IPC自動送信） | Worker |
 
 ## 重要なポイント
 

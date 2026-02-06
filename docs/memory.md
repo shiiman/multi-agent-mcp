@@ -9,12 +9,12 @@
 │                      Memory レイヤー構造                          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  Layer 2: グローバルメモリ（~/.multi-agent-mcp/global_memory/）  │
+│  Layer 2: グローバルメモリ（~/.multi-agent-mcp/memory/）         │
 │  ├── 全プロジェクトで共有                                        │
 │  ├── ユーザーの好み・設定                                        │
 │  └── クロスプロジェクトの学び                                    │
 │                                                                 │
-│  Layer 3: プロジェクトメモリ（{project}/.multi-agent-mcp/memory/）│
+│  Layer 3: プロジェクトメモリ（{project}/.multi-agent-mcp/{session_id}/memory/）│
 │  ├── プロジェクト固有の知識                                      │
 │  ├── セッション間で共有                                          │
 │  └── 決定事項・技術的コンテキスト                                │
@@ -33,17 +33,19 @@
 
 ```
 ~/.multi-agent-mcp/
-└── global_memory/                    # グローバルメモリ
+└── memory/                           # グローバルメモリ
     ├── entry-name.md                 # 通常エントリ
-    └── .archive/                     # アーカイブ
+    └── archive/                      # アーカイブ
         └── entry-name.md
 
 {project}/.multi-agent-mcp/
-└── memory/                           # プロジェクトメモリ
+└── {session_id}/memory/              # セッション単位のプロジェクトメモリ
     ├── entry-name.md                 # 通常エントリ
-    └── .archive/                     # アーカイブ
+    └── archive/                      # アーカイブ
         └── entry-name.md
 ```
+
+`session_id` が未設定の場合は、`{project}/.multi-agent-mcp/memory/` が使用されます。
 
 ### エントリファイルの形式
 
@@ -89,7 +91,7 @@ REST API は以下の方針で設計する:
                                     ▼
                               ┌────────────┐
                               │ Archive    │
-                              │ (.archive/)│
+                              │ (archive/) │
                               └─────┬──────┘
                                     │
                                     ▼ restore_from_archive
@@ -121,24 +123,33 @@ REST API は以下の方針で設計する:
 | `delete_memory_entry` | 削除（アーカイブへ移動） | Owner, Admin |
 | `get_memory_summary` | サマリー取得 | Owner, Admin, Worker |
 
-### アーカイブ操作
+### プロジェクトメモリ・アーカイブ操作
 
 | ツール | 説明 | 使用者 |
 | ------ | ---- | ------ |
-| `search_memory_archive` | アーカイブ検索 | Owner, Admin |
-| `list_memory_archive` | アーカイブ一覧 | Owner, Admin |
+| `search_memory_archive` | アーカイブ検索 | Owner, Admin, Worker |
+| `list_memory_archive` | アーカイブ一覧 | Owner, Admin, Worker |
 | `restore_from_memory_archive` | アーカイブから復元 | Owner, Admin |
-| `get_memory_archive_summary` | アーカイブサマリー | Owner, Admin |
+| `get_memory_archive_summary` | アーカイブサマリー | Owner, Admin, Worker |
 
 ### グローバルメモリ
 
 | ツール | 説明 | 使用者 |
 | ------ | ---- | ------ |
-| `save_to_global_memory` | グローバルに保存 | Owner |
+| `save_to_global_memory` | グローバルに保存 | Owner, Admin, Worker |
 | `retrieve_from_global_memory` | グローバル検索 | Owner, Admin, Worker |
 | `list_global_memory_entries` | グローバル一覧 | Owner, Admin, Worker |
 | `get_global_memory_summary` | グローバルサマリー | Owner, Admin, Worker |
-| `delete_global_memory_entry` | グローバル削除 | Owner |
+| `delete_global_memory_entry` | グローバル削除 | Owner, Admin |
+
+### グローバルアーカイブ
+
+| ツール | 説明 | 使用者 |
+| ------ | ---- | ------ |
+| `search_global_memory_archive` | グローバルアーカイブ検索 | Owner, Admin, Worker |
+| `list_global_memory_archive` | グローバルアーカイブ一覧 | Owner, Admin, Worker |
+| `restore_from_global_memory_archive` | グローバルアーカイブから復元 | Owner, Admin |
+| `get_global_memory_archive_summary` | グローバルアーカイブサマリー | Owner, Admin, Worker |
 
 ## 重要なポイント
 

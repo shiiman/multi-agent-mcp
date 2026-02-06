@@ -58,20 +58,20 @@ Worker エージェントに分離された作業環境を提供するシステ�
 
 ### gtr (git-worktree-runner) とは
 
-[gtr](https://github.com/kazuho/git-worktree-runner) は git worktree を簡単に管理するツールです。
+[gtr](https://github.com/coderabbitai/git-worktree-runner) は git worktree を簡単に管理するツールです。
 
 | 機能 | gtr | Native git |
 | ---- | --- | ---------- |
-| Worktree 作成 | `gtr new branch-name` | `git worktree add path branch` |
+| Worktree 作成 | `git gtr new branch-name` | `git worktree add path branch` |
 | 削除時のブランチ処理 | 自動削除 | 手動で別途削除 |
-| AI CLI 連携 | `gtr ai claude` で直接起動 | 手動でディレクトリ移動 |
+| AI CLI 連携 | `git gtr ai <branch>` で直接起動 | 手動でディレクトリ移動 |
 | Worktree パス | 自動決定 | 明示的に指定 |
 
 ### gtr のインストール
 
 ```bash
 # Homebrew
-brew install kazuho/tap/git-worktree-runner
+brew install coderabbitai/tap/git-worktree-runner
 
 # または Cargo
 cargo install git-worktree-runner
@@ -135,13 +135,14 @@ cargo install git-worktree-runner
 
 | ツール | 説明 | 使用者 |
 | ------ | ---- | ------ |
-| `create_worktree` | Worktree を作成 | Admin |
-| `list_worktrees` | 一覧取得 | Admin, Owner |
-| `remove_worktree` | Worktree を削除 | Admin |
-| `assign_worktree` | Worker に割り当て | Admin |
-| `get_worktree_status` | Git ステータス取得 | Admin |
-| `check_gtr_available` | gtr の利用可否確認 | Admin, Owner |
-| `open_worktree_with_ai` | gtr ai で AI CLI を起動 | Admin |
+| `create_worktree` | Worktree を作成 | Owner, Admin |
+| `list_worktrees` | 一覧取得 | Owner, Admin, Worker |
+| `remove_worktree` | Worktree を削除 | Owner, Admin |
+| `assign_worktree` | Worker に割り当て | Owner, Admin |
+| `get_worktree_status` | Git ステータス取得 | Owner, Admin, Worker |
+| `check_gtr_available` | gtr の利用可否確認 | Owner, Admin |
+| `open_worktree_with_ai` | gtr ai で AI CLI を起動 | Owner, Admin |
+| `merge_completed_tasks` | 完了タスクのブランチを統合 | Owner, Admin |
 
 ## 重要なポイント
 
@@ -154,14 +155,16 @@ gtr_available = check_gtr_available()
 # 2. Worktree を作成
 result = create_worktree(
     repo_path="/project",
-    branch_name="feature-auth",
+    worktree_path="/project-worktrees/feature-auth",
+    branch="feature-auth",
     base_branch="main"
 )
 
 # 3. Worker に割り当て
 assign_worktree(
     agent_id="worker_xxx",
-    worktree_path=result["path"]
+    worktree_path=result["worktree_path"],
+    branch="feature-auth"
 )
 ```
 
@@ -238,7 +241,7 @@ branch refs/heads/feature-a
 which gtr
 
 # インストール
-brew install kazuho/tap/git-worktree-runner
+brew install coderabbitai/tap/git-worktree-runner
 ```
 
 ### Worktree の削除に失敗
@@ -263,5 +266,8 @@ Git の制約: 1つのブランチは1つの worktree でのみチェックア�
 git worktree list
 
 # 不要な worktree を削除
-remove_worktree(branch_name="feature-a")
+remove_worktree(
+    repo_path="/project",
+    worktree_path="/project-worktrees/feature-a"
+)
 ```

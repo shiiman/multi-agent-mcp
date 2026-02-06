@@ -104,7 +104,7 @@ uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp mu
 claude mcp list
 ```
 
-## 提供するTools（85個）
+## 提供するTools（86個）
 
 ### セッション管理（4個）
 
@@ -148,14 +148,19 @@ claude mcp list
 | `check_gtr_available` | gtr (git-worktree-runner) の利用可否を確認 |
 | `open_worktree_with_ai` | gtr aiでworktreeをAIツールで開く |
 
-### IPC/メッセージング（5個）
+### マージ（1個）
+
+| Tool | 説明 |
+|------|------|
+| `merge_completed_tasks` | 完了タスクの作業ブランチをbaseブランチへ統合 |
+
+### IPC/メッセージング（4個）
 
 | Tool | 説明 |
 |------|------|
 | `send_message` | エージェント間でメッセージを送信 |
 | `read_messages` | エージェントのメッセージを読み取る |
 | `get_unread_count` | 未読メッセージ数を取得 |
-| `clear_messages` | メッセージをクリア |
 | `register_agent_to_ipc` | エージェントをIPCシステムに登録 |
 
 ### ダッシュボード/タスク管理（14個）
@@ -202,7 +207,7 @@ claude mcp list
 | `auto_assign_tasks` | 空いているWorkerにタスクを自動割り当て |
 | `get_task_queue` | 現在のタスクキューを取得 |
 
-### ヘルスチェック（5個）
+### ヘルスチェック（6個）
 
 | Tool | 説明 |
 |------|------|
@@ -210,7 +215,8 @@ claude mcp list
 | `healthcheck_all` | 全エージェントのヘルスチェックを実行 |
 | `get_unhealthy_agents` | 異常なエージェント一覧を取得 |
 | `attempt_recovery` | エージェントの復旧を試みる |
-| `record_heartbeat` | ハートビートを記録 |
+| `full_recovery` | Worker を完全復旧（agent/worktree再作成＋タスク再割り当て） |
+| `monitor_and_recover_workers` | Worker監視と段階復旧（attempt→full→failed化）を実行 |
 
 ### ペルソナ（3個）
 
@@ -296,10 +302,13 @@ cleanup_workspace()
 
 | ドキュメント | 説明 |
 | ------------ | ---- |
+| [Files システム](docs/files.md) | 永続ファイル/ディレクトリ構造と命名規則 |
 | [IPC システム](docs/ipc.md) | エージェント間メッセージ通信の仕組み |
 | [Memory システム](docs/memory.md) | 知識の永続化・共有・アーカイブ機能 |
 | [Worktree システム](docs/worktree.md) | Git worktree による分離作業環境 |
 | [Dashboard システム](docs/dashboard.md) | タスク状態管理とダッシュボード表示 |
+| [Healthcheck システム](docs/healthcheck.md) | Worker 監視、段階復旧、daemon 運用 |
+| [Merge ガイド](docs/merge.md) | 完了タスクブランチの統合運用 |
 
 ## 環境変数
 
@@ -317,7 +326,10 @@ cleanup_workspace()
 | `MCP_ESTIMATED_TOKENS_PER_CALL` | 2000 | 1回のAPI呼び出しあたりの推定トークン数 |
 | `MCP_MODEL_COST_TABLE_JSON` | `{"claude:opus":0.03,...}` | モデル別1000トークン単価テーブル（JSON） |
 | `MCP_MODEL_COST_DEFAULT_PER_1K` | 0.01 | 未定義モデル向けの汎用単価（USD/1K） |
-| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 60 | ヘルスチェック間隔（秒）- 応答なしで異常判断 |
+| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 60 | ヘルスチェック監視ループの実行間隔（秒） |
+| `MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS` | 600 | 無応答判定の閾値（秒） |
+| `MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS` | 3 | 同一worker/taskに対する復旧試行回数の上限 |
+| `MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE` | 3 | 実作業なし検知が連続したとき daemon を自動停止する閾値 |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | claude | standardプロファイルのAI CLI |

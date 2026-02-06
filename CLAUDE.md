@@ -13,67 +13,82 @@ This project provides an MCP server that allows Claude Code (or other AI CLIs) t
 - **Git Worktree Support**: Parallel development with isolated working directories
 - **AI CLI Selection**: Support for Claude Code, Codex, and Gemini CLI
 - **Task Scheduling**: Priority-based task queue with dependency management
-- **Health Monitoring**: Heartbeat-based agent health checks with auto-recovery
+- **Health Monitoring**: Stall/tmux死活監視 + 自動復旧 + daemon運用
 - **Cost Tracking**: API cost tracking integrated into Dashboard
 
 ## Project Structure
 
-```
+```text
 multi-agent-mcp/
 ├── src/
-│   ├── server.py              # MCP server entry point (FastMCP, ~70 lines)
-│   ├── context.py             # AppContext definition
+│   ├── server.py                # MCP server entry point (FastMCP)
+│   ├── context.py               # AppContext definition
 │   ├── config/
-│   │   ├── settings.py        # Pydantic Settings configuration
-│   │   ├── templates.py       # Workspace templates
-│   │   ├── template_loader.py # Template loading with caching
-│   │   └── workflow_guides.py # Role-based workflow guides
+│   │   ├── settings.py          # Pydantic Settings configuration
+│   │   ├── templates.py         # Workspace templates
+│   │   ├── template_loader.py   # Template loading with caching
+│   │   └── workflow_guides.py   # Role-based workflow guides
 │   ├── models/
-│   │   ├── agent.py           # Agent, AgentRole, AgentStatus
-│   │   ├── dashboard.py       # Dashboard, TaskInfo
-│   │   ├── message.py         # Message, MessageType
-│   │   └── workspace.py       # WorktreeInfo
+│   │   ├── agent.py             # Agent, AgentRole, AgentStatus
+│   │   ├── dashboard.py         # Dashboard, TaskInfo
+│   │   ├── message.py           # Message, MessageType
+│   │   └── workspace.py         # WorktreeInfo
 │   ├── managers/
-│   │   ├── tmux_manager.py    # Tmux session management
-│   │   ├── agent_manager.py   # Agent lifecycle management
-│   │   ├── worktree_manager.py # Git worktree management
-│   │   ├── ai_cli_manager.py  # AI CLI selection and execution
+│   │   ├── tmux_manager.py      # Tmux session management
+│   │   ├── tmux_workspace_mixin.py # Tmux workspace layout helpers
+│   │   ├── tmux_shared.py       # Shared tmux utilities
+│   │   ├── agent_manager.py     # Agent lifecycle management
+│   │   ├── worktree_manager.py  # Git worktree management
+│   │   ├── ai_cli_manager.py    # AI CLI selection and execution
 │   │   ├── gtrconfig_manager.py # .gtrconfig detection/generation
 │   │   ├── scheduler_manager.py # Task priority queue
 │   │   ├── healthcheck_manager.py # Agent health monitoring
-│   │   ├── ipc_manager.py     # Inter-process communication
-│   │   ├── dashboard_manager.py # Dashboard state management (includes cost tracking)
-│   │   ├── memory_manager.py  # Persistent knowledge management
-│   │   ├── persona_manager.py # Task-based persona optimization
-│   │   └── terminal/          # Terminal app implementations
-│   │       ├── base.py        # Abstract base class
-│   │       ├── ghostty.py     # Ghostty terminal support
-│   │       ├── iterm2.py      # iTerm2 terminal support
-│   │       └── terminal_app.py # macOS Terminal.app support
-│   └── tools/                 # MCP tool definitions (85 tools)
-│       ├── __init__.py        # register_all_tools()
-│       ├── helpers.py         # Common helper functions
-│       ├── session.py         # Session management (4 tools)
-│       ├── agent.py           # Agent management (6 tools)
-│       ├── command.py         # Command execution (5 tools)
-│       ├── worktree.py        # Git worktree (7 tools)
-│       ├── ipc.py             # IPC/messaging (5 tools)
-│       ├── dashboard.py       # Dashboard/task/cost management (14 tools)
-│       ├── gtrconfig.py       # Gtrconfig (3 tools)
-│       ├── template.py        # Templates (4 tools)
-│       ├── scheduler.py       # Scheduler (3 tools)
-│       ├── healthcheck.py     # Healthcheck (5 tools)
-│       ├── persona.py         # Persona (3 tools)
-│       ├── memory.py          # Memory management (19 tools)
-│       ├── screenshot.py      # Screenshot management (4 tools)
-│       ├── model_profile.py   # Model profile (3 tools)
-│       └── task_templates.py  # Task template generation (helper module)
-├── templates/                 # Templates for agents and scripts
-│   ├── roles/                 # Role-based workflow guides (owner, admin, worker)
-│   ├── tasks/                 # Task instruction templates (admin_task, admin_task_no_worktree, worker_task)
-│   └── scripts/               # Script templates
-│       └── bash/              # Bash scripts (workspace_setup.sh)
-├── tests/                     # Pytest test files
+│   │   ├── healthcheck_daemon.py # Background monitor loop
+│   │   ├── ipc_manager.py       # Inter-process communication
+│   │   ├── dashboard_manager.py # Dashboard state management
+│   │   ├── dashboard_*_mixin.py # Dashboard I/O/rendering/task mixins
+│   │   ├── dashboard_cost.py    # Cost calculation helpers
+│   │   ├── memory_manager.py    # Persistent knowledge management
+│   │   ├── persona_manager.py   # Task-based persona optimization
+│   │   └── terminal/            # Terminal app implementations
+│   │       ├── base.py          # Abstract base class
+│   │       ├── ghostty.py       # Ghostty terminal support
+│   │       ├── iterm2.py        # iTerm2 terminal support
+│   │       └── terminal_app.py  # macOS Terminal.app support
+│   └── tools/                   # MCP tool definitions (86 tools)
+│       ├── __init__.py          # register_all_tools()
+│       ├── helpers.py           # Compatibility exports + permission helpers
+│       ├── helpers_*.py         # Persistence/manager/git helper split modules
+│       ├── session.py           # Session entry module (re-export)
+│       ├── session_tools.py     # Session tools (4)
+│       ├── session_env.py       # Session .env/template helpers
+│       ├── session_state.py     # Session state helpers
+│       ├── agent.py             # Agent entry module (re-export)
+│       ├── agent_tools.py       # Agent tool registration entry
+│       ├── agent_lifecycle_tools.py # Agent lifecycle tools (5)
+│       ├── agent_batch_tools.py # Batch worker tools (1)
+│       ├── command.py           # Command execution (5)
+│       ├── worktree.py          # Git worktree (7)
+│       ├── merge.py             # Merge completed task branches (1)
+│       ├── ipc.py               # IPC/messaging (4)
+│       ├── dashboard.py         # Dashboard/task tools (10)
+│       ├── dashboard_cost_tools.py # Cost tools (4)
+│       ├── gtrconfig.py         # Gtrconfig (3)
+│       ├── template.py          # Templates (4)
+│       ├── scheduler.py         # Scheduler (3)
+│       ├── healthcheck.py       # Healthcheck (6)
+│       ├── persona.py           # Persona (3)
+│       ├── memory.py            # Project memory + archive (10)
+│       ├── memory_global.py     # Global memory + archive (9)
+│       ├── screenshot.py        # Screenshot management (4)
+│       ├── model_profile.py     # Model profile (3)
+│       └── task_templates.py    # Task template generation (helper module)
+├── templates/                   # Templates for agents and scripts
+│   ├── roles/                   # Role-based workflow guides (owner, admin, worker)
+│   ├── tasks/                   # Task instruction templates
+│   └── scripts/                 # Script templates
+│       └── bash/                # Bash scripts (workspace_setup.sh)
+├── tests/                       # Pytest test files
 ├── pyproject.toml
 └── README.md
 ```
@@ -155,7 +170,8 @@ All managers follow a consistent pattern:
 ### MCP Tools
 
 Tools are defined in `src/tools/` modules using FastMCP decorators:
-- Each category has its own module (e.g., `session.py`, `agent.py`)
+- Entry modules can delegate to split modules (e.g., `session.py` -> `session_tools.py`)
+- Agent tools are composed via `agent_tools.py` -> `agent_lifecycle_tools.py` / `agent_batch_tools.py`
 - Tools are registered via `register_tools(mcp)` function in each module
 - `src/tools/__init__.py` provides `register_all_tools(mcp)` to register all tools
 - Return structured data (dict) for complex responses
@@ -208,11 +224,17 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `MCP_MCP_DIR` | MCP working directory name | .multi-agent-mcp |
 | `MCP_MAX_WORKERS` | Maximum number of worker agents | 6 |
-| `MCP_TMUX_PREFIX` | Prefix for tmux session names | multi-agent-mcp |
 | `MCP_ENABLE_WORKTREE` | Enable git worktree for workers | true |
+| `MCP_WINDOW_NAME_MAIN` | Main tmux window name (Admin + Worker 1-6) | main |
+| `MCP_WINDOW_NAME_WORKER_PREFIX` | Prefix for extra worker windows | workers- |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
-| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck interval (no response = unhealthy) | 60 |
+| `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck monitor interval (seconds) | 60 |
+| `MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS` | Stall detection timeout (seconds) | 600 |
+| `MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS` | Max recovery attempts per worker/task | 3 |
+| `MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE` | Consecutive idle detections to auto-stop daemon | 3 |
+| `MCP_DEFAULT_TERMINAL` | Default terminal app | auto |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | claude |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | opus |
@@ -227,10 +249,16 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | Performance Admin thinking tokens | 30000 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | Performance Worker thinking tokens | 4000 |
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
+| `MCP_CLI_DEFAULT_CLAUDE_ADMIN_MODEL` | Claude CLI Admin default model | opus |
+| `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | Claude CLI Worker default model | sonnet |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | Codex CLI Admin default model | gpt-5.3-codex |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | Codex CLI Worker default model | gpt-5.3-codex |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | Gemini CLI Admin default model | gemini-3-pro |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | Gemini CLI Worker default model | gemini-3-flash |
+| `MCP_WORKER_CLI_MODE` | Worker CLI mode (`uniform` / `per-worker`) | uniform |
+| `MCP_WORKER_CLI_UNIFORM` | Uniform Worker CLI value | claude |
+| `MCP_WORKER_MODEL_MODE` | Worker model mode (`uniform` / `per-worker`) | uniform |
+| `MCP_WORKER_MODEL_UNIFORM` | Uniform Worker model value (falls back to profile worker model) | - |
 | `MCP_QUALITY_CHECK_MAX_ITERATIONS` | Max quality check iterations | 5 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | Same issue repeat limit | 3 |
 | `MCP_MEMORY_MAX_ENTRIES` | Max memory entries | 1000 |
