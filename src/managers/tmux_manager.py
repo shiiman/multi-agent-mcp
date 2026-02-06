@@ -612,6 +612,7 @@ class TmuxManager:
         pane: int,
         command: str,
         literal: bool = True,
+        clear_input: bool = True,
     ) -> bool:
         """指定したウィンドウ・ペインにキー入力を送信する。
 
@@ -621,6 +622,8 @@ class TmuxManager:
             pane: ペインインデックス
             command: 実行するコマンド
             literal: Trueの場合、特殊文字をリテラルとして送信
+            clear_input: Trueの場合、送信前に C-c/C-u で入力バッファをクリア。
+                         通知送信時は False にすること（Claude Code の処理を中断させないため）
 
         Returns:
             成功した場合True
@@ -629,10 +632,11 @@ class TmuxManager:
         window_name = self._get_window_name(window)
         target = f"{session_name}:{window_name}.{pane}"
 
-        # 🔴 入力バッファをクリア（残存文字による @export 問題を防止）
-        # C-u: 現在の入力行をクリア、C-c: 実行中のコマンドをキャンセル
-        await self._run("send-keys", "-t", target, "C-c")
-        await self._run("send-keys", "-t", target, "C-u")
+        # 入力バッファをクリア（残存文字による @export 問題を防止）
+        # 通知送信時は clear_input=False でスキップ（Claude Code の処理を中断させない）
+        if clear_input:
+            await self._run("send-keys", "-t", target, "C-c")
+            await self._run("send-keys", "-t", target, "C-u")
 
         # コマンド送信
         if literal:

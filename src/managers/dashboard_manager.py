@@ -440,6 +440,12 @@ class DashboardManager(DashboardCostMixin):
         if worktree_path:
             task.worktree_path = worktree_path
 
+        # エージェントの current_task_id も更新
+        for agent_summary in dashboard.agents:
+            if agent_summary.agent_id == agent_id:
+                agent_summary.current_task_id = task_id
+                break
+
         self._write_dashboard(dashboard)
 
         logger.info(f"タスク {task_id} をエージェント {agent_id} に割り当てました")

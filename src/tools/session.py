@@ -559,6 +559,14 @@ def register_tools(mcp: FastMCP) -> None:
         if session_id:
             app_ctx.session_id = session_id
 
+            # session_id 設定後、既存エージェント（Owner 等）をファイルに再保存
+            # Owner は init_tmux_workspace の前に作成されるため、
+            # session_id 未設定で agents.json への保存に失敗している
+            from src.tools.helpers_persistence import save_agent_to_file as _save_agent
+
+            for agent in app_ctx.agents.values():
+                _save_agent(app_ctx, agent)
+
         # gtr 自動確認・設定
         gtr_status = {
             "gtr_available": False,

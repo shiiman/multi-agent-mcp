@@ -255,37 +255,8 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効な進捗率です: {progress}（有効: 0-100）",
             }
 
-        dashboard = ensure_dashboard_manager(app_ctx)
-
-        # チェックリストがある場合は update_task_checklist を使用
-        if checklist is not None or message is not None:
-            try:
-                success, update_msg = dashboard.update_task_checklist(
-                    task_id=task_id,
-                    checklist=checklist,
-                    log_message=message,
-                )
-                if not success:
-                    logger.warning(f"チェックリスト/ログ更新に失敗: {update_msg}")
-            except Exception as e:
-                logger.warning(f"チェックリスト/ログ更新に失敗: {e}")
-
-        # progress が明示的に指定された場合はステータスも更新
-        if progress is not None:
-            try:
-                success, update_msg = dashboard.update_task_status(
-                    task_id=task_id,
-                    status=TaskStatus.IN_PROGRESS,
-                    progress=progress,
-                )
-                if not success:
-                    logger.warning(f"Dashboard の進捗更新に失敗: {update_msg}")
-            except Exception as e:
-                logger.warning(f"Dashboard の進捗更新に失敗: {e}")
-
-        # 最新のタスク情報を取得
-        task = dashboard.get_task(task_id)
-        actual_progress = task.progress if task else (progress or 0)
+        # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
+        actual_progress = progress or 0
 
         # Admin にも進捗を通知（IPC メッセージ）
         admin_notified = False
@@ -303,6 +274,8 @@ def register_tools(mcp: FastMCP) -> None:
                     metadata={
                         "task_id": task_id,
                         "progress": actual_progress,
+                        "checklist": checklist,
+                        "message": message,
                         "reporter": caller_agent_id,
                     },
                 )
@@ -340,29 +313,17 @@ def register_tools(mcp: FastMCP) -> None:
                         admin_agent.window_index or 0,
                         admin_agent.pane_index,
                         notification_text,
+                        clear_input=False,
                     )
                     logger.info(f"Admin への tmux 通知を送信: {admin_id_for_notify}")
             except Exception as e:
                 logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
-
-        # Markdown ダッシュボードも更新
-        markdown_updated = False
-        if app_ctx.session_id and app_ctx.project_root:
-            try:
-                dashboard = ensure_dashboard_manager(app_ctx)
-                dashboard.save_markdown_dashboard(
-                    app_ctx.project_root, app_ctx.session_id
-                )
-                markdown_updated = True
-            except Exception as e:
-                logger.warning(f"Markdown ダッシュボード更新に失敗: {e}")
 
         return {
             "success": True,
             "task_id": task_id,
             "progress": actual_progress,
             "admin_notified": admin_notified,
-            "markdown_updated": markdown_updated,
             "message": f"進捗 {actual_progress}% を報告しました",
         }
 
@@ -415,20 +376,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効なステータスです: {status}（有効: completed, failed）",
             }
 
-        # Dashboard を直接更新（Worker からでも更新可能にする）
-        dashboard_updated = False
-        try:
-            dashboard = ensure_dashboard_manager(app_ctx)
-            task_status = TaskStatus.COMPLETED if status == "completed" else TaskStatus.FAILED
-            dashboard.update_task_status(
-                task_id=task_id,
-                status=task_status,
-                error_message=message if status == "failed" else None,
-            )
-            dashboard_updated = True
-            logger.info(f"タスク {task_id} のステータスを {status} に更新しました")
-        except Exception as e:
-            logger.warning(f"Dashboard の更新に失敗: {e}")
+        # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
 
         # IPC マネージャーを取得（自動初期化）
         ipc = ensure_ipc_manager(app_ctx)
@@ -472,6 +420,7 @@ def register_tools(mcp: FastMCP) -> None:
                     admin_agent.window_index or 0,
                     admin_agent.pane_index,
                     notification_text,
+                    clear_input=False,
                 )
                 logger.info(f"Admin への tmux 通知を送信: {admin_id}")
         except Exception as e:
@@ -503,25 +452,11 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception as e:
             logger.debug(f"メモリ保存をスキップ: {e}")
 
-        # Markdown ダッシュボードも更新
-        markdown_updated = False
-        if app_ctx.session_id and app_ctx.project_root:
-            try:
-                dashboard = ensure_dashboard_manager(app_ctx)
-                dashboard.save_markdown_dashboard(
-                    app_ctx.project_root, app_ctx.session_id
-                )
-                markdown_updated = True
-            except Exception as e:
-                logger.warning(f"Markdown ダッシュボード更新に失敗: {e}")
-
         return {
             "success": True,
             "message": f"Admin ({admin_id}) に報告を送信しました",
             "task_id": task_id,
             "reported_status": status,
-            "dashboard_updated": dashboard_updated,
-            "markdown_updated": markdown_updated,
             "memory_saved": memory_saved,
             "notification_sent": notification_sent,
         }
@@ -609,19 +544,25 @@ def register_tools(mcp: FastMCP) -> None:
 
         dashboard = ensure_dashboard_manager(app_ctx)
 
-        # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
-        sync_agents_from_file(app_ctx)
+        # Worker の場合は Dashboard を読み取り専用で返す（上書き防止）
+        caller = app_ctx.agents.get(caller_agent_id)
+        caller_role = getattr(caller, "role", None)
+        is_admin_or_owner = caller_role in (
+            AgentRole.ADMIN.value, AgentRole.OWNER.value, "admin", "owner",
+        )
 
-        # エージェント情報を Dashboard に同期
-        for agent in app_ctx.agents.values():
-            dashboard.update_agent_summary(agent)
-
-        # 🔴 同期後に Dashboard ファイルも更新（マルチプロセス対応）
-        if app_ctx.session_id and app_ctx.project_root:
-            try:
-                dashboard.save_markdown_dashboard(app_ctx.project_root, app_ctx.session_id)
-            except Exception as e:
-                logger.warning(f"Dashboard ファイル更新に失敗: {e}")
+        if is_admin_or_owner:
+            # Admin/Owner: エージェント情報を同期して Dashboard を更新
+            sync_agents_from_file(app_ctx)
+            for agent in app_ctx.agents.values():
+                dashboard.update_agent_summary(agent)
+            if app_ctx.session_id and app_ctx.project_root:
+                try:
+                    dashboard.save_markdown_dashboard(
+                        app_ctx.project_root, app_ctx.session_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Dashboard ファイル更新に失敗: {e}")
 
         dashboard_data = dashboard.get_dashboard()
 
@@ -649,19 +590,25 @@ def register_tools(mcp: FastMCP) -> None:
 
         dashboard = ensure_dashboard_manager(app_ctx)
 
-        # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
-        sync_agents_from_file(app_ctx)
+        # Worker の場合は Dashboard を読み取り専用で返す（上書き防止）
+        caller = app_ctx.agents.get(caller_agent_id)
+        caller_role = getattr(caller, "role", None)
+        is_admin_or_owner = caller_role in (
+            AgentRole.ADMIN.value, AgentRole.OWNER.value, "admin", "owner",
+        )
 
-        # エージェント情報を Dashboard に同期
-        for agent in app_ctx.agents.values():
-            dashboard.update_agent_summary(agent)
-
-        # 🔴 同期後に Dashboard ファイルも更新（マルチプロセス対応）
-        if app_ctx.session_id and app_ctx.project_root:
-            try:
-                dashboard.save_markdown_dashboard(app_ctx.project_root, app_ctx.session_id)
-            except Exception as e:
-                logger.warning(f"Dashboard ファイル更新に失敗: {e}")
+        if is_admin_or_owner:
+            # Admin/Owner: エージェント情報を同期して Dashboard を更新
+            sync_agents_from_file(app_ctx)
+            for agent in app_ctx.agents.values():
+                dashboard.update_agent_summary(agent)
+            if app_ctx.session_id and app_ctx.project_root:
+                try:
+                    dashboard.save_markdown_dashboard(
+                        app_ctx.project_root, app_ctx.session_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Dashboard ファイル更新に失敗: {e}")
 
         summary = dashboard.get_summary()
 
