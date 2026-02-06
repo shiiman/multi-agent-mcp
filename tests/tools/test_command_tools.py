@@ -1,6 +1,7 @@
 """コマンド実行ツールのテスト。"""
 
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -712,3 +713,60 @@ class TestSendTask:
         assert result["success"] is True
         assert "codex --model gpt-5.3-codex" in result["command_sent"]
         assert "codex exec" not in result["command_sent"]
+
+    @pytest.mark.asyncio
+    async def test_send_task_auto_enhance_does_not_embed_role_guide(
+        self, command_mock_ctx, git_repo
+    ):
+        """auto_enhance=True でも task ファイルに role 本文が混入しないことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="管理タスクを実行してください",
+            session_id="issue-role-separation",
+            auto_enhance=True,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        task_text = Path(result["task_file"]).read_text(encoding="utf-8")
+        assert "# Multi-Agent MCP - Admin Agent" not in task_text

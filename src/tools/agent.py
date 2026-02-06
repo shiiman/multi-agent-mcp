@@ -11,7 +11,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import AICli, Settings, TerminalApp
 from src.config.template_loader import get_template_loader
-from src.config.workflow_guides import get_role_guide, get_role_template_path
+from src.config.workflow_guides import get_role_template_path
 from src.context import AppContext
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
@@ -355,13 +355,6 @@ async def _send_task_to_worker(
             admin_id=caller_agent_id,
             mcp_tool_prefix=mcp_prefix,
         )
-
-        # ロールテンプレートを先頭に追加
-        role_guide = get_role_guide("worker")
-        if role_guide:
-            final_task_content = (
-                role_guide.content + "\n\n---\n\n# タスク指示\n\n" + final_task_content
-            )
 
         # タスクファイル作成・送信
         dashboard = ensure_dashboard_manager(app_ctx)

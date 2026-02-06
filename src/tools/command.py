@@ -6,7 +6,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.config.workflow_guides import get_role_guide, get_role_template_path
+from src.config.workflow_guides import get_role_template_path
 from src.models.agent import AgentRole, AgentStatus
 from src.tools.helpers import (
     ensure_dashboard_manager,
@@ -259,13 +259,7 @@ def register_tools(mcp: FastMCP) -> None:
                     mcp_tool_prefix=mcp_prefix,
                 )
 
-            # ロールテンプレートを先頭に追加
-            role_name = "admin" if is_admin else "worker"
-            role_guide = get_role_guide(role_name)
-            if role_guide:
-                final_task_content = (
-                    role_guide.content + "\n\n---\n\n# タスク指示\n\n" + final_task_content
-                )
+            # Keep role/task separation: role guidance is passed via CLI bootstrap command.
 
         # タスクファイル作成
         dashboard = ensure_dashboard_manager(app_ctx)

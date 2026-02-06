@@ -1,6 +1,7 @@
 """エージェント管理ツールのテスト。"""
 
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -658,3 +659,58 @@ class TestGetNextWorkerSlot:
         slot = _get_next_worker_slot(agents, settings, "test-project")
 
         assert slot is None
+
+
+class TestSendTaskToWorker:
+    """_send_task_to_worker ヘルパーのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_worker_task_file_does_not_embed_role_guide(self, mock_ctx, git_repo):
+        """Worker task ファイルに role 本文が混入しないことをテスト。"""
+        from src.tools.agent import _send_task_to_worker
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = worker
+
+        profile_settings = {
+            "worker_model": "gpt-5.3-codex",
+            "worker_thinking_tokens": 4000,
+        }
+
+        success = await _send_task_to_worker(
+            app_ctx=app_ctx,
+            agent=worker,
+            task_content="テスト実装を進めてください",
+            branch="feature/test",
+            worktree_path=str(git_repo),
+            session_id="issue-worker-role-separation",
+            worker_index=0,
+            enable_worktree=False,
+            profile_settings=profile_settings,
+            caller_agent_id="admin-001",
+        )
+
+        assert success is True
+        task_path = (
+            Path(git_repo)
+            / ".multi-agent-mcp"
+            / "issue-worker-role-separation"
+            / "tasks"
+            / "worker-001.md"
+        )
+        task_text = task_path.read_text(encoding="utf-8")
+        assert "# Multi-Agent MCP - Worker Agent" not in task_text
