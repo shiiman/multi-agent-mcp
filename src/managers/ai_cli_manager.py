@@ -188,7 +188,8 @@ class AiCliManager:
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
-            parts.extend(["--message", quoted_prompt])
+            # Codex CLI はプロンプトを位置引数で受け取る（--message は未対応）。
+            parts.append(quoted_prompt)
             command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
@@ -232,7 +233,7 @@ class AiCliManager:
                 args.extend(["--prompt", prompt])
         elif cli == AICli.CODEX:
             if prompt:
-                args.extend(["--message", prompt])
+                args.append(prompt)
         elif cli == AICli.GEMINI:
             if prompt:
                 args.extend(["--prompt", prompt])
