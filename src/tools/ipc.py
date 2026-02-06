@@ -5,10 +5,8 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.context import AppContext
-from src.models.agent import AgentStatus
 from src.models.message import MessagePriority, MessageType
-from src.tools.helpers import check_tool_permission, ensure_ipc_manager, sync_agents_from_file
+from src.tools.helpers import ensure_ipc_manager, require_permission, sync_agents_from_file
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +39,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             送信結果（success, message_id, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "send_message", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "send_message", caller_agent_id)
         if role_error:
             return role_error
 
@@ -177,10 +172,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             メッセージ一覧（success, messages, count または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "read_messages", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "read_messages", caller_agent_id)
         if role_error:
             return role_error
 
@@ -233,10 +225,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             未読数（success, agent_id, unread_count）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_unread_count", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_unread_count", caller_agent_id)
         if role_error:
             return role_error
 
@@ -268,10 +257,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             登録結果（success, agent_id, message）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "register_agent_to_ipc", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "register_agent_to_ipc", caller_agent_id)
         if role_error:
             return role_error
 

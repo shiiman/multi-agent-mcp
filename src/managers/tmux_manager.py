@@ -99,17 +99,6 @@ class TmuxManager:
             logger.error(f"tmux コマンド実行エラー: {e}")
             return 1, "", str(e)
 
-    def _session_name(self, name: str) -> str:
-        """セッション名を返す（プレフィックスなし）。
-
-        Args:
-            name: セッション名
-
-        Returns:
-            セッション名（そのまま返す）
-        """
-        return name
-
     def _get_window_name(self, window_index: int) -> str:
         """ウィンドウインデックスからウィンドウ名を取得する。
 
@@ -136,7 +125,7 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(name)
+        session_name = name
         code, _, stderr = await self._run(
             "new-session", "-d", "-s", session_name, "-c", working_dir
         )
@@ -155,7 +144,7 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(session)
+        session_name = session
 
         # コマンド送信（リテラルモードで特殊文字をエスケープ）
         # multi-agent-shogun の知見: メッセージと Enter は別々に送信する必要がある
@@ -188,7 +177,7 @@ class TmuxManager:
         Returns:
             キャプチャした出力テキスト
         """
-        session_name = self._session_name(session)
+        session_name = session
         code, stdout, stderr = await self._run(
             "capture-pane", "-t", session_name, "-p", "-S", f"-{lines}"
         )
@@ -206,7 +195,7 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(session)
+        session_name = session
         code, _, stderr = await self._run("kill-session", "-t", session_name)
         if code != 0:
             logger.warning(f"セッション終了エラー（既に終了している可能性）: {stderr}")
@@ -235,7 +224,7 @@ class TmuxManager:
         Returns:
             存在する場合True
         """
-        session_name = self._session_name(session)
+        session_name = session
         code, _, _ = await self._run("has-session", "-t", session_name)
         return code == 0
 
@@ -286,7 +275,7 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(session)
+        session_name = session
         attach_cmd = f"tmux attach -t {session_name}"
 
         # 指定されたターミナルを使用
@@ -375,7 +364,7 @@ class TmuxManager:
         """
         # プロジェクト名を含むセッション名を生成
         project_name = get_project_name(working_dir)
-        session_name = self._session_name(project_name)
+        session_name = project_name
 
         # セッションが既に存在する場合はスキップ
         if await self.session_exists(project_name):
@@ -503,7 +492,7 @@ class TmuxManager:
         Returns:
             新しいウィンドウ番号、失敗した場合None
         """
-        session_name = self._session_name(session)
+        session_name = session
 
         # 新しいウィンドウを追加
         code, _, stderr = await self._run(
@@ -547,7 +536,7 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(project_name)
+        session_name = project_name
         window_name = f"workers-{window_index + 1}"
 
         # ウィンドウが既に存在するか確認
@@ -635,7 +624,7 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(session)
+        session_name = session
         window_name = self._get_window_name(window)
         target = f"{session_name}:{window_name}.{pane}"
 
@@ -674,7 +663,7 @@ class TmuxManager:
         Returns:
             キャプチャした出力テキスト
         """
-        session_name = self._session_name(session)
+        session_name = session
         window_name = self._get_window_name(window)
         target = f"{session_name}:{window_name}.{pane}"
 
@@ -700,7 +689,7 @@ class TmuxManager:
         Returns:
             成功した場合True
         """
-        session_name = self._session_name(session)
+        session_name = session
         window_name = self._get_window_name(window)
         target = f"{session_name}:{window_name}.{pane}"
 
@@ -721,7 +710,7 @@ class TmuxManager:
         Returns:
             ウィンドウ情報のリスト
         """
-        session_name = self._session_name(session)
+        session_name = session
 
         code, stdout, _ = await self._run(
             "list-windows",
@@ -823,7 +812,7 @@ class TmuxManager:
 
         # プロジェクト名を含むセッション名を生成
         project_name = get_project_name(working_dir)
-        session_name = self._session_name(project_name)
+        session_name = project_name
 
         # スクリプト生成
         script = self._generate_workspace_script(session_name, working_dir)

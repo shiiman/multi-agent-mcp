@@ -29,7 +29,6 @@ def tool_test_ctx(git_repo, settings):
     mock_tmux.session_exists = AsyncMock(return_value=True)
     mock_tmux.set_pane_title = AsyncMock(return_value=True)
     mock_tmux.add_extra_worker_window = AsyncMock(return_value=True)
-    mock_tmux._session_name = MagicMock(return_value="repo")
     mock_tmux._get_window_name = MagicMock(return_value="main")
     mock_tmux._run = AsyncMock(return_value="")
     mock_tmux.settings = settings

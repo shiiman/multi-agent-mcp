@@ -6,7 +6,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import ModelProfile
 from src.context import AppContext
-from src.tools.helpers import check_tool_permission
+from src.tools.helpers import require_permission
 
 
 def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str, Any]:
@@ -69,10 +69,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             プロファイル情報（success, active_profile, settings）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_model_profile", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_model_profile", caller_agent_id)
         if role_error:
             return role_error
 
@@ -104,10 +101,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             切り替え結果（success, previous_profile, current_profile, settings）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "switch_model_profile", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "switch_model_profile", caller_agent_id)
         if role_error:
             return role_error
 
@@ -153,10 +147,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             プロファイル設定の詳細
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_model_profile_settings", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_model_profile_settings", caller_agent_id)
         if role_error:
             return role_error
 

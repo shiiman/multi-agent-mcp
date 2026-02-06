@@ -283,7 +283,6 @@ def mock_tmux_manager():
     mock.set_pane_title = AsyncMock(return_value=True)
     mock.add_extra_worker_window = AsyncMock(return_value=True)
     mock.cleanup_all_sessions = AsyncMock()
-    mock._session_name = MagicMock(return_value="test-session")
     mock._get_window_name = MagicMock(return_value="main")
     mock._run = AsyncMock(return_value="")
     return mock

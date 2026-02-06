@@ -4,8 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.context import AppContext
-from src.tools.helpers import check_tool_permission, ensure_persona_manager
+from src.tools.helpers import ensure_persona_manager, require_permission
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -28,10 +27,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             検出結果（success, task_type, persona）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "detect_task_type", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "detect_task_type", caller_agent_id)
         if role_error:
             return role_error
 
@@ -66,10 +62,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             ペルソナ情報（success, persona, system_prompt_addition）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_optimal_persona", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_optimal_persona", caller_agent_id)
         if role_error:
             return role_error
 
@@ -101,10 +94,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             ペルソナ一覧（success, personas, count）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "list_personas", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "list_personas", caller_agent_id)
         if role_error:
             return role_error
 

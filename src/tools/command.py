@@ -6,23 +6,21 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.context import AppContext
+from src.config.workflow_guides import get_role_guide
 from src.managers.agent_manager import AgentManager
 from src.models.agent import AgentRole, AgentStatus
-from src.config.workflow_guides import get_role_guide
 from src.tools.helpers import (
-    check_tool_permission,
     ensure_dashboard_manager,
-    ensure_global_memory_manager,
-    ensure_memory_manager,
     ensure_persona_manager,
     get_mcp_tool_prefix_from_config,
+    require_permission,
     resolve_main_repo_root,
     save_agent_to_file,
+    search_memory_context,
     sync_agents_from_file,
 )
 from src.tools.model_profile import get_current_profile_settings
-from src.tools.task_templates import generate_admin_task, generate_7section_task
+from src.tools.task_templates import generate_7section_task, generate_admin_task
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -47,10 +45,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             送信結果（success, agent_id, command, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "send_command", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "send_command", caller_agent_id)
         if role_error:
             return role_error
 
@@ -110,10 +105,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             出力内容（success, agent_id, lines, output または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_output", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_output", caller_agent_id)
         if role_error:
             return role_error
 
@@ -180,10 +172,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             送信結果（success, task_file, command_sent, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "send_task", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "send_task", caller_agent_id)
         if role_error:
             return role_error
 
@@ -228,35 +217,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         if auto_enhance:
             # メモリから関連情報を検索（プロジェクト + グローバル）
-            memory_context = ""
-            memory_lines = []
-
-            # プロジェクトメモリ検索
-            try:
-                memory_manager = ensure_memory_manager(app_ctx)
-                project_results = memory_manager.search(task_content, limit=3)
-                if project_results:
-                    memory_lines.append("**プロジェクトメモリ:**")
-                    for entry in project_results:
-                        memory_lines.append(f"- **{entry.key}**: {entry.content[:200]}...")
-            except Exception:
-                pass
-
-            # グローバルメモリ検索
-            try:
-                global_memory = ensure_global_memory_manager()
-                global_results = global_memory.search(task_content, limit=2)
-                if global_results:
-                    if memory_lines:
-                        memory_lines.append("")  # 空行
-                    memory_lines.append("**グローバルメモリ:**")
-                    for entry in global_results:
-                        memory_lines.append(f"- **{entry.key}**: {entry.content[:200]}...")
-            except Exception:
-                pass
-
-            if memory_lines:
-                memory_context = "\n".join(memory_lines)
+            memory_context = search_memory_context(app_ctx, task_content)
 
             # プロジェクト名を取得
             project_name = project_root.name
@@ -405,10 +366,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             開く結果（success, agent_id, session, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "open_session", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "open_session", caller_agent_id)
         if role_error:
             return role_error
 
@@ -461,10 +419,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             送信結果（success, command, role_filter, results, summary または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "broadcast_command", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "broadcast_command", caller_agent_id)
         if role_error:
             return role_error
 

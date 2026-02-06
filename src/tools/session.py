@@ -1,7 +1,6 @@
 """セッション管理ツール。"""
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +9,11 @@ from mcp.server.fastmcp import Context, FastMCP
 from src.config.settings import Settings
 from src.context import AppContext
 from src.managers.tmux_manager import get_project_name
-from src.tools.helpers import check_tool_permission, get_gtrconfig_manager, get_worktree_manager
+from src.tools.helpers import (
+    get_gtrconfig_manager,
+    get_worktree_manager,
+    require_permission,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -306,10 +309,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             クリーンアップ結果（success, terminated_sessions, cleared_agents, message）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "cleanup_workspace", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "cleanup_workspace", caller_agent_id)
         if role_error:
             return role_error
 
@@ -353,10 +353,7 @@ def register_tools(mcp: FastMCP) -> None:
             completed_tasks: 完了タスク数
             failed_tasks: 失敗タスク数
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "check_all_tasks_completed", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "check_all_tasks_completed", caller_agent_id)
         if role_error:
             return role_error
 
@@ -389,10 +386,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             クリーンアップ結果
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "cleanup_on_completion", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "cleanup_on_completion", caller_agent_id)
         if role_error:
             return role_error
 
@@ -429,8 +423,8 @@ def register_tools(mcp: FastMCP) -> None:
         agent_count = len(agents)
 
         # グローバルレジストリからエージェント情報を削除
-        from src.tools.helpers import remove_agents_by_owner
         from src.models.agent import AgentRole
+        from src.tools.helpers import remove_agents_by_owner
 
         owner_agent = next(
             (a for a in agents.values() if a.role == AgentRole.OWNER),
@@ -540,13 +534,11 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             初期化結果（success, session_name, gtr_status, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-        tmux = app_ctx.tmux
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "init_tmux_workspace", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "init_tmux_workspace", caller_agent_id)
         if role_error:
             return role_error
+
+        tmux = app_ctx.tmux
 
         # 既存の tmux セッションが存在するかチェック（重複起動防止）
         project_name = get_project_name(working_dir)

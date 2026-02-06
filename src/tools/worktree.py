@@ -7,8 +7,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import Settings
-from src.context import AppContext
-from src.tools.helpers import check_tool_permission, get_worktree_manager, save_agent_to_file
+from src.tools.helpers import get_worktree_manager, require_permission, save_agent_to_file
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +40,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             作成結果（success, worktree_path, branch, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "create_worktree", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "create_worktree", caller_agent_id)
         if role_error:
             return role_error
 
@@ -98,10 +94,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             worktree一覧（success, worktrees, count または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "list_worktrees", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "list_worktrees", caller_agent_id)
         if role_error:
             return role_error
 
@@ -143,10 +136,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             削除結果（success, worktree_path, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "remove_worktree", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "remove_worktree", caller_agent_id)
         if role_error:
             return role_error
 
@@ -201,10 +191,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             割り当て結果（success, agent_id, worktree_path, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "assign_worktree", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "assign_worktree", caller_agent_id)
         if role_error:
             return role_error
 
@@ -252,10 +239,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             ステータス情報（success, status または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_worktree_status", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_worktree_status", caller_agent_id)
         if role_error:
             return role_error
 
@@ -291,10 +275,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             gtrの利用可否（success, gtr_available, message）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "check_gtr_available", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "check_gtr_available", caller_agent_id)
         if role_error:
             return role_error
 
@@ -333,10 +314,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             実行結果（success, branch, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "open_worktree_with_ai", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "open_worktree_with_ai", caller_agent_id)
         if role_error:
             return role_error
 

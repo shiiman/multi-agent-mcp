@@ -2,7 +2,9 @@
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -10,11 +12,17 @@ from src.config.settings import Settings
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.tmux_manager import TmuxManager
+from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.helpers import (
+    check_tool_permission,
     get_mcp_tool_prefix_from_config,
     get_project_root_from_config,
+    load_agents_from_file,
+    remove_agent_from_file,
     resolve_main_repo_root,
     resolve_project_root,
+    save_agent_to_file,
+    sync_agents_from_file,
 )
 
 
@@ -140,3 +148,318 @@ class TestGetMcpToolPrefixFromConfig:
 
         result = get_mcp_tool_prefix_from_config(working_dir=str(git_repo))
         assert result == "mcp__test-server__"
+
+
+class TestCheckToolPermission:
+    """check_tool_permission 関数のテスト。"""
+
+    def test_bootstrap_tool_allows_none_caller(self, app_ctx):
+        """BOOTSTRAP_TOOLS は caller_agent_id=None でも許可される。"""
+        result = check_tool_permission(app_ctx, "init_tmux_workspace", None)
+        assert result is None
+
+    def test_bootstrap_tool_create_agent_allows_none(self, app_ctx):
+        """create_agent は BOOTSTRAP_TOOLS なので None でも許可。"""
+        result = check_tool_permission(app_ctx, "create_agent", None)
+        assert result is None
+
+    def test_non_bootstrap_tool_requires_caller(self, app_ctx):
+        """非 BOOTSTRAP ツールで caller_agent_id=None の場合エラー。"""
+        result = check_tool_permission(app_ctx, "list_agents", None)
+        assert result is not None
+        assert result["success"] is False
+        assert "caller_agent_id" in result["error"]
+
+    def test_unknown_agent_returns_error(self, app_ctx):
+        """存在しないエージェントID でエラーを返す。"""
+        result = check_tool_permission(app_ctx, "list_agents", "nonexistent-agent")
+        assert result is not None
+        assert result["success"] is False
+        assert "見つかりません" in result["error"]
+
+    def test_allowed_role_returns_none(self, app_ctx):
+        """許可ロールに含まれるエージェントは None を返す（許可）。"""
+        # app_ctx.agents には agent-001 (owner) が含まれている
+        now = datetime.now()
+        app_ctx.agents["test-owner"] = Agent(
+            id="test-owner",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        result = check_tool_permission(app_ctx, "list_agents", "test-owner")
+        assert result is None
+
+    def test_disallowed_role_returns_error(self, app_ctx):
+        """許可ロールに含まれないエージェントはエラーを返す。"""
+        now = datetime.now()
+        app_ctx.agents["test-worker"] = Agent(
+            id="test-worker",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        # reset_cost_counter は owner のみ許可
+        result = check_tool_permission(app_ctx, "reset_cost_counter", "test-worker")
+        assert result is not None
+        assert result["success"] is False
+
+    def test_undefined_tool_allows_all_roles(self, app_ctx):
+        """権限が未定義のツールは全ロール許可。"""
+        now = datetime.now()
+        app_ctx.agents["test-worker"] = Agent(
+            id="test-worker",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        result = check_tool_permission(app_ctx, "undefined_tool_xyz", "test-worker")
+        assert result is None
+
+
+class TestAgentFilePersistence:
+    """エージェント永続化関数のテスト。"""
+
+    @pytest.fixture
+    def persistence_ctx(self, settings, git_repo):
+        """永続化テスト用の AppContext を作成する。"""
+        tmux = TmuxManager(settings)
+        ai_cli = AiCliManager(settings)
+        ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            project_root=str(git_repo),
+            session_id="test-session",
+        )
+        return ctx
+
+    @pytest.fixture
+    def sample_agent(self):
+        """テスト用のエージェントを作成する。"""
+        now = datetime.now()
+        return Agent(
+            id="persist-agent-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+            working_dir="/tmp/test",
+        )
+
+    def test_save_agent_to_file(self, persistence_ctx, sample_agent):
+        """エージェントをファイルに保存できることをテスト。"""
+        result = save_agent_to_file(persistence_ctx, sample_agent)
+        assert result is True
+
+    def test_load_agents_from_file(self, persistence_ctx, sample_agent):
+        """保存済みファイルから Agent を正しく復元できることをテスト。"""
+        save_agent_to_file(persistence_ctx, sample_agent)
+        agents = load_agents_from_file(persistence_ctx)
+        assert "persist-agent-001" in agents
+        agent = agents["persist-agent-001"]
+        assert agent.role == AgentRole.WORKER.value
+        assert agent.status == AgentStatus.IDLE.value
+
+    def test_load_agents_returns_empty_when_no_file(self, persistence_ctx):
+        """ファイルが存在しない場合に空 dict を返すことをテスト。"""
+        agents = load_agents_from_file(persistence_ctx)
+        assert agents == {}
+
+    def test_load_agents_datetime_conversion(self, persistence_ctx, sample_agent):
+        """datetime 文字列が正しく変換されることをテスト。"""
+        save_agent_to_file(persistence_ctx, sample_agent)
+        agents = load_agents_from_file(persistence_ctx)
+        agent = agents["persist-agent-001"]
+        assert isinstance(agent.created_at, datetime)
+        assert isinstance(agent.last_activity, datetime)
+
+    def test_sync_agents_from_file(self, persistence_ctx, sample_agent):
+        """ファイルの内容が AppContext に同期されることをテスト。"""
+        save_agent_to_file(persistence_ctx, sample_agent)
+        added = sync_agents_from_file(persistence_ctx)
+        assert added == 1
+        assert "persist-agent-001" in persistence_ctx.agents
+
+    def test_sync_agents_does_not_overwrite_existing(self, persistence_ctx, sample_agent):
+        """既存のエージェントを上書きしないことをテスト。"""
+        # メモリにエージェントを追加
+        persistence_ctx.agents["persist-agent-001"] = sample_agent
+        # ファイルにも保存
+        save_agent_to_file(persistence_ctx, sample_agent)
+        # sync しても追加数は 0
+        added = sync_agents_from_file(persistence_ctx)
+        assert added == 0
+
+    def test_remove_agent_from_file(self, persistence_ctx, sample_agent):
+        """エージェントをファイルから削除できることをテスト。"""
+        save_agent_to_file(persistence_ctx, sample_agent)
+        result = remove_agent_from_file(persistence_ctx, "persist-agent-001")
+        assert result is True
+        # 削除後は空
+        agents = load_agents_from_file(persistence_ctx)
+        assert "persist-agent-001" not in agents
+
+    def test_remove_nonexistent_agent(self, persistence_ctx, sample_agent):
+        """存在しないエージェントID で例外が出ないことをテスト。"""
+        save_agent_to_file(persistence_ctx, sample_agent)
+        result = remove_agent_from_file(persistence_ctx, "nonexistent-id")
+        assert result is False
+
+
+class TestHelpersImportCompat:
+    """helpers.py 分割後の import 互換性テスト。
+
+    全シンボルが from src.tools.helpers import ... で引き続き利用可能であることを確認する。
+    """
+
+    def test_git_helpers_reexport(self):
+        """helpers_git のシンボルが helpers から import 可能。"""
+        from src.tools.helpers import resolve_main_repo_root
+        assert callable(resolve_main_repo_root)
+
+    def test_registry_helpers_reexport(self):
+        """helpers_registry のシンボルが helpers から import 可能。"""
+        from src.tools.helpers import (
+            save_agent_to_registry,
+            get_project_root_from_registry,
+            get_session_id_from_registry,
+            remove_agent_from_registry,
+            remove_agents_by_owner,
+            get_project_root_from_config,
+            get_mcp_tool_prefix_from_config,
+            get_session_id_from_config,
+            ensure_session_id,
+            _get_from_config,
+        )
+        assert callable(save_agent_to_registry)
+        assert callable(get_project_root_from_registry)
+        assert callable(get_session_id_from_registry)
+        assert callable(remove_agent_from_registry)
+        assert callable(remove_agents_by_owner)
+        assert callable(get_project_root_from_config)
+        assert callable(get_mcp_tool_prefix_from_config)
+        assert callable(get_session_id_from_config)
+        assert callable(ensure_session_id)
+        assert callable(_get_from_config)
+
+    def test_persistence_helpers_reexport(self):
+        """helpers_persistence のシンボルが helpers から import 可能。"""
+        from src.tools.helpers import (
+            save_agent_to_file,
+            load_agents_from_file,
+            sync_agents_from_file,
+            remove_agent_from_file,
+        )
+        assert callable(save_agent_to_file)
+        assert callable(load_agents_from_file)
+        assert callable(sync_agents_from_file)
+        assert callable(remove_agent_from_file)
+
+    def test_managers_helpers_reexport(self):
+        """helpers_managers のシンボルが helpers から import 可能。"""
+        from src.tools.helpers import (
+            get_worktree_manager,
+            get_gtrconfig_manager,
+            ensure_ipc_manager,
+            ensure_dashboard_manager,
+            ensure_scheduler_manager,
+            ensure_healthcheck_manager,
+            ensure_persona_manager,
+            ensure_memory_manager,
+            ensure_global_memory_manager,
+            search_memory_context,
+        )
+        assert callable(get_worktree_manager)
+        assert callable(get_gtrconfig_manager)
+        assert callable(ensure_ipc_manager)
+        assert callable(ensure_dashboard_manager)
+        assert callable(ensure_scheduler_manager)
+        assert callable(ensure_healthcheck_manager)
+        assert callable(ensure_persona_manager)
+        assert callable(ensure_memory_manager)
+        assert callable(ensure_global_memory_manager)
+        assert callable(search_memory_context)
+
+    def test_direct_submodule_imports(self):
+        """各サブモジュールから直接 import も可能。"""
+        from src.tools.helpers_git import resolve_main_repo_root
+        from src.tools.helpers_registry import save_agent_to_registry
+        from src.tools.helpers_persistence import save_agent_to_file
+        from src.tools.helpers_managers import ensure_ipc_manager
+        assert callable(resolve_main_repo_root)
+        assert callable(save_agent_to_registry)
+        assert callable(save_agent_to_file)
+        assert callable(ensure_ipc_manager)
+
+    def test_core_functions_remain_in_helpers(self):
+        """コア関数が helpers.py に直接定義されていることを確認。"""
+        from src.tools.helpers import (
+            check_tool_permission,
+            resolve_project_root,
+            ensure_project_root_from_caller,
+            get_agent_role,
+            find_agents_by_role,
+            BOOTSTRAP_TOOLS,
+        )
+        assert callable(check_tool_permission)
+        assert callable(resolve_project_root)
+        assert callable(ensure_project_root_from_caller)
+        assert callable(get_agent_role)
+        assert callable(find_agents_by_role)
+        assert isinstance(BOOTSTRAP_TOOLS, set)
+
+
+class TestRequirePermission:
+    """get_app_ctx / require_permission ヘルパーのテスト。"""
+
+    def _make_mock_ctx(self, app_ctx):
+        """テスト用の mock Context を作成する。"""
+        ctx = MagicMock()
+        ctx.request_context.lifespan_context = app_ctx
+        return ctx
+
+    def test_get_app_ctx(self, app_ctx):
+        """get_app_ctx が AppContext を正しく取得する。"""
+        from src.tools.helpers import get_app_ctx
+
+        ctx = self._make_mock_ctx(app_ctx)
+        result = get_app_ctx(ctx)
+        assert result is app_ctx
+
+    @patch("src.tools.helpers.sync_agents_from_file")
+    def test_require_permission_allowed(self, mock_sync, app_ctx):
+        """権限OK時に (app_ctx, None) を返す。"""
+        from src.tools.helpers import require_permission
+
+        # Owner エージェントを登録
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir="/tmp",
+            created_at=now,
+            last_activity=now,
+        )
+
+        ctx = self._make_mock_ctx(app_ctx)
+        result_ctx, error = require_permission(ctx, "create_task", "owner-001")
+        assert result_ctx is app_ctx
+        assert error is None
+
+    @patch("src.tools.helpers.sync_agents_from_file")
+    def test_require_permission_denied(self, mock_sync, app_ctx):
+        """権限エラー時に (app_ctx, error_dict) を返す。"""
+        from src.tools.helpers import require_permission
+
+        ctx = self._make_mock_ctx(app_ctx)
+        # caller_agent_id=None は非 BOOTSTRAP ツールではエラー
+        result_ctx, error = require_permission(ctx, "get_dashboard", None)
+        assert result_ctx is app_ctx
+        assert error is not None
+        assert error["success"] is False

@@ -9,18 +9,15 @@ from mcp.server.fastmcp import Context, FastMCP
 
 logger = logging.getLogger(__name__)
 
-from src.config.settings import Settings
-from src.context import AppContext
 from src.models.agent import AgentStatus
 from src.models.dashboard import TaskStatus
 from src.models.message import MessagePriority, MessageType
 from src.tools.helpers import (
-    check_role_permission,
-    check_tool_permission,
     ensure_dashboard_manager,
     ensure_ipc_manager,
     ensure_memory_manager,
     find_agents_by_role,
+    require_permission,
     save_agent_to_file,
     sync_agents_from_file,
 )
@@ -52,10 +49,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             作成結果（success, task, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "create_task", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "create_task", caller_agent_id)
         if role_error:
             return role_error
 
@@ -97,10 +91,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             更新結果（success, task_id, status, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "update_task_status", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "update_task_status", caller_agent_id)
         if role_error:
             return role_error
 
@@ -153,10 +144,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             割り当て結果（success, task_id, agent_id, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "assign_task_to_agent", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "assign_task_to_agent", caller_agent_id)
         if role_error:
             return role_error
 
@@ -203,10 +191,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             タスク一覧（success, tasks, count または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "list_tasks", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "list_tasks", caller_agent_id)
         if role_error:
             return role_error
 
@@ -260,10 +245,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             報告結果（success, task_id, progress, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "report_task_progress", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "report_task_progress", caller_agent_id)
         if role_error:
             return role_error
 
@@ -405,10 +387,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             報告結果（success, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "report_task_completion", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "report_task_completion", caller_agent_id)
         if role_error:
             return role_error
 
@@ -513,8 +492,8 @@ def register_tools(mcp: FastMCP) -> None:
                 tags=["task", status, task_id],
             )
             memory_saved = True
-        except Exception:
-            pass  # メモリ保存失敗は致命的ではない
+        except Exception as e:
+            logger.debug(f"メモリ保存をスキップ: {e}")
 
         # Markdown ダッシュボードも更新
         markdown_updated = False
@@ -554,10 +533,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             タスク詳細（success, task または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_task", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_task", caller_agent_id)
         if role_error:
             return role_error
 
@@ -592,10 +568,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             削除結果（success, task_id, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "remove_task", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "remove_task", caller_agent_id)
         if role_error:
             return role_error
 
@@ -622,10 +595,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             ダッシュボード情報（success, dashboard）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_dashboard", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_dashboard", caller_agent_id)
         if role_error:
             return role_error
 
@@ -665,10 +635,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             サマリー情報（success, summary）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_dashboard_summary", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_dashboard_summary", caller_agent_id)
         if role_error:
             return role_error
 
@@ -695,126 +662,3 @@ def register_tools(mcp: FastMCP) -> None:
             "summary": summary,
         }
 
-    # コスト管理ツール
-
-    @mcp.tool()
-    async def get_cost_estimate(
-        caller_agent_id: str | None = None,
-        ctx: Context = None,
-    ) -> dict[str, Any]:
-        """現在のコスト推定を取得する。
-
-        Args:
-            caller_agent_id: 呼び出し元エージェントID（必須）
-
-        Returns:
-            コスト推定（success, estimate, warning）
-        """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_cost_estimate", caller_agent_id)
-        if role_error:
-            return role_error
-
-        dashboard = ensure_dashboard_manager(app_ctx)
-        estimate = dashboard.get_cost_estimate()
-        warning = dashboard.check_cost_warning()
-
-        return {
-            "success": True,
-            "estimate": estimate,
-            "warning": warning,
-        }
-
-    @mcp.tool()
-    async def set_cost_warning_threshold(
-        threshold_usd: float,
-        caller_agent_id: str | None = None,
-        ctx: Context = None,
-    ) -> dict[str, Any]:
-        """コスト警告の閾値を設定する。
-
-        ※ Owner のみ使用可能。
-
-        Args:
-            threshold_usd: 新しい閾値（USD）
-            caller_agent_id: 呼び出し元エージェントID（必須）
-
-        Returns:
-            設定結果（success, threshold, message）
-        """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "set_cost_warning_threshold", caller_agent_id)
-        if role_error:
-            return role_error
-
-        dashboard = ensure_dashboard_manager(app_ctx)
-        dashboard.set_cost_warning_threshold(threshold_usd)
-
-        return {
-            "success": True,
-            "threshold": threshold_usd,
-            "message": f"コスト警告閾値を ${threshold_usd:.2f} に設定しました",
-        }
-
-    @mcp.tool()
-    async def reset_cost_counter(
-        caller_agent_id: str | None = None,
-        ctx: Context = None,
-    ) -> dict[str, Any]:
-        """コストカウンターをリセットする。
-
-        ※ Owner のみ使用可能。
-
-        Args:
-            caller_agent_id: 呼び出し元エージェントID（必須）
-
-        Returns:
-            リセット結果（success, deleted_count, message）
-        """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "reset_cost_counter", caller_agent_id)
-        if role_error:
-            return role_error
-
-        dashboard = ensure_dashboard_manager(app_ctx)
-        deleted = dashboard.reset_cost_counter()
-
-        return {
-            "success": True,
-            "deleted_count": deleted,
-            "message": f"{deleted} 件の記録をリセットしました",
-        }
-
-    @mcp.tool()
-    async def get_cost_summary(
-        caller_agent_id: str | None = None,
-        ctx: Context = None,
-    ) -> dict[str, Any]:
-        """コストサマリーを取得する。
-
-        Args:
-            caller_agent_id: 呼び出し元エージェントID（必須）
-
-        Returns:
-            コストサマリー（success, summary）
-        """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_cost_summary", caller_agent_id)
-        if role_error:
-            return role_error
-
-        dashboard = ensure_dashboard_manager(app_ctx)
-        summary = dashboard.get_cost_summary()
-
-        return {
-            "success": True,
-            "summary": summary,
-        }

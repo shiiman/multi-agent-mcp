@@ -5,8 +5,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.context import AppContext
-from src.tools.helpers import check_tool_permission, ensure_healthcheck_manager
+from src.tools.helpers import ensure_healthcheck_manager, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +30,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             ヘルス状態（success, health_status）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "healthcheck_agent", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "healthcheck_agent", caller_agent_id)
         if role_error:
             return role_error
 
@@ -62,10 +58,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             全ヘルス状態（success, statuses, summary）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "healthcheck_all", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "healthcheck_all", caller_agent_id)
         if role_error:
             return role_error
 
@@ -100,10 +93,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             異常エージェント一覧（success, unhealthy_agents, count）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_unhealthy_agents", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_unhealthy_agents", caller_agent_id)
         if role_error:
             return role_error
 
@@ -134,10 +124,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             復旧結果（success, message）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "attempt_recovery", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "attempt_recovery", caller_agent_id)
         if role_error:
             return role_error
 
@@ -175,10 +162,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             復旧結果（success, old_agent_id, new_agent_id, reassigned_tasks, message）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "full_recovery", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "full_recovery", caller_agent_id)
         if role_error:
             return role_error
 
@@ -235,7 +219,7 @@ def register_tools(mcp: FastMCP) -> None:
         ):
             try:
                 # Ctrl+C を送信してプロセスを停止
-                session_name = tmux._session_name(old_session_name)
+                session_name = old_session_name
                 window_name = tmux._get_window_name(old_window_index)
                 target = f"{session_name}:{window_name}.{old_pane_index}"
                 await tmux._run("send-keys", "-t", target, "C-c")
@@ -281,6 +265,7 @@ def register_tools(mcp: FastMCP) -> None:
         # 5. 新しい agent を作成
         import uuid
         from datetime import datetime
+
         from src.models.agent import Agent, AgentStatus
         from src.tools.helpers import save_agent_to_file
 
@@ -311,7 +296,7 @@ def register_tools(mcp: FastMCP) -> None:
             and new_worktree_path
         ):
             try:
-                session_name = tmux._session_name(old_session_name)
+                session_name = old_session_name
                 window_name = tmux._get_window_name(old_window_index)
                 target = f"{session_name}:{window_name}.{old_pane_index}"
                 # working directory を変更

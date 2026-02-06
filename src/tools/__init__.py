@@ -6,10 +6,12 @@ from src.tools import (
     agent,
     command,
     dashboard,
+    dashboard_cost_tools,
     gtrconfig,
     healthcheck,
     ipc,
     memory,
+    memory_global,
     model_profile,
     persona,
     scheduler,
@@ -41,8 +43,11 @@ def register_all_tools(mcp: FastMCP) -> None:
     # IPC/メッセージング
     ipc.register_tools(mcp)
 
-    # ダッシュボード/タスク管理（コスト管理を含む）
+    # ダッシュボード/タスク管理
     dashboard.register_tools(mcp)
+
+    # コスト管理
+    dashboard_cost_tools.register_tools(mcp)
 
     # Gtrconfig
     gtrconfig.register_tools(mcp)
@@ -59,8 +64,11 @@ def register_all_tools(mcp: FastMCP) -> None:
     # ペルソナ
     persona.register_tools(mcp)
 
-    # メモリ
+    # メモリ（プロジェクトローカル + アーカイブ）
     memory.register_tools(mcp)
+
+    # グローバルメモリ
+    memory_global.register_tools(mcp)
 
     # スクリーンショット
     screenshot.register_tools(mcp)

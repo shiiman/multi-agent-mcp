@@ -7,8 +7,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import Settings
-from src.context import AppContext
-from src.tools.helpers import check_tool_permission
+from src.tools.helpers import require_permission
 
 
 def _get_mcp_dir() -> str:
@@ -32,10 +31,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             ディレクトリ情報（success, path, exists）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_screenshot_dir", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_screenshot_dir", caller_agent_id)
         if role_error:
             return role_error
 
@@ -68,10 +64,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             スクリーンショット一覧（success, screenshots, count）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "list_screenshots", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "list_screenshots", caller_agent_id)
         if role_error:
             return role_error
 
@@ -132,10 +125,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             画像データ（success, filename, base64_data, mime_type）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "read_screenshot", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "read_screenshot", caller_agent_id)
         if role_error:
             return role_error
 
@@ -191,10 +181,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             画像データ（success, filename, base64_data, mime_type）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "read_latest_screenshot", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "read_latest_screenshot", caller_agent_id)
         if role_error:
             return role_error
 

@@ -94,7 +94,8 @@ end tell
         try:
             code, stdout, _ = await self._run_shell(f"osascript -e '{applescript}'")
             return code == 0 and "true" in stdout.lower()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Ghostty 実行チェックをスキップ: {e}")
             return False
 
     async def _open_in_tab(self, script_path: str, session_path: str) -> bool:

@@ -14,13 +14,11 @@ from typing import TYPE_CHECKING
 import yaml
 
 from src.config.settings import get_mcp_dir
+from src.managers.dashboard_cost import DashboardCostMixin
 from src.models.agent import Agent
-from src.config.settings import Settings
 from src.models.dashboard import (
     AgentSummary,
-    ApiCallRecord,
     ChecklistItem,
-    CostInfo,
     Dashboard,
     TaskInfo,
     TaskLog,
@@ -34,11 +32,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class DashboardManager:
+class DashboardManager(DashboardCostMixin):
     """ダッシュボードを管理するクラス。
 
     複数プロセス対応のため、インメモリキャッシュを使わず
     毎回ファイルから読み書きする。
+    コスト管理メソッドは DashboardCostMixin から継承。
     """
 
     def __init__(
@@ -81,12 +80,7 @@ class DashboardManager:
 
     def _get_dashboard_path(self) -> Path:
         """ダッシュボードファイルパスを取得する。"""
-        # 🔴 ダッシュボード統合: dashboard.md に統一
         return self.dashboard_dir / "dashboard.md"
-
-    def _get_legacy_json_path(self) -> Path:
-        """レガシー JSON ダッシュボードファイルパスを取得する（移行用）。"""
-        return self.dashboard_dir / f"dashboard_{self.workspace_id}.json"
 
     def _write_dashboard(self, dashboard: Dashboard) -> None:
         """ダッシュボードをファイルに保存する（YAML Front Matter + Markdown）。
@@ -133,24 +127,6 @@ class DashboardManager:
             except (yaml.YAMLError, OSError) as e:
                 logger.warning(f"ダッシュボード読み込みエラー: {e}")
 
-        # レガシー JSON ファイルからの移行
-        legacy_path = self._get_legacy_json_path()
-        if legacy_path.exists():
-            try:
-                import json
-
-                with open(legacy_path, encoding="utf-8") as f:
-                    data = json.load(f)
-                    dashboard = Dashboard(**data)
-                    # 新形式で保存し直す
-                    self._write_dashboard(dashboard)
-                    # レガシーファイルを削除
-                    legacy_path.unlink()
-                    logger.info(f"レガシー JSON を Markdown に移行しました: {legacy_path}")
-                    return dashboard
-            except Exception as e:
-                logger.warning(f"レガシーファイル移行エラー: {e}")
-
         # ファイルがない場合は新規作成
         return Dashboard(
             workspace_id=self.workspace_id,
@@ -189,6 +165,25 @@ class DashboardManager:
             "# Multi-Agent Dashboard",
             "",
             f"**更新時刻**: {now}",
+        ]
+
+        lines.extend(self._generate_agent_table(dashboard))
+        lines.extend(self._generate_task_table(dashboard))
+        lines.extend(self._generate_task_details(dashboard))
+        lines.extend(self._generate_stats_section(dashboard))
+
+        return "\n".join(lines)
+
+    def _generate_agent_table(self, dashboard: Dashboard) -> list[str]:
+        """エージェント状態テーブルを生成する。"""
+        status_emoji = {
+            "idle": "🟢",
+            "busy": "🔵",
+            "error": "🔴",
+            "offline": "⚫",
+        }
+
+        lines = [
             "",
             "---",
             "",
@@ -197,13 +192,6 @@ class DashboardManager:
             "| ID | 役割 | 状態 | 現在のタスク | Worktree |",
             "|:---|:---|:---|:---|:---|",
         ]
-
-        status_emoji = {
-            "idle": "🟢",
-            "busy": "🔵",
-            "error": "🔴",
-            "offline": "⚫",
-        }
 
         for agent in dashboard.agents:
             emoji = status_emoji.get(str(agent.status).lower(), "⚪")
@@ -214,16 +202,10 @@ class DashboardManager:
                 f"{current_task} | `{worktree}` |"
             )
 
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## タスク状態",
-            "",
-            "| ID | タイトル | 状態 | 担当 | 進捗 |",
-            "|:---|:---|:---|:---|:---|",
-        ])
+        return lines
 
+    def _generate_task_table(self, dashboard: Dashboard) -> list[str]:
+        """タスク状態テーブルを生成する。"""
         task_emoji = {
             "pending": "⏳",
             "in_progress": "🔄",
@@ -233,6 +215,16 @@ class DashboardManager:
             "cancelled": "🗑️",
         }
 
+        lines = [
+            "",
+            "---",
+            "",
+            "## タスク状態",
+            "",
+            "| ID | タイトル | 状態 | 担当 | 進捗 |",
+            "|:---|:---|:---|:---|:---|",
+        ]
+
         for task in dashboard.tasks:
             emoji = task_emoji.get(str(task.status.value).lower(), "❓")
             assigned = task.assigned_agent_id[:8] if task.assigned_agent_id else "-"
@@ -241,47 +233,48 @@ class DashboardManager:
                 f"`{assigned}` | {task.progress}% |"
             )
 
-        # タスク詳細セクション（進行中のタスクのみ）
+        return lines
+
+    def _generate_task_details(self, dashboard: Dashboard) -> list[str]:
+        """進行中タスクの詳細セクションを生成する。"""
         in_progress_tasks = [
             t for t in dashboard.tasks if t.status == TaskStatus.IN_PROGRESS
         ]
-        if in_progress_tasks:
+        if not in_progress_tasks:
+            return []
+
+        lines = [
+            "",
+            "---",
+            "",
+            "## タスク詳細",
+        ]
+
+        for task in in_progress_tasks:
             lines.extend([
                 "",
-                "---",
+                f"### {task.title}",
                 "",
-                "## タスク詳細",
+                f"**進捗**: {task.progress}%",
             ])
 
-            for task in in_progress_tasks:
-                lines.extend([
-                    "",
-                    f"### {task.title}",
-                    "",
-                    f"**進捗**: {task.progress}%",
-                ])
+            if task.checklist:
+                lines.extend(["", "**チェックリスト**:"])
+                for item in task.checklist:
+                    check = "x" if item.completed else " "
+                    lines.append(f"- [{check}] {item.text}")
 
-                # チェックリスト
-                if task.checklist:
-                    lines.extend([
-                        "",
-                        "**チェックリスト**:",
-                    ])
-                    for item in task.checklist:
-                        check = "x" if item.completed else " "
-                        lines.append(f"- [{check}] {item.text}")
+            if task.logs:
+                lines.extend(["", "**最新ログ**:"])
+                for log in task.logs[-5:]:
+                    time_str = log.timestamp.strftime("%H:%M")
+                    lines.append(f"- {time_str} - {log.message}")
 
-                # 最新ログ
-                if task.logs:
-                    lines.extend([
-                        "",
-                        "**最新ログ**:",
-                    ])
-                    for log in task.logs[-5:]:
-                        time_str = log.timestamp.strftime("%H:%M")
-                        lines.append(f"- {time_str} - {log.message}")
+        return lines
 
-        lines.extend([
+    def _generate_stats_section(self, dashboard: Dashboard) -> list[str]:
+        """統計・コスト情報セクションを生成する。"""
+        lines = [
             "",
             "---",
             "",
@@ -292,9 +285,8 @@ class DashboardManager:
             f"- **総タスク数**: {dashboard.total_tasks}",
             f"- **完了タスク**: {dashboard.completed_tasks}",
             f"- **失敗タスク**: {dashboard.failed_tasks}",
-        ])
+        ]
 
-        # コスト情報セクション
         cost = dashboard.cost
         if cost.total_api_calls > 0:
             lines.extend([
@@ -309,14 +301,13 @@ class DashboardManager:
                 f"- **警告閾値**: ${cost.warning_threshold_usd:.2f}",
             ])
 
-            # 警告表示
             if cost.estimated_cost_usd >= cost.warning_threshold_usd:
                 lines.extend([
                     "",
                     f"⚠️ **警告**: 推定コストが閾値を超えています！",
                 ])
 
-        return "\n".join(lines)
+        return lines
 
     def get_dashboard(self) -> Dashboard:
         """現在のダッシュボードを取得する。
@@ -765,248 +756,6 @@ class DashboardManager:
             logger.info(f"タスクファイルを削除しました: {task_file}")
             return True
         return False
-
-    # コスト管理メソッド
-
-    def record_api_call(
-        self,
-        ai_cli: str,
-        estimated_tokens: int | None = None,
-        agent_id: str | None = None,
-        task_id: str | None = None,
-    ) -> None:
-        """API呼び出しを記録する。
-
-        Args:
-            ai_cli: 使用したAI CLI（claude/codex/gemini）
-            estimated_tokens: 推定トークン数（Noneでデフォルト値）
-            agent_id: エージェントID（オプション）
-            task_id: タスクID（オプション）
-        """
-        settings = Settings()
-        tokens = estimated_tokens or settings.estimated_tokens_per_call
-
-        dashboard = self._read_dashboard()
-        record = ApiCallRecord(
-            ai_cli=ai_cli.lower(),
-            tokens=tokens,
-            timestamp=datetime.now(),
-            agent_id=agent_id,
-            task_id=task_id,
-        )
-        dashboard.cost.calls.append(record)
-
-        # 統計を再計算
-        self._recalculate_cost_stats(dashboard)
-        self._write_dashboard(dashboard)
-
-        logger.debug(f"API呼び出しを記録: {ai_cli} ({tokens} tokens)")
-
-    def _recalculate_cost_stats(self, dashboard: Dashboard) -> None:
-        """コスト統計を再計算する（内部メソッド）。
-
-        Args:
-            dashboard: Dashboardオブジェクト
-        """
-        settings = Settings()
-        cost_per_1k_tokens = {
-            "claude": settings.cost_per_1k_tokens_claude,
-            "codex": settings.cost_per_1k_tokens_codex,
-            "gemini": settings.cost_per_1k_tokens_gemini,
-        }
-
-        dashboard.cost.total_api_calls = len(dashboard.cost.calls)
-        dashboard.cost.estimated_tokens = sum(c.tokens for c in dashboard.cost.calls)
-
-        total_cost = 0.0
-        for call in dashboard.cost.calls:
-            cost_per_1k = cost_per_1k_tokens.get(call.ai_cli.lower(), 0.01)
-            total_cost += (call.tokens / 1000) * cost_per_1k
-        dashboard.cost.estimated_cost_usd = total_cost
-
-    def get_cost_estimate(self) -> dict:
-        """コスト推定を取得する。
-
-        Returns:
-            コスト推定情報の辞書
-        """
-        dashboard = self._read_dashboard()
-        cost = dashboard.cost
-
-        # CLI別のカウント
-        claude_calls = sum(1 for c in cost.calls if c.ai_cli.lower() == "claude")
-        codex_calls = sum(1 for c in cost.calls if c.ai_cli.lower() == "codex")
-        gemini_calls = sum(1 for c in cost.calls if c.ai_cli.lower() == "gemini")
-
-        return {
-            "total_api_calls": cost.total_api_calls,
-            "estimated_tokens": cost.estimated_tokens,
-            "estimated_cost_usd": round(cost.estimated_cost_usd, 4),
-            "claude_calls": claude_calls,
-            "codex_calls": codex_calls,
-            "gemini_calls": gemini_calls,
-        }
-
-    def get_cost_summary(self) -> dict:
-        """コストサマリーを取得する。
-
-        Returns:
-            サマリー情報の辞書
-        """
-        dashboard = self._read_dashboard()
-        cost = dashboard.cost
-        warning = self.check_cost_warning()
-
-        # CLI別のカウント
-        claude_calls = sum(1 for c in cost.calls if c.ai_cli.lower() == "claude")
-        codex_calls = sum(1 for c in cost.calls if c.ai_cli.lower() == "codex")
-        gemini_calls = sum(1 for c in cost.calls if c.ai_cli.lower() == "gemini")
-
-        return {
-            "total_api_calls": cost.total_api_calls,
-            "estimated_tokens": cost.estimated_tokens,
-            "estimated_cost_usd": round(cost.estimated_cost_usd, 4),
-            "warning_threshold_usd": cost.warning_threshold_usd,
-            "warning_message": warning,
-            "by_cli": {
-                "claude": claude_calls,
-                "codex": codex_calls,
-                "gemini": gemini_calls,
-            },
-        }
-
-    def check_cost_warning(self) -> str | None:
-        """コスト警告をチェックする。
-
-        Returns:
-            警告メッセージ、警告なしならNone
-        """
-        dashboard = self._read_dashboard()
-        cost = dashboard.cost
-
-        if cost.estimated_cost_usd >= cost.warning_threshold_usd:
-            return (
-                f"警告: 推定コスト (${cost.estimated_cost_usd:.2f}) が "
-                f"閾値 (${cost.warning_threshold_usd:.2f}) を超えています"
-            )
-        return None
-
-    def set_cost_warning_threshold(self, threshold_usd: float) -> None:
-        """コスト警告の閾値を設定する。
-
-        Args:
-            threshold_usd: 新しい閾値（USD）
-        """
-        dashboard = self._read_dashboard()
-        dashboard.cost.warning_threshold_usd = threshold_usd
-        self._write_dashboard(dashboard)
-        logger.info(f"コスト警告閾値を ${threshold_usd:.2f} に設定しました")
-
-    def reset_cost_counter(self) -> int:
-        """コスト記録をリセットする。
-
-        Returns:
-            削除した記録数
-        """
-        dashboard = self._read_dashboard()
-        count = len(dashboard.cost.calls)
-        dashboard.cost = CostInfo()
-        self._write_dashboard(dashboard)
-        logger.info(f"コスト記録をリセットしました（{count} 件削除）")
-        return count
-
-    def get_cost_by_agent(self, agent_id: str) -> float:
-        """エージェント別のコストを取得する。
-
-        Args:
-            agent_id: エージェントID
-
-        Returns:
-            推定コスト（USD）
-        """
-        settings = Settings()
-        cost_per_1k_tokens = {
-            "claude": settings.cost_per_1k_tokens_claude,
-            "codex": settings.cost_per_1k_tokens_codex,
-            "gemini": settings.cost_per_1k_tokens_gemini,
-        }
-
-        dashboard = self._read_dashboard()
-        cost = 0.0
-        for call in dashboard.cost.calls:
-            if call.agent_id == agent_id:
-                cost_per_1k = cost_per_1k_tokens.get(call.ai_cli.lower(), 0.01)
-                cost += (call.tokens / 1000) * cost_per_1k
-        return cost
-
-    def get_cost_by_task(self, task_id: str) -> float:
-        """タスク別のコストを取得する。
-
-        Args:
-            task_id: タスクID
-
-        Returns:
-            推定コスト（USD）
-        """
-        settings = Settings()
-        cost_per_1k_tokens = {
-            "claude": settings.cost_per_1k_tokens_claude,
-            "codex": settings.cost_per_1k_tokens_codex,
-            "gemini": settings.cost_per_1k_tokens_gemini,
-        }
-
-        dashboard = self._read_dashboard()
-        cost = 0.0
-        for call in dashboard.cost.calls:
-            if call.task_id == task_id:
-                cost_per_1k = cost_per_1k_tokens.get(call.ai_cli.lower(), 0.01)
-                cost += (call.tokens / 1000) * cost_per_1k
-        return cost
-
-    def get_cost_detailed_breakdown(self) -> dict:
-        """詳細なコスト内訳を取得する。
-
-        Returns:
-            詳細内訳の辞書
-        """
-        settings = Settings()
-        cost_per_1k_tokens = {
-            "claude": settings.cost_per_1k_tokens_claude,
-            "codex": settings.cost_per_1k_tokens_codex,
-            "gemini": settings.cost_per_1k_tokens_gemini,
-        }
-
-        dashboard = self._read_dashboard()
-
-        by_agent: dict[str, float] = {}
-        by_task: dict[str, float] = {}
-        by_cli: dict[str, dict] = {}
-
-        for call in dashboard.cost.calls:
-            cost_per_1k = cost_per_1k_tokens.get(call.ai_cli.lower(), 0.01)
-            call_cost = (call.tokens / 1000) * cost_per_1k
-
-            # エージェント別
-            if call.agent_id:
-                by_agent[call.agent_id] = by_agent.get(call.agent_id, 0.0) + call_cost
-
-            # タスク別
-            if call.task_id:
-                by_task[call.task_id] = by_task.get(call.task_id, 0.0) + call_cost
-
-            # CLI別
-            cli = call.ai_cli.lower()
-            if cli not in by_cli:
-                by_cli[cli] = {"calls": 0, "tokens": 0, "cost": 0.0}
-            by_cli[cli]["calls"] += 1
-            by_cli[cli]["tokens"] += call.tokens
-            by_cli[cli]["cost"] += call_cost
-
-        return {
-            "by_agent": by_agent,
-            "by_task": by_task,
-            "by_cli": by_cli,
-        }
 
     # Markdown ダッシュボード生成メソッド
 

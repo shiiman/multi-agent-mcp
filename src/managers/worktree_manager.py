@@ -50,7 +50,8 @@ class WorktreeManager:
             )
             await proc.communicate()
             self._gtr_available = proc.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"gtr 検出をスキップ: {e}")
             self._gtr_available = False
 
         if self._gtr_available:

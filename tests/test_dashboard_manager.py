@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from src.models.dashboard import TaskStatus
 
 
@@ -331,3 +333,81 @@ class TestMarkdownDashboard:
         # 完了タスクのemojiが含まれていることを確認
         assert "✅" in md_content
         assert "Completed Task" in md_content
+
+
+class TestDashboardCost:
+    """ダッシュボードコスト管理メソッドのテスト。"""
+
+    def test_record_api_call(self, dashboard_manager):
+        """API 呼び出し記録後にコスト統計が更新されることをテスト。"""
+        dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=1000)
+        estimate = dashboard_manager.get_cost_estimate()
+        assert estimate["total_api_calls"] == 1
+        assert estimate["estimated_tokens"] == 1000
+        assert estimate["claude_calls"] == 1
+
+    def test_record_multiple_cli_calls(self, dashboard_manager):
+        """複数 CLI の呼び出しが正しくカウントされることをテスト。"""
+        dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=500)
+        dashboard_manager.record_api_call(ai_cli="codex", estimated_tokens=300)
+        dashboard_manager.record_api_call(ai_cli="gemini", estimated_tokens=200)
+        estimate = dashboard_manager.get_cost_estimate()
+        assert estimate["total_api_calls"] == 3
+        assert estimate["estimated_tokens"] == 1000
+        assert estimate["claude_calls"] == 1
+        assert estimate["codex_calls"] == 1
+        assert estimate["gemini_calls"] == 1
+
+    def test_cost_summary_with_warning(self, dashboard_manager):
+        """閾値超過時に警告メッセージが含まれることをテスト。"""
+        dashboard_manager.set_cost_warning_threshold(0.001)
+        dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=10000)
+        summary = dashboard_manager.get_cost_summary()
+        assert summary["warning_message"] is not None
+        assert "警告" in summary["warning_message"]
+
+    def test_check_cost_warning_below_threshold(self, dashboard_manager):
+        """閾値未満で None を返すことをテスト。"""
+        result = dashboard_manager.check_cost_warning()
+        assert result is None
+
+    def test_check_cost_warning_above_threshold(self, dashboard_manager):
+        """閾値以上で警告文字列を返すことをテスト。"""
+        dashboard_manager.set_cost_warning_threshold(0.0)
+        dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=1000)
+        result = dashboard_manager.check_cost_warning()
+        assert result is not None
+        assert "警告" in result
+
+    def test_set_cost_warning_threshold(self, dashboard_manager):
+        """閾値変更が永続化されることをテスト。"""
+        dashboard_manager.set_cost_warning_threshold(25.0)
+        summary = dashboard_manager.get_cost_summary()
+        assert summary["warning_threshold_usd"] == 25.0
+
+    def test_reset_cost_counter(self, dashboard_manager):
+        """リセット後に全カウントがゼロであることをテスト。"""
+        dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=1000)
+        dashboard_manager.record_api_call(ai_cli="codex", estimated_tokens=500)
+        dashboard_manager.reset_cost_counter()
+        estimate = dashboard_manager.get_cost_estimate()
+        assert estimate["total_api_calls"] == 0
+        assert estimate["estimated_tokens"] == 0
+        assert estimate["estimated_cost_usd"] == 0.0
+
+    def test_record_api_call_with_agent_and_task(self, dashboard_manager):
+        """エージェントID とタスクID 付きの API 呼び出し記録をテスト。"""
+        dashboard_manager.record_api_call(
+            ai_cli="claude",
+            estimated_tokens=1000,
+            agent_id="agent-001",
+            task_id="task-001",
+        )
+        estimate = dashboard_manager.get_cost_estimate()
+        assert estimate["total_api_calls"] == 1
+
+    def test_estimated_cost_calculation(self, dashboard_manager):
+        """コスト計算が正しいことをテスト。"""
+        dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=1000)
+        estimate = dashboard_manager.get_cost_estimate()
+        assert estimate["estimated_cost_usd"] > 0

@@ -4,8 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.context import AppContext
-from src.tools.helpers import check_tool_permission, get_gtrconfig_manager
+from src.tools.helpers import get_gtrconfig_manager, require_permission
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -28,10 +27,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             Gtrconfig状態（success, status）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "check_gtrconfig", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "check_gtrconfig", caller_agent_id)
         if role_error:
             return role_error
 
@@ -61,10 +57,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             推奨設定（success, recommended_config）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "analyze_project_for_gtrconfig", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "analyze_project_for_gtrconfig", caller_agent_id)
         if role_error:
             return role_error
 
@@ -98,10 +91,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             生成結果（success, config, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "generate_gtrconfig", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "generate_gtrconfig", caller_agent_id)
         if role_error:
             return role_error
 

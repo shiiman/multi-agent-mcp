@@ -603,7 +603,7 @@ class TestCostTools:
     @pytest.mark.asyncio
     async def test_get_cost_summary(self, dashboard_mock_ctx, git_repo):
         """コストサマリーを取得できることをテスト。"""
-        from src.tools.dashboard import register_tools
+        from src.tools.dashboard_cost_tools import register_tools
         from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test")

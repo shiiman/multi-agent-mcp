@@ -11,6 +11,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import AICli, Settings, TerminalApp
 from src.config.template_loader import get_template_loader
+from src.config.workflow_guides import get_role_guide
 from src.context import AppContext
 from src.managers.agent_manager import AgentManager
 from src.managers.tmux_manager import (
@@ -19,17 +20,15 @@ from src.managers.tmux_manager import (
     get_project_name,
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
-from src.config.workflow_guides import get_role_guide
 from src.tools.helpers import (
-    check_tool_permission,
     ensure_dashboard_manager,
-    ensure_global_memory_manager,
     ensure_ipc_manager,
-    ensure_memory_manager,
     ensure_persona_manager,
     get_mcp_tool_prefix_from_config,
+    require_permission,
     resolve_main_repo_root,
     save_agent_to_file,
+    search_memory_context,
     sync_agents_from_file,
 )
 from src.tools.model_profile import get_current_profile_settings
@@ -98,6 +97,309 @@ def _get_next_worker_slot(
     return None
 
 
+def _validate_agent_creation(
+    agents: dict[str, Agent],
+    role: str,
+    ai_cli: str | None,
+    profile_max_workers: int,
+) -> tuple[AgentRole | None, AICli | None, dict[str, Any] | None]:
+    """エージェント作成の入力を検証する。
+
+    Returns:
+        (agent_role, selected_cli, error): 検証OK時は error=None
+    """
+    try:
+        agent_role = AgentRole(role)
+    except ValueError:
+        return None, None, {
+            "success": False,
+            "error": f"無効な役割です: {role}（有効: owner, admin, worker）",
+        }
+
+    selected_cli: AICli | None = None
+    if ai_cli:
+        try:
+            selected_cli = AICli(ai_cli)
+        except ValueError:
+            valid_clis = [c.value for c in AICli]
+            return None, None, {
+                "success": False,
+                "error": f"無効なAI CLIです: {ai_cli}（有効: {valid_clis}）",
+            }
+
+    if agent_role == AgentRole.WORKER:
+        worker_count = sum(1 for a in agents.values() if a.role == AgentRole.WORKER)
+        if worker_count >= profile_max_workers:
+            return None, None, {
+                "success": False,
+                "error": f"Worker数が上限（{profile_max_workers}）に達しています",
+            }
+
+    if agent_role in (AgentRole.OWNER, AgentRole.ADMIN):
+        existing = [a for a in agents.values() if a.role == agent_role]
+        if existing:
+            return None, None, {
+                "success": False,
+                "error": f"{agent_role.value}は既に存在します（ID: {existing[0].id}）",
+            }
+
+    return agent_role, selected_cli, None
+
+
+async def _determine_pane_position(
+    tmux,
+    agents: dict[str, Agent],
+    settings: Settings,
+    agent_role: AgentRole,
+    agent_id: str,
+    working_dir: str,
+    profile_max_workers: int,
+) -> dict[str, Any]:
+    """ロールに応じてペイン位置を決定し、tmux セッション情報を返す。
+
+    Returns:
+        成功時: {"success": True, "session_name", "window_index", "pane_index",
+                "tmux_session", "log_location"}
+        失敗時: {"success": False, "error": ...}
+    """
+    project_name = get_project_name(working_dir)
+
+    if agent_role == AgentRole.OWNER:
+        return {
+            "success": True,
+            "session_name": None,
+            "window_index": None,
+            "pane_index": None,
+            "tmux_session": None,
+            "log_location": "tmux なし（起点の AI CLI（Owner））",
+        }
+
+    # Admin/Worker はメインセッションが必要
+    if not await tmux.create_main_session(working_dir):
+        return {"success": False, "error": "メインセッションの作成に失敗しました"}
+
+    session_name = project_name
+
+    if agent_role == AgentRole.ADMIN:
+        window_index = 0
+        pane_index = MAIN_WINDOW_PANE_ADMIN
+    else:
+        slot = _get_next_worker_slot(agents, settings, project_name, profile_max_workers)
+        if slot is None:
+            return {"success": False, "error": "利用可能なWorkerスロットがありません"}
+        window_index, pane_index = slot
+
+        if window_index > 0:
+            ok = await tmux.add_extra_worker_window(
+                project_name=project_name,
+                window_index=window_index,
+                rows=settings.extra_worker_rows,
+                cols=settings.extra_worker_cols,
+            )
+            if not ok:
+                return {
+                    "success": False,
+                    "error": f"追加Workerウィンドウ {window_index} の作成に失敗しました",
+                }
+
+    await tmux.set_pane_title(
+        session_name, window_index, pane_index, f"{agent_role.value}-{agent_id}"
+    )
+    tmux_session = f"{session_name}:{window_index}.{pane_index}"
+
+    return {
+        "success": True,
+        "session_name": session_name,
+        "window_index": window_index,
+        "pane_index": pane_index,
+        "tmux_session": tmux_session,
+        "log_location": tmux_session,
+    }
+
+
+def _post_create_agent(
+    app_ctx: AppContext,
+    agent: Agent,
+    agents: dict[str, Agent],
+) -> dict[str, bool]:
+    """エージェント作成後の共通処理（IPC登録、ファイル保存、レジストリ、ダッシュボード）。"""
+    result = {
+        "ipc_registered": False,
+        "file_persisted": False,
+        "dashboard_updated": False,
+    }
+
+    # IPC マネージャーに登録
+    if app_ctx.session_id:
+        try:
+            ipc = ensure_ipc_manager(app_ctx)
+            ipc.register_agent(agent.id)
+            result["ipc_registered"] = True
+            logger.info(f"エージェント {agent.id} を IPC に登録しました")
+        except ValueError as e:
+            logger.warning(f"IPC 登録をスキップ: {e}")
+    else:
+        logger.info(
+            f"エージェント {agent.id} の IPC 登録をスキップしました"
+            "（session_id 未設定、後で init_tmux_workspace で設定）"
+        )
+
+    # エージェント情報をファイルに保存
+    result["file_persisted"] = save_agent_to_file(app_ctx, agent)
+    if result["file_persisted"]:
+        logger.info(f"エージェント {agent.id} をファイルに保存しました")
+
+    # グローバルレジストリに登録
+    from src.tools.helpers import save_agent_to_registry
+
+    if agent.role == AgentRole.OWNER:
+        owner_id = agent.id
+    else:
+        owner_agent = next(
+            (a for a in agents.values() if a.role == AgentRole.OWNER),
+            None,
+        )
+        owner_id = owner_agent.id if owner_agent else agent.id
+
+    if app_ctx.project_root:
+        save_agent_to_registry(
+            agent.id, owner_id, app_ctx.project_root, app_ctx.session_id
+        )
+        logger.info(f"エージェント {agent.id} をグローバルレジストリに登録しました")
+
+    # ダッシュボードにエージェント情報を追加
+    if app_ctx.session_id and app_ctx.project_root:
+        try:
+            dashboard = ensure_dashboard_manager(app_ctx)
+            dashboard.update_agent_summary(agent)
+            dashboard.save_markdown_dashboard(
+                app_ctx.project_root, app_ctx.session_id
+            )
+            result["dashboard_updated"] = True
+            logger.info(f"エージェント {agent.id} をダッシュボードに追加しました")
+        except Exception as e:
+            logger.warning(f"ダッシュボード更新に失敗: {e}")
+
+    return result
+
+
+async def _create_worktree_for_worker(
+    app_ctx: AppContext,
+    repo_path: str,
+    branch: str,
+    base_branch: str,
+    worker_index: int,
+) -> tuple[str | None, str | None]:
+    """Worker 用の worktree を作成する。
+
+    Returns:
+        (worktree_path, error_message): 成功時は (path, None)、失敗時は (None, error)
+    """
+    from src.tools.helpers import get_worktree_manager
+
+    worktree = get_worktree_manager(app_ctx, repo_path)
+    worktree_dir = Path(repo_path).parent / f".worktrees/{branch}"
+    success, message, actual_path = await worktree.create_worktree(
+        str(worktree_dir), branch, create_branch=True, base_branch=base_branch
+    )
+    if not success:
+        return None, f"Worker {worker_index + 1}: Worktree 作成失敗 - {message}"
+    logger.info(f"Worker {worker_index + 1}: Worktree 作成完了 - {actual_path}")
+    return actual_path, None
+
+
+async def _send_task_to_worker(
+    app_ctx: AppContext,
+    agent: Agent,
+    task_content: str,
+    branch: str,
+    worktree_path: str,
+    session_id: str,
+    worker_index: int,
+    enable_worktree: bool,
+    profile_settings: dict,
+    caller_agent_id: str | None,
+) -> bool:
+    """Worker にタスクを送信する。"""
+    try:
+        project_root = Path(resolve_main_repo_root(worktree_path))
+
+        # メモリから関連情報を検索
+        memory_context = search_memory_context(app_ctx, task_content)
+
+        # ペルソナを取得
+        persona_manager = ensure_persona_manager(app_ctx)
+        persona = persona_manager.get_optimal_persona(task_content)
+
+        # 7セクション構造のタスクを生成
+        mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
+        final_task_content = generate_7section_task(
+            task_id=session_id,
+            agent_id=agent.id,
+            task_description=task_content,
+            persona_name=persona.name,
+            persona_prompt=persona.system_prompt_addition,
+            memory_context=memory_context,
+            project_name=project_root.name,
+            worktree_path=worktree_path if enable_worktree else None,
+            branch_name=branch,
+            admin_id=caller_agent_id,
+            mcp_tool_prefix=mcp_prefix,
+        )
+
+        # ロールテンプレートを先頭に追加
+        role_guide = get_role_guide("worker")
+        if role_guide:
+            final_task_content = (
+                role_guide.content + "\n\n---\n\n# タスク指示\n\n" + final_task_content
+            )
+
+        # タスクファイル作成・送信
+        dashboard = ensure_dashboard_manager(app_ctx)
+        task_file = dashboard.write_task_file(
+            project_root, session_id, agent.id, final_task_content
+        )
+
+        agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
+        agent_model = profile_settings.get("worker_model")
+
+        base_thinking = AgentManager.get_thinking_tokens_for_role(
+            AgentRole.WORKER, app_ctx.settings
+        )
+        thinking_multiplier = profile_settings.get("thinking_multiplier", 1.0)
+        thinking_tokens = int(base_thinking * thinking_multiplier)
+
+        read_command = app_ctx.ai_cli.build_stdin_command(
+            cli=agent_cli,
+            task_file_path=str(task_file),
+            worktree_path=worktree_path if enable_worktree else None,
+            project_root=str(project_root),
+            model=agent_model,
+            role="worker",
+            thinking_tokens=thinking_tokens,
+        )
+
+        tmux = app_ctx.tmux
+        success = await tmux.send_keys_to_pane(
+            agent.session_name, agent.window_index, agent.pane_index, read_command
+        )
+        if success:
+            agent.status = AgentStatus.BUSY
+            agent.last_activity = datetime.now()
+            save_agent_to_file(app_ctx, agent)
+            dashboard.save_markdown_dashboard(project_root, session_id)
+            logger.info(
+                f"Worker {worker_index + 1} (ID: {agent.id}) にタスクを送信しました"
+            )
+            return True
+        else:
+            logger.warning(f"Worker {worker_index + 1}: タスク送信失敗")
+            return False
+    except Exception as e:
+        logger.warning(f"Worker {worker_index + 1}: タスク送信エラー - {e}")
+        return False
+
+
 def register_tools(mcp: FastMCP) -> None:
     """エージェント管理ツールを登録する。"""
 
@@ -128,14 +430,12 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             作成結果（success, agent, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
+        app_ctx, role_error = require_permission(ctx, "create_agent", caller_agent_id)
         settings = app_ctx.settings
-        tmux = app_ctx.tmux
         agents = app_ctx.agents
 
         # ロールチェック（Owner 作成時は caller_agent_id 不要、それ以外は必須）
         if role != "owner":
-            role_error = check_tool_permission(app_ctx, "create_agent", caller_agent_id)
             if role_error:
                 return role_error
         else:
@@ -146,111 +446,24 @@ def register_tools(mcp: FastMCP) -> None:
                 app_ctx.project_root = resolve_main_repo_root(working_dir)
                 logger.info(f"Owner 作成時に project_root を自動設定: {app_ctx.project_root}")
 
-        # 現在のプロファイル設定を取得
+        # 入力検証
         profile_settings = get_current_profile_settings(app_ctx)
         profile_max_workers = profile_settings["max_workers"]
 
-        # 役割の検証
-        try:
-            agent_role = AgentRole(role)
-        except ValueError:
-            return {
-                "success": False,
-                "error": f"無効な役割です: {role}（有効: owner, admin, worker）",
-            }
+        agent_role, selected_cli, validation_error = _validate_agent_creation(
+            agents, role, ai_cli, profile_max_workers
+        )
+        if validation_error:
+            return validation_error
 
-        # AI CLIの検証
-        selected_cli: AICli | None = None
-        if ai_cli:
-            try:
-                selected_cli = AICli(ai_cli)
-            except ValueError:
-                valid_clis = [c.value for c in AICli]
-                return {
-                    "success": False,
-                    "error": f"無効なAI CLIです: {ai_cli}（有効: {valid_clis}）",
-                }
-
-        # Worker数の上限チェック（プロファイル設定を使用）
-        if agent_role == AgentRole.WORKER:
-            worker_count = sum(1 for a in agents.values() if a.role == AgentRole.WORKER)
-            if worker_count >= profile_max_workers:
-                return {
-                    "success": False,
-                    "error": f"Worker数が上限（{profile_max_workers}）に達しています",
-                }
-
-        # Owner/Adminの重複チェック
-        if agent_role in (AgentRole.OWNER, AgentRole.ADMIN):
-            existing = [a for a in agents.values() if a.role == agent_role]
-            if existing:
-                return {
-                    "success": False,
-                    "error": f"{agent_role.value}は既に存在します（ID: {existing[0].id}）",
-                }
-
-        # エージェントIDを生成
+        # ペイン位置の決定
         agent_id = str(uuid.uuid4())[:8]
-
-        # ロールに応じてペイン位置を決定（プロジェクト固有のセッション内）
-        project_name = get_project_name(working_dir)
-        if agent_role == AgentRole.OWNER:
-            # Owner は tmux ペインに配置しない（実行AIエージェントが担う）
-            session_name: str | None = None
-            window_index: int | None = None
-            pane_index: int | None = None
-        elif agent_role == AgentRole.ADMIN:
-            # メインセッションを確保（単一セッション方式）
-            if not await tmux.create_main_session(working_dir):
-                return {
-                    "success": False,
-                    "error": "メインセッションの作成に失敗しました",
-                }
-            session_name = project_name
-            window_index = 0
-            pane_index = MAIN_WINDOW_PANE_ADMIN
-        else:  # WORKER
-            # メインセッションを確保（単一セッション方式）
-            if not await tmux.create_main_session(working_dir):
-                return {
-                    "success": False,
-                    "error": "メインセッションの作成に失敗しました",
-                }
-            session_name = project_name
-
-            # 次の空きスロットを探す（プロファイル設定の max_workers を使用）
-            slot = _get_next_worker_slot(agents, settings, project_name, profile_max_workers)
-            if slot is None:
-                return {
-                    "success": False,
-                    "error": "利用可能なWorkerスロットがありません",
-                }
-            window_index, pane_index = slot
-
-            # 追加ウィンドウが必要な場合は作成
-            if window_index > 0:
-                success = await tmux.add_extra_worker_window(
-                    project_name=project_name,
-                    window_index=window_index,
-                    rows=settings.extra_worker_rows,
-                    cols=settings.extra_worker_cols,
-                )
-                if not success:
-                    return {
-                        "success": False,
-                        "error": f"追加Workerウィンドウ {window_index} の作成に失敗しました",
-                    }
-
-        # ペインにタイトルを設定（tmux ペインがある場合のみ）
-        if session_name is not None and window_index is not None and pane_index is not None:
-            await tmux.set_pane_title(
-                session_name, window_index, pane_index, f"{agent_role.value}-{agent_id}"
-            )
-            tmux_session = f"{session_name}:{window_index}.{pane_index}"
-            log_location = tmux_session
-        else:
-            tmux_session = None
-            log_location = "tmux なし（起点の AI CLI（Owner））"
+        pane_result = await _determine_pane_position(
+            app_ctx.tmux, agents, settings, agent_role, agent_id,
+            working_dir, profile_max_workers,
+        )
+        if not pane_result["success"]:
+            return {"success": False, "error": pane_result["error"]}
 
         # エージェント情報を登録
         now = datetime.now()
@@ -258,11 +471,11 @@ def register_tools(mcp: FastMCP) -> None:
             id=agent_id,
             role=agent_role,
             status=AgentStatus.IDLE,
-            tmux_session=tmux_session,
+            tmux_session=pane_result["tmux_session"],
             working_dir=working_dir,
-            session_name=session_name,
-            window_index=window_index,
-            pane_index=pane_index,
+            session_name=pane_result["session_name"],
+            window_index=pane_result["window_index"],
+            pane_index=pane_result["pane_index"],
             ai_cli=selected_cli,
             created_at=now,
             last_activity=now,
@@ -270,73 +483,19 @@ def register_tools(mcp: FastMCP) -> None:
         agents[agent_id] = agent
 
         logger.info(
-            f"エージェント {agent_id}（{role}）を作成しました: {log_location}"
+            f"エージェント {agent_id}（{role}）を作成しました: {pane_result['log_location']}"
         )
 
-        # IPC マネージャーに自動登録（session_id が必要、Owner は init_tmux_workspace 後に登録）
-        ipc_registered = False
-        if app_ctx.session_id:
-            try:
-                ipc = ensure_ipc_manager(app_ctx)
-                ipc.register_agent(agent_id)
-                ipc_registered = True
-                logger.info(f"エージェント {agent_id} を IPC に登録しました")
-            except ValueError as e:
-                logger.warning(f"IPC 登録をスキップ（session_id 未設定）: {e}")
-        else:
-            logger.info(
-                f"エージェント {agent_id} の IPC 登録をスキップしました"
-                "（session_id 未設定、後で init_tmux_workspace で設定）"
-            )
-
-        # エージェント情報をファイルに保存（MCP インスタンス間で共有）
-        file_saved = save_agent_to_file(app_ctx, agent)
-        if file_saved:
-            logger.info(f"エージェント {agent_id} をファイルに保存しました")
-
-        # グローバルレジストリに登録（MCP cwd 問題の解決）
-        from src.tools.helpers import save_agent_to_registry
-
-        if agent_role == AgentRole.OWNER:
-            # Owner は自分自身が owner_id
-            owner_id = agent_id
-        else:
-            # Admin/Worker は既存の Owner を探す
-            owner_agent = next(
-                (a for a in agents.values() if a.role == AgentRole.OWNER),
-                None,
-            )
-            owner_id = owner_agent.id if owner_agent else agent_id
-
-        if app_ctx.project_root:
-            save_agent_to_registry(
-                agent_id, owner_id, app_ctx.project_root, app_ctx.session_id
-            )
-            logger.info(f"エージェント {agent_id} をグローバルレジストリに登録しました")
-
-        # ダッシュボードにエージェント情報を追加
-        dashboard_updated = False
-        if app_ctx.session_id and app_ctx.project_root:
-            try:
-                from src.tools.helpers import ensure_dashboard_manager
-                dashboard = ensure_dashboard_manager(app_ctx)
-                dashboard.update_agent_summary(agent)
-                # Markdown ダッシュボードも更新
-                dashboard.save_markdown_dashboard(
-                    app_ctx.project_root, app_ctx.session_id
-                )
-                dashboard_updated = True
-                logger.info(f"エージェント {agent_id} をダッシュボードに追加しました")
-            except Exception as e:
-                logger.warning(f"ダッシュボード更新に失敗: {e}")
+        # 後処理（IPC登録、ファイル保存、レジストリ、ダッシュボード）
+        post_result = _post_create_agent(app_ctx, agent, agents)
 
         result = {
             "success": True,
             "agent": agent.model_dump(mode="json"),
             "message": f"エージェント {agent_id}（{role}）を作成しました",
-            "ipc_registered": ipc_registered,
-            "file_persisted": file_saved,
-            "dashboard_updated": dashboard_updated,
+            "ipc_registered": post_result["ipc_registered"],
+            "file_persisted": post_result["file_persisted"],
+            "dashboard_updated": post_result["dashboard_updated"],
         }
         if selected_cli:
             result["ai_cli"] = selected_cli.value
@@ -357,13 +516,11 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             エージェント一覧（success, agents, count, synced_from_file）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-        agents = app_ctx.agents
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "list_agents", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "list_agents", caller_agent_id)
         if role_error:
             return role_error
+
+        agents = app_ctx.agents
 
         # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
         synced = sync_agents_from_file(app_ctx)
@@ -392,10 +549,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             エージェント詳細（success, agent, session_active または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_agent_status", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_agent_status", caller_agent_id)
         if role_error:
             return role_error
 
@@ -439,10 +593,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             終了結果（success, agent_id, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "terminate_agent", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "terminate_agent", caller_agent_id)
         if role_error:
             return role_error
 
@@ -466,7 +617,7 @@ def register_tools(mcp: FastMCP) -> None:
             await tmux.send_keys_to_pane(
                 agent.session_name, agent.window_index, agent.pane_index, "", literal=False
             )
-            session_name = tmux._session_name(agent.session_name)
+            session_name = agent.session_name
             window_name = tmux._get_window_name(agent.window_index)
             target = f"{session_name}:{window_name}.{agent.pane_index}"
             await tmux._run("send-keys", "-t", target, "C-c")
@@ -522,10 +673,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             初期化結果（success, agent_id, cli, prompt_source, message）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "initialize_agent", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "initialize_agent", caller_agent_id)
         if role_error:
             return role_error
 
@@ -699,13 +847,11 @@ def register_tools(mcp: FastMCP) -> None:
             workers: 作成された Worker 情報のリスト
             failed_count: 失敗した Worker 数
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-        settings = app_ctx.settings
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "create_workers_batch", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "create_workers_batch", caller_agent_id)
         if role_error:
             return role_error
+
+        settings = app_ctx.settings
 
         if not worker_configs:
             return {
@@ -783,28 +929,19 @@ def register_tools(mcp: FastMCP) -> None:
                 # 1. Worktree 作成（有効な場合のみ）
                 worktree_path = repo_path
                 if enable_worktree:
-                    from src.tools.helpers import get_worktree_manager
-                    worktree = get_worktree_manager(app_ctx, repo_path)
-
-                    # worktree パスを生成
-                    worktree_dir = Path(repo_path).parent / f".worktrees/{branch}"
-                    success, message, actual_path = await worktree.create_worktree(
-                        str(worktree_dir), branch, create_branch=True, base_branch=base_branch
+                    wt_path, wt_error = await _create_worktree_for_worker(
+                        app_ctx, repo_path, branch, base_branch, worker_index
                     )
-                    if not success:
+                    if wt_error:
                         return {
                             "success": False,
-                            "error": f"Worker {worker_index + 1}: Worktree 作成失敗 - {message}",
+                            "error": wt_error,
                             "worker_index": worker_index,
                         }
-                    worktree_path = actual_path
-                    logger.info(f"Worker {worker_index + 1}: Worktree 作成完了 - {worktree_path}")
+                    worktree_path = wt_path
 
-                # 2. Worker エージェント作成
-                # create_agent の内部ロジックを直接実行
+                # 2. tmux セッション確保・エージェント作成
                 tmux = app_ctx.tmux
-
-                # メインセッションを確保
                 if not await tmux.create_main_session(repo_path):
                     return {
                         "success": False,
@@ -812,7 +949,6 @@ def register_tools(mcp: FastMCP) -> None:
                         "worker_index": worker_index,
                     }
 
-                # 🔴 事前割り当てされた pane を使用（race condition 対策）
                 if assigned_slot is None:
                     return {
                         "success": False,
@@ -821,31 +957,26 @@ def register_tools(mcp: FastMCP) -> None:
                     }
                 window_index, pane_index = assigned_slot
 
-                # 追加ウィンドウが必要な場合は作成
                 if window_index > 0:
-                    success = await tmux.add_extra_worker_window(
+                    ok = await tmux.add_extra_worker_window(
                         project_name=project_name,
                         window_index=window_index,
                         rows=settings.extra_worker_rows,
                         cols=settings.extra_worker_cols,
                     )
-                    if not success:
+                    if not ok:
                         return {
                             "success": False,
                             "error": f"Worker {worker_index + 1}: 追加ウィンドウ作成失敗",
                             "worker_index": worker_index,
                         }
 
-                # エージェントID を生成
                 agent_id = str(uuid.uuid4())[:8]
-
-                # ペインにタイトルを設定
                 await tmux.set_pane_title(
                     project_name, window_index, pane_index, f"worker-{agent_id}"
                 )
                 tmux_session = f"{project_name}:{window_index}.{pane_index}"
 
-                # エージェント情報を登録
                 now = datetime.now()
                 agent = Agent(
                     id=agent_id,
@@ -866,49 +997,19 @@ def register_tools(mcp: FastMCP) -> None:
                     f"Worker {worker_index + 1} (ID: {agent_id}) を作成しました: {tmux_session}"
                 )
 
-                # IPC マネージャーに登録
-                ipc_registered = False
-                if app_ctx.session_id:
-                    try:
-                        ipc = ensure_ipc_manager(app_ctx)
-                        ipc.register_agent(agent_id)
-                        ipc_registered = True
-                    except ValueError as e:
-                        logger.warning(f"IPC 登録をスキップ: {e}")
+                # 3. 後処理（IPC登録、ファイル保存、レジストリ、ダッシュボード）
+                post_result = _post_create_agent(app_ctx, agent, agents)
 
-                # エージェント情報をファイルに保存
-                file_saved = save_agent_to_file(app_ctx, agent)
-
-                # グローバルレジストリに登録
-                from src.tools.helpers import save_agent_to_registry
-                owner_agent = next(
-                    (a for a in agents.values() if a.role == AgentRole.OWNER),
-                    None,
-                )
-                owner_id = owner_agent.id if owner_agent else agent_id
-
-                if app_ctx.project_root:
-                    save_agent_to_registry(
-                        agent_id, owner_id, app_ctx.project_root, app_ctx.session_id
-                    )
-
-                # ダッシュボードにエージェント情報を追加
-                dashboard_updated = False
+                # 4. タスク割り当て（task_id が指定されている場合）
+                task_assigned = False
+                task_id = config.get("task_id")
                 dashboard = None
                 if app_ctx.session_id and app_ctx.project_root:
                     try:
                         dashboard = ensure_dashboard_manager(app_ctx)
-                        dashboard.update_agent_summary(agent)
-                        dashboard.save_markdown_dashboard(
-                            app_ctx.project_root, app_ctx.session_id
-                        )
-                        dashboard_updated = True
                     except Exception as e:
-                        logger.warning(f"ダッシュボード更新に失敗: {e}")
+                        logger.debug(f"ダッシュボードマネージャー取得をスキップ: {e}")
 
-                # タスク割り当て（task_id が指定されている場合）
-                task_assigned = False
-                task_id = config.get("task_id")
                 if task_id and dashboard:
                     try:
                         success, message = dashboard.assign_task(
@@ -923,112 +1024,15 @@ def register_tools(mcp: FastMCP) -> None:
                     except Exception as e:
                         logger.warning(f"Worker {worker_index + 1}: タスク割り当てエラー - {e}")
 
-                # タスク送信（task_content が指定されている場合）
+                # 5. タスク送信（task_content が指定されている場合）
                 task_sent = False
                 task_content = config.get("task_content")
                 if task_content and session_id:
-                    try:
-                        # プロジェクトルートを取得
-                        project_root = Path(resolve_main_repo_root(worktree_path))
-
-                        # メモリから関連情報を検索
-                        memory_context = ""
-                        memory_lines = []
-
-                        try:
-                            memory_manager = ensure_memory_manager(app_ctx)
-                            project_results = memory_manager.search(task_content, limit=3)
-                            if project_results:
-                                memory_lines.append("**プロジェクトメモリ:**")
-                                for entry in project_results:
-                                    memory_lines.append(f"- **{entry.key}**: {entry.content[:200]}...")
-                        except Exception:
-                            pass
-
-                        try:
-                            global_memory = ensure_global_memory_manager()
-                            global_results = global_memory.search(task_content, limit=2)
-                            if global_results:
-                                if memory_lines:
-                                    memory_lines.append("")
-                                memory_lines.append("**グローバルメモリ:**")
-                                for entry in global_results:
-                                    memory_lines.append(f"- **{entry.key}**: {entry.content[:200]}...")
-                        except Exception:
-                            pass
-
-                        if memory_lines:
-                            memory_context = "\n".join(memory_lines)
-
-                        # ペルソナを取得
-                        persona_manager = ensure_persona_manager(app_ctx)
-                        persona = persona_manager.get_optimal_persona(task_content)
-
-                        # 7セクション構造のタスクを生成
-                        mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
-                        final_task_content = generate_7section_task(
-                            task_id=session_id,
-                            agent_id=agent_id,
-                            task_description=task_content,
-                            persona_name=persona.name,
-                            persona_prompt=persona.system_prompt_addition,
-                            memory_context=memory_context,
-                            project_name=project_root.name,
-                            worktree_path=worktree_path if enable_worktree else None,
-                            branch_name=branch,
-                            admin_id=caller_agent_id,
-                            mcp_tool_prefix=mcp_prefix,
-                        )
-
-                        # ロールテンプレートを先頭に追加
-                        role_guide = get_role_guide("worker")
-                        if role_guide:
-                            final_task_content = (
-                                role_guide.content + "\n\n---\n\n# タスク指示\n\n" + final_task_content
-                            )
-
-                        # タスクファイル作成
-                        if dashboard:
-                            task_file = dashboard.write_task_file(
-                                project_root, session_id, agent_id, final_task_content
-                            )
-
-                            # AI CLI コマンドを構築して送信
-                            agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
-                            agent_model = profile_settings.get("worker_model")
-
-                            # Extended Thinking トークン数を計算（ベース × プロファイル倍率）
-                            base_thinking = AgentManager.get_thinking_tokens_for_role(
-                                AgentRole.WORKER, app_ctx.settings
-                            )
-                            thinking_multiplier = profile_settings.get("thinking_multiplier", 1.0)
-                            thinking_tokens = int(base_thinking * thinking_multiplier)
-
-                            read_command = app_ctx.ai_cli.build_stdin_command(
-                                cli=agent_cli,
-                                task_file_path=str(task_file),
-                                worktree_path=worktree_path if enable_worktree else None,
-                                project_root=str(project_root),
-                                model=agent_model,
-                                role="worker",
-                                thinking_tokens=thinking_tokens,
-                            )
-
-                            success = await tmux.send_keys_to_pane(
-                                project_name, window_index, pane_index, read_command
-                            )
-                            if success:
-                                agent.status = AgentStatus.BUSY
-                                agent.last_activity = datetime.now()
-                                # ファイルに保存（MCP インスタンス間で共有）
-                                save_agent_to_file(app_ctx, agent)
-                                dashboard.save_markdown_dashboard(project_root, session_id)
-                                task_sent = True
-                                logger.info(f"Worker {worker_index + 1} (ID: {agent_id}) にタスクを送信しました")
-                            else:
-                                logger.warning(f"Worker {worker_index + 1}: タスク送信失敗")
-                    except Exception as e:
-                        logger.warning(f"Worker {worker_index + 1}: タスク送信エラー - {e}")
+                    task_sent = await _send_task_to_worker(
+                        app_ctx, agent, task_content, branch, worktree_path,
+                        session_id, worker_index, enable_worktree,
+                        profile_settings, caller_agent_id,
+                    )
 
                 return {
                     "success": True,
@@ -1038,9 +1042,9 @@ def register_tools(mcp: FastMCP) -> None:
                     "worktree_path": worktree_path,
                     "tmux_session": tmux_session,
                     "task_title": task_title,
-                    "ipc_registered": ipc_registered,
-                    "file_persisted": file_saved,
-                    "dashboard_updated": dashboard_updated,
+                    "ipc_registered": post_result["ipc_registered"],
+                    "file_persisted": post_result["file_persisted"],
+                    "dashboard_updated": post_result["dashboard_updated"],
                     "task_assigned": task_assigned,
                     "task_sent": task_sent,
                 }

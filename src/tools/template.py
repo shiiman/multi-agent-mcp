@@ -5,9 +5,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.templates import get_template, get_template_names, list_templates
-from src.config.workflow_guides import get_role_guide, list_role_guides
-from src.context import AppContext
-from src.tools.helpers import check_tool_permission
+from src.tools.helpers import require_permission
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -26,10 +24,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             テンプレート一覧（success, templates, names）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "list_workspace_templates", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "list_workspace_templates", caller_agent_id)
         if role_error:
             return role_error
 
@@ -56,10 +51,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             テンプレート詳細（success, template または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_workspace_template", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_workspace_template", caller_agent_id)
         if role_error:
             return role_error
 
@@ -95,10 +87,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             ロールガイド（success, guide または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_role_guide", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_role_guide", caller_agent_id)
         if role_error:
             return role_error
 
@@ -134,10 +123,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             ロール名のリスト
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "list_role_guides", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "list_role_guides", caller_agent_id)
         if role_error:
             return role_error
 

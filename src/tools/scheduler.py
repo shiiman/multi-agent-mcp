@@ -4,9 +4,8 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.context import AppContext
 from src.managers.scheduler_manager import TaskPriority
-from src.tools.helpers import check_tool_permission, ensure_scheduler_manager
+from src.tools.helpers import ensure_scheduler_manager, require_permission
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -33,10 +32,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             追加結果（success, task_id, priority, message または error）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "enqueue_task", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "enqueue_task", caller_agent_id)
         if role_error:
             return role_error
 
@@ -82,10 +78,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             割り当て結果（success, assignments, count）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "auto_assign_tasks", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "auto_assign_tasks", caller_agent_id)
         if role_error:
             return role_error
 
@@ -117,10 +110,7 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             キュー状態（success, queue）
         """
-        app_ctx: AppContext = ctx.request_context.lifespan_context
-
-        # ロールチェック
-        role_error = check_tool_permission(app_ctx, "get_task_queue", caller_agent_id)
+        app_ctx, role_error = require_permission(ctx, "get_task_queue", caller_agent_id)
         if role_error:
             return role_error
 
