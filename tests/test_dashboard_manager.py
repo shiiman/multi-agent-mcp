@@ -1,8 +1,6 @@
 """DashboardManagerのテスト。"""
 
-from pathlib import Path
 
-import pytest
 
 from src.models.dashboard import TaskStatus
 

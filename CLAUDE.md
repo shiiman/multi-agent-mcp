@@ -218,16 +218,15 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | opus |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | sonnet |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
-| `MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER` | Standard thinking multiplier | 1.0 |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | Standard Admin thinking tokens | 4000 |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | Standard Worker thinking tokens | 4000 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | claude |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | opus |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | opus |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
-| `MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER` | Performance thinking multiplier | 2.0 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | Performance Admin thinking tokens | 30000 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | Performance Worker thinking tokens | 4000 |
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
-| `MCP_OWNER_THINKING_TOKENS` | Owner thinking tokens | 0 |
-| `MCP_ADMIN_THINKING_TOKENS` | Admin thinking tokens | 4000 |
-| `MCP_WORKER_THINKING_TOKENS` | Worker thinking tokens | 1000 |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | Codex CLI Admin default model | gpt-5.3-codex |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | Codex CLI Worker default model | gpt-5.3-codex |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | Gemini CLI Admin default model | gemini-3-pro |

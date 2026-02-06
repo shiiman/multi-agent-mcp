@@ -48,7 +48,8 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
         session_id = ensure_session_id(app_ctx)
         if not session_id:
             raise ValueError(
-                "session_id が設定されていません。init_tmux_workspace で session_id を指定してください。"
+                "session_id が設定されていません。"
+                "init_tmux_workspace で session_id を指定してください。"
             )
         ipc_dir = os.path.join(base_dir, get_mcp_dir(), session_id, "ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
@@ -72,7 +73,8 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
         session_id = ensure_session_id(app_ctx)
         if not session_id:
             raise ValueError(
-                "session_id が設定されていません。init_tmux_workspace で session_id を指定してください。"
+                "session_id が設定されていません。"
+                "init_tmux_workspace で session_id を指定してください。"
             )
         # workspace_id は session_id を使用（同一タスク = 同一ダッシュボード）
         if app_ctx.workspace_id is None:

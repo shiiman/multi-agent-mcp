@@ -57,7 +57,9 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             推奨設定（success, recommended_config）
         """
-        app_ctx, role_error = require_permission(ctx, "analyze_project_for_gtrconfig", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx, "analyze_project_for_gtrconfig", caller_agent_id
+        )
         if role_error:
             return role_error
 
@@ -74,7 +76,6 @@ def register_tools(mcp: FastMCP) -> None:
     async def generate_gtrconfig(
         project_path: str,
         overwrite: bool = False,
-        generate_example: bool = True,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -85,7 +86,6 @@ def register_tools(mcp: FastMCP) -> None:
         Args:
             project_path: プロジェクトのルートパス
             overwrite: 既存ファイルを上書きするか
-            generate_example: .gtrconfig.example も生成するか
             caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
@@ -104,10 +104,6 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "error": result,
             }
-
-        # .gtrconfig.example も生成
-        if generate_example:
-            gtrconfig.generate_example()
 
         return {
             "success": True,

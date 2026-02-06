@@ -1,12 +1,10 @@
 """エージェント管理ツールのテスト。"""
 
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.config.settings import AICli, Settings, TerminalApp
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -96,8 +94,9 @@ class TestCreateAgent:
     @pytest.mark.asyncio
     async def test_create_owner_success(self, mock_ctx, git_repo):
         """Ownerエージェントを作成できることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -124,8 +123,9 @@ class TestCreateAgent:
     @pytest.mark.asyncio
     async def test_create_admin_success(self, mock_ctx, git_repo):
         """Adminエージェントを作成できることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -163,8 +163,9 @@ class TestCreateAgent:
     @pytest.mark.asyncio
     async def test_create_worker_success(self, mock_ctx, git_repo):
         """Workerエージェントを作成できることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -202,8 +203,9 @@ class TestCreateAgent:
     @pytest.mark.asyncio
     async def test_create_duplicate_owner_fails(self, mock_ctx, git_repo):
         """Ownerが既に存在する場合に失敗することをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -234,8 +236,9 @@ class TestCreateAgent:
     @pytest.mark.asyncio
     async def test_invalid_role_fails(self, mock_ctx, git_repo):
         """無効なロールでエラーになることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -258,8 +261,9 @@ class TestCreateAgent:
     @pytest.mark.asyncio
     async def test_invalid_ai_cli_fails(self, mock_ctx, git_repo):
         """無効なAI CLIでエラーになることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -287,8 +291,9 @@ class TestListAgents:
     @pytest.mark.asyncio
     async def test_list_all_agents(self, mock_ctx, git_repo):
         """全エージェントを取得できることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -333,8 +338,9 @@ class TestListAgents:
     @pytest.mark.asyncio
     async def test_list_empty_agents(self, mock_ctx):
         """エージェントがない場合に空リストを返すことをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -372,8 +378,9 @@ class TestGetAgentStatus:
     @pytest.mark.asyncio
     async def test_get_existing_agent_status(self, mock_ctx, git_repo):
         """存在するエージェントのステータスを取得できることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -419,8 +426,9 @@ class TestGetAgentStatus:
     @pytest.mark.asyncio
     async def test_get_nonexistent_agent_fails(self, mock_ctx, git_repo):
         """存在しないエージェントでエラーになることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -460,8 +468,9 @@ class TestTerminateAgent:
     @pytest.mark.asyncio
     async def test_terminate_worker_success(self, mock_ctx, git_repo):
         """Workerエージェントを終了できることをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -510,8 +519,9 @@ class TestTerminateAgent:
     @pytest.mark.asyncio
     async def test_terminate_nonexistent_agent_fails(self, mock_ctx, git_repo):
         """存在しないエージェントの終了が失敗することをテスト。"""
-        from src.tools.agent import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)

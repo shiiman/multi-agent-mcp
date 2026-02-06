@@ -1,12 +1,10 @@
 """メモリ管理ツールのテスト。"""
 
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.config.settings import Settings, TerminalApp
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -88,8 +86,9 @@ class TestSaveToMemory:
     @pytest.mark.asyncio
     async def test_save_project_memory(self, memory_mock_ctx, git_repo):
         """プロジェクトメモリに保存できることをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -127,8 +126,9 @@ class TestSaveToMemory:
     @pytest.mark.asyncio
     async def test_save_with_tags(self, memory_mock_ctx, git_repo):
         """タグ付きでメモリに保存できることをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -170,8 +170,9 @@ class TestRetrieveFromMemory:
     @pytest.mark.asyncio
     async def test_retrieve_existing_entry(self, memory_mock_ctx, git_repo):
         """保存されたエントリを検索できることをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -219,8 +220,9 @@ class TestRetrieveFromMemory:
     @pytest.mark.asyncio
     async def test_retrieve_nonexistent_returns_empty(self, memory_mock_ctx, git_repo):
         """存在しないクエリで空の結果を返すことをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -260,8 +262,9 @@ class TestGetMemoryEntry:
     @pytest.mark.asyncio
     async def test_get_existing_entry(self, memory_mock_ctx, git_repo):
         """キーでエントリを取得できることをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -308,8 +311,9 @@ class TestGetMemoryEntry:
     @pytest.mark.asyncio
     async def test_get_nonexistent_entry_fails(self, memory_mock_ctx, git_repo):
         """存在しないキーでエラーになることをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -349,8 +353,9 @@ class TestListMemoryEntries:
     @pytest.mark.asyncio
     async def test_list_all_entries(self, memory_mock_ctx, git_repo):
         """全エントリを一覧表示できることをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -402,8 +407,9 @@ class TestListMemoryEntries:
     @pytest.mark.asyncio
     async def test_list_with_tag_filter(self, memory_mock_ctx, git_repo):
         """タグでフィルタリングできることをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -464,8 +470,9 @@ class TestDeleteMemoryEntry:
     @pytest.mark.asyncio
     async def test_delete_existing_entry(self, memory_mock_ctx, git_repo):
         """エントリを削除できることをテスト。"""
-        from src.tools.memory import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)

@@ -1,15 +1,12 @@
 """ダッシュボード/タスク管理ツール。"""
 
-import asyncio
 import logging
 from datetime import datetime
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-logger = logging.getLogger(__name__)
-
-from src.models.agent import AgentStatus
+from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus
 from src.models.message import MessagePriority, MessageType
 from src.tools.helpers import (
@@ -21,6 +18,8 @@ from src.tools.helpers import (
     save_agent_to_file,
     sync_agents_from_file,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -313,7 +312,6 @@ def register_tools(mcp: FastMCP) -> None:
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
         # BUSY/IDLE に関係なく常に通知を送信
-        notification_sent = False
         if admin_notified and admin_ids:
             try:
                 tmux = app_ctx.tmux
@@ -324,17 +322,25 @@ def register_tools(mcp: FastMCP) -> None:
                 agents = app_ctx.agents
 
                 admin_agent = agents.get(admin_id_for_notify)
-                if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
-                    logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id_for_notify}")
+                if (
+                    not admin_agent
+                    or not admin_agent.session_name
+                    or admin_agent.pane_index is None
+                ):
+                    logger.warning(
+                        f"Admin エージェントの tmux 情報が見つかりません: {admin_id_for_notify}"
+                    )
                 else:
-                    notification_text = f"echo '[IPC] 新しいメッセージ: task_progress from {caller_agent_id}'"
+                    notification_text = (
+                        "echo '[IPC] 新しいメッセージ:"
+                        f" task_progress from {caller_agent_id}'"
+                    )
                     await tmux.send_keys_to_pane(
                         admin_agent.session_name,
                         admin_agent.window_index or 0,
                         admin_agent.pane_index,
                         notification_text,
                     )
-                    notification_sent = True
                     logger.info(f"Admin への tmux 通知を送信: {admin_id_for_notify}")
             except Exception as e:
                 logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
@@ -457,14 +463,16 @@ def register_tools(mcp: FastMCP) -> None:
             if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
                 logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id}")
             else:
-                notification_text = f"echo '[IPC] 新しいメッセージ: {msg_type.value} from {caller_agent_id}'"
+                notification_text = (
+                    "echo '[IPC] 新しいメッセージ:"
+                    f" {msg_type.value} from {caller_agent_id}'"
+                )
                 await tmux.send_keys_to_pane(
                     admin_agent.session_name,
                     admin_agent.window_index or 0,
                     admin_agent.pane_index,
                     notification_text,
                 )
-                notification_sent = True
                 logger.info(f"Admin への tmux 通知を送信: {admin_id}")
         except Exception as e:
             logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")

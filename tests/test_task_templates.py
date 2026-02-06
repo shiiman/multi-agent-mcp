@@ -1,9 +1,8 @@
 """タスクテンプレート生成のテスト。"""
 
-import pytest
 
 from src.config.settings import Settings
-from src.tools.task_templates import generate_admin_task, generate_7section_task
+from src.tools.task_templates import generate_7section_task, generate_admin_task
 
 
 class TestGenerateAdminTask:

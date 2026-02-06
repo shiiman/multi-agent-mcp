@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.config.settings import Settings, TerminalApp
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -88,8 +87,9 @@ class TestSendMessage:
     @pytest.mark.asyncio
     async def test_send_message_success(self, ipc_mock_ctx, git_repo):
         """メッセージ送信が成功することをテスト。"""
-        from src.tools.ipc import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -137,8 +137,9 @@ class TestSendMessage:
     @pytest.mark.asyncio
     async def test_send_message_invalid_type(self, ipc_mock_ctx, git_repo):
         """無効なメッセージタイプでエラーになることをテスト。"""
-        from src.tools.ipc import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -177,8 +178,9 @@ class TestSendMessage:
     @pytest.mark.asyncio
     async def test_send_broadcast_message(self, ipc_mock_ctx, git_repo):
         """ブロードキャストメッセージの送信をテスト。"""
-        from src.tools.ipc import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -221,8 +223,9 @@ class TestReadMessages:
     @pytest.mark.asyncio
     async def test_read_messages_success(self, ipc_mock_ctx, git_repo):
         """メッセージの読み取りが成功することをテスト。"""
-        from src.tools.ipc import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -280,8 +283,9 @@ class TestReadMessages:
     @pytest.mark.asyncio
     async def test_read_messages_unread_only(self, ipc_mock_ctx, git_repo):
         """未読メッセージのみの読み取りをテスト。"""
-        from src.tools.ipc import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -321,8 +325,9 @@ class TestGetUnreadCount:
     @pytest.mark.asyncio
     async def test_get_unread_count(self, ipc_mock_ctx, git_repo):
         """未読数の取得をテスト。"""
-        from src.tools.ipc import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -362,8 +367,9 @@ class TestRegisterAgentToIpc:
     @pytest.mark.asyncio
     async def test_register_agent_to_ipc(self, ipc_mock_ctx, git_repo):
         """エージェントのIPC登録をテスト。"""
-        from src.tools.ipc import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)

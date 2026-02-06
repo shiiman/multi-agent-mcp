@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.config.settings import Settings, TerminalApp
 from src.managers.agent_manager import AgentManager
 from src.managers.tmux_manager import MAIN_SESSION, MAIN_WINDOW_PANE_ADMIN
 from src.models.agent import Agent, AgentRole, AgentStatus
@@ -281,32 +280,6 @@ class TestSummary:
         # AgentRole enum は use_enum_values=True により文字列
         assert AgentRole.OWNER in summary["by_role"] or "owner" in summary["by_role"]
         assert AgentRole.WORKER in summary["by_role"] or "worker" in summary["by_role"]
-
-
-class TestThinkingTokens:
-    """Extended Thinking トークン関連のテスト。"""
-
-    def test_get_thinking_tokens_for_owner(self, settings):
-        """Ownerのthinkingトークン数を取得できることをテスト。"""
-        tokens = AgentManager.get_thinking_tokens_for_role(AgentRole.OWNER, settings)
-        assert tokens == settings.owner_thinking_tokens
-
-    def test_get_thinking_tokens_for_admin(self, settings):
-        """Adminのthinkingトークン数を取得できることをテスト。"""
-        tokens = AgentManager.get_thinking_tokens_for_role(AgentRole.ADMIN, settings)
-        assert tokens == settings.admin_thinking_tokens
-
-    def test_get_thinking_tokens_for_worker(self, settings):
-        """Workerのthinkingトークン数を取得できることをテスト。"""
-        tokens = AgentManager.get_thinking_tokens_for_role(AgentRole.WORKER, settings)
-        assert tokens == settings.worker_thinking_tokens
-
-    def test_get_thinking_env_vars(self, settings):
-        """thinking環境変数を取得できることをテスト。"""
-        env_vars = AgentManager.get_thinking_env_vars(AgentRole.WORKER, settings)
-
-        assert "MAX_THINKING_TOKENS" in env_vars
-        assert env_vars["MAX_THINKING_TOKENS"] == str(settings.worker_thinking_tokens)
 
 
 class TestGridLayout:

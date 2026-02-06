@@ -304,7 +304,7 @@ class DashboardManager(DashboardCostMixin):
             if cost.estimated_cost_usd >= cost.warning_threshold_usd:
                 lines.extend([
                     "",
-                    f"⚠️ **警告**: 推定コストが閾値を超えています！",
+                    "⚠️ **警告**: 推定コストが閾値を超えています！",
                 ])
 
         return lines
@@ -514,7 +514,8 @@ class DashboardManager(DashboardCostMixin):
 
         Args:
             task_id: タスクID
-            checklist: チェックリストアイテムのリスト [{"text": "...", "completed": True/False}, ...]
+            checklist: チェックリストアイテムのリスト
+                [{"text": "...", "completed": True/False}, ...]
             log_message: 追加するログメッセージ
 
         Returns:

@@ -3,12 +3,12 @@
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.config.settings import AICli, TerminalApp
-from src.config.template_loader import TemplateLoader, get_template_loader
+from src.config.template_loader import get_template_loader
 from src.models.agent import Agent, AgentRole, AgentStatus
 
 
@@ -138,7 +138,6 @@ class TestInitializeAgentValidation:
 
     def test_prompt_type_file_nonexistent_file(self):
         """prompt_type='file' で存在しないファイルの場合エラーになることをテスト。"""
-        prompt_type = "file"
         custom_prompt = "/nonexistent/path/to/file.md"
 
         path = Path(custom_prompt)
@@ -366,7 +365,10 @@ class TestInitializeAgentIntegration:
     async def test_initialize_with_file_prompt(self, ai_cli_manager):
         """ファイルからプロンプトを読み込んで初期化できることをテスト。"""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
-            f.write("# ファイルベースのプロンプト\n\nこれはファイルから読み込まれたプロンプトです。")
+            f.write(
+                "# ファイルベースのプロンプト\n\n"
+                "これはファイルから読み込まれたプロンプトです。"
+            )
             file_path = f.name
 
         try:

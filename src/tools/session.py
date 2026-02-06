@@ -43,6 +43,17 @@ def generate_env_template() -> str:
     """
     s = Settings()
     v = _format_env_value
+
+    # 長い変数名の値を事前に取得（E501 対策）
+    std_admin_think = v(s.model_profile_standard_admin_thinking_tokens)
+    std_worker_think = v(s.model_profile_standard_worker_thinking_tokens)
+    perf_admin_think = v(
+        s.model_profile_performance_admin_thinking_tokens
+    )
+    perf_worker_think = v(
+        s.model_profile_performance_worker_thinking_tokens
+    )
+
     return f"""# Multi-Agent MCP プロジェクト設定
 # 環境変数で上書きされます（環境変数 > .env > デフォルト）
 
@@ -85,21 +96,23 @@ MCP_MODEL_PROFILE_ACTIVE={v(s.model_profile_active)}
 
 # standard プロファイル設定（バランス重視）
 # Admin は Opus、Worker は Sonnet（Claude CLI の場合）
-# CLI を変更した場合、Claude 固有モデル名は自動的に CLI デフォルトに解決されます
+# CLI を変更した場合、Claude 固有モデル名は CLI デフォルトに解決されます
 MCP_MODEL_PROFILE_STANDARD_CLI={v(s.model_profile_standard_cli)}
 MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL={v(s.model_profile_standard_admin_model)}
 MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL={v(s.model_profile_standard_worker_model)}
 MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS={v(s.model_profile_standard_max_workers)}
-MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER={v(s.model_profile_standard_thinking_multiplier)}
+MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS={std_admin_think}
+MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS={std_worker_think}
 
 # performance プロファイル設定（性能重視）
 # Admin/Worker ともに Opus（Claude CLI の場合）
-# CLI を変更した場合、Claude 固有モデル名は自動的に CLI デフォルトに解決されます
+# CLI を変更した場合、Claude 固有モデル名は CLI デフォルトに解決されます
 MCP_MODEL_PROFILE_PERFORMANCE_CLI={v(s.model_profile_performance_cli)}
 MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL={v(s.model_profile_performance_admin_model)}
 MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL={v(s.model_profile_performance_worker_model)}
 MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS={v(s.model_profile_performance_max_workers)}
-MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER={v(s.model_profile_performance_thinking_multiplier)}
+MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS={perf_admin_think}
+MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS={perf_worker_think}
 
 # ========== CLI 別デフォルトモデル ==========
 # Claude 固有モデル名（opus, sonnet 等）が非 Claude CLI で使われた場合のフォールバック先
@@ -134,16 +147,6 @@ MCP_QUALITY_CHECK_MAX_ITERATIONS={v(s.quality_check_max_iterations)}
 
 # 同一問題の繰り返し上限（この回数を超えたら Owner に相談）
 MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT={v(s.quality_check_same_issue_limit)}
-
-# ========== Extended Thinking 設定 ==========
-# Owner の思考トークン数（0 = 即断即決モード）
-MCP_OWNER_THINKING_TOKENS={v(s.owner_thinking_tokens)}
-
-# Admin の思考トークン数
-MCP_ADMIN_THINKING_TOKENS={v(s.admin_thinking_tokens)}
-
-# Worker の思考トークン数
-MCP_WORKER_THINKING_TOKENS={v(s.worker_thinking_tokens)}
 
 # ========== メモリ設定 ==========
 # メモリの最大エントリ数
@@ -546,7 +549,10 @@ def register_tools(mcp: FastMCP) -> None:
         if session_exists:
             return {
                 "success": False,
-                "error": f"tmux セッション '{project_name}' は既に存在します。重複初期化は許可されていません。",
+                "error": (
+                    f"tmux セッション '{project_name}' は既に存在します。"
+                    "重複初期化は許可されていません。"
+                ),
             }
 
         # session_id を設定（後続の create_agent 等で使用）
@@ -590,8 +596,12 @@ def register_tools(mcp: FastMCP) -> None:
                                 await proc.communicate()
 
                                 if proc.returncode == 0:
+                                    commit_msg = (
+                                        "chore: add .gtrconfig"
+                                        " for gtr worktree runner"
+                                    )
                                     proc = await asyncio.create_subprocess_exec(
-                                        "git", "commit", "-m", "chore: add .gtrconfig for gtr worktree runner",
+                                        "git", "commit", "-m", commit_msg,
                                         cwd=working_dir,
                                         stdout=asyncio.subprocess.PIPE,
                                         stderr=asyncio.subprocess.PIPE,

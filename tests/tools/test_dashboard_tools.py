@@ -1,12 +1,10 @@
 """ダッシュボード/タスク管理ツールのテスト。"""
 
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.config.settings import Settings, TerminalApp
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -92,8 +90,9 @@ class TestCreateTask:
     @pytest.mark.asyncio
     async def test_create_task_success(self, dashboard_mock_ctx, git_repo):
         """タスクを作成できることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -131,8 +130,9 @@ class TestCreateTask:
     @pytest.mark.asyncio
     async def test_create_task_with_assignment(self, dashboard_mock_ctx, git_repo):
         """エージェント割り当て付きでタスクを作成できることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -185,8 +185,9 @@ class TestUpdateTaskStatus:
     @pytest.mark.asyncio
     async def test_update_to_in_progress(self, dashboard_mock_ctx, git_repo):
         """タスクステータスを in_progress に更新できることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -244,8 +245,9 @@ class TestUpdateTaskStatus:
     @pytest.mark.asyncio
     async def test_update_invalid_status_fails(self, dashboard_mock_ctx, git_repo):
         """無効なステータスでエラーになることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -286,8 +288,9 @@ class TestAssignTaskToAgent:
     @pytest.mark.asyncio
     async def test_assign_to_existing_agent(self, dashboard_mock_ctx, git_repo):
         """タスクをエージェントに割り当てできることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -354,8 +357,9 @@ class TestAssignTaskToAgent:
     @pytest.mark.asyncio
     async def test_assign_to_nonexistent_agent_fails(self, dashboard_mock_ctx, git_repo):
         """存在しないエージェントへの割り当てが失敗することをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -416,8 +420,9 @@ class TestListTasks:
     @pytest.mark.asyncio
     async def test_list_all_tasks(self, dashboard_mock_ctx, git_repo):
         """全タスクを取得できることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -472,8 +477,9 @@ class TestGetTask:
     @pytest.mark.asyncio
     async def test_get_existing_task(self, dashboard_mock_ctx, git_repo):
         """存在するタスクを取得できることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -522,8 +528,9 @@ class TestGetTask:
     @pytest.mark.asyncio
     async def test_get_nonexistent_task_fails(self, dashboard_mock_ctx, git_repo):
         """存在しないタスクでエラーになることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -563,8 +570,9 @@ class TestGetDashboard:
     @pytest.mark.asyncio
     async def test_get_full_dashboard(self, dashboard_mock_ctx, git_repo):
         """ダッシュボード全体を取得できることをテスト。"""
-        from src.tools.dashboard import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -603,8 +611,9 @@ class TestCostTools:
     @pytest.mark.asyncio
     async def test_get_cost_summary(self, dashboard_mock_ctx, git_repo):
         """コストサマリーを取得できることをテスト。"""
-        from src.tools.dashboard_cost_tools import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard_cost_tools import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)

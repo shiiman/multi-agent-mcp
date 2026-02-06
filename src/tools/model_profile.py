@@ -28,7 +28,8 @@ def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str
             "admin_model": settings.model_profile_standard_admin_model,
             "worker_model": settings.model_profile_standard_worker_model,
             "max_workers": settings.model_profile_standard_max_workers,
-            "thinking_multiplier": settings.model_profile_standard_thinking_multiplier,
+            "admin_thinking_tokens": settings.model_profile_standard_admin_thinking_tokens,
+            "worker_thinking_tokens": settings.model_profile_standard_worker_thinking_tokens,
         }
     else:  # PERFORMANCE
         return {
@@ -37,7 +38,8 @@ def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str
             "admin_model": settings.model_profile_performance_admin_model,
             "worker_model": settings.model_profile_performance_worker_model,
             "max_workers": settings.model_profile_performance_max_workers,
-            "thinking_multiplier": settings.model_profile_performance_thinking_multiplier,
+            "admin_thinking_tokens": settings.model_profile_performance_admin_thinking_tokens,
+            "worker_thinking_tokens": settings.model_profile_performance_worker_thinking_tokens,
         }
 
 

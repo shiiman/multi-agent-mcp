@@ -324,6 +324,9 @@ def register_tools(mcp: FastMCP) -> None:
             "new_agent_id": new_agent_id,
             "new_worktree_path": new_worktree_path,
             "reassigned_tasks": [t.get("id") for t in reassigned_tasks],
-            "message": f"エージェント {agent_id} を {new_agent_id} として復旧しました（タスク: {len(reassigned_tasks)} 件再割り当て）",
+            "message": (
+                f"エージェント {agent_id} を {new_agent_id} として"
+                f"復旧しました（タスク: {len(reassigned_tasks)} 件再割り当て）"
+            ),
         }
 

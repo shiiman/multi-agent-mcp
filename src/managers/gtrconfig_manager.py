@@ -16,7 +16,6 @@ class GtrconfigManager:
     """Gtrconfigの検出・生成・管理を行うマネージャー。"""
 
     GTRCONFIG_FILENAME = ".gtrconfig"
-    GTRCONFIG_EXAMPLE_FILENAME = ".gtrconfig.example"
 
     def __init__(self, project_root: str) -> None:
         """GtrconfigManagerを初期化する。
@@ -33,14 +32,6 @@ class GtrconfigManager:
             存在する場合True
         """
         return (self.project_root / self.GTRCONFIG_FILENAME).exists()
-
-    def example_exists(self) -> bool:
-        """Gtrconfig.exampleが存在するか確認する。
-
-        Returns:
-            存在する場合True
-        """
-        return (self.project_root / self.GTRCONFIG_EXAMPLE_FILENAME).exists()
 
     def read(self) -> dict | None:
         """Gtrconfigを読み込む。
@@ -216,28 +207,6 @@ class GtrconfigManager:
         else:
             return False, ".gtrconfig の書き込みに失敗しました"
 
-    def generate_example(self) -> tuple[bool, dict | str]:
-        """Gtrconfig.exampleを生成する（defaults含む）。
-
-        Returns:
-            (成功したか, 設定またはエラーメッセージ) のタプル
-        """
-        config = self.analyze_project()
-        config["defaults"] = {
-            "editor": "cursor",
-            "ai": "auto",
-        }
-
-        example_path = self.project_root / self.GTRCONFIG_EXAMPLE_FILENAME
-        try:
-            with open(example_path, "wb") as f:
-                tomli_w.dump(config, f)
-            logger.info(f".gtrconfig.example を生成しました: {self.project_root}")
-            return True, config
-        except Exception as e:
-            logger.error(f".gtrconfig.example書き込みエラー: {e}")
-            return False, f".gtrconfig.example の書き込みに失敗しました: {e}"
-
     def update_section(
         self,
         section: str,
@@ -277,7 +246,6 @@ class GtrconfigManager:
         config = self.read()
         return {
             "exists": self.exists(),
-            "example_exists": self.example_exists(),
             "config": config,
             "project_root": str(self.project_root),
         }

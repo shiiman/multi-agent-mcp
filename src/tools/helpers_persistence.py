@@ -1,10 +1,12 @@
 """エージェント永続化ヘルパー関数。"""
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.config.settings import get_mcp_dir
 from src.context import AppContext
@@ -13,6 +15,9 @@ from src.tools.helpers_registry import (
     ensure_session_id,
     get_project_root_from_config,
 )
+
+if TYPE_CHECKING:
+    from src.models.agent import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +56,6 @@ def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
     Returns:
         成功した場合 True
     """
-    from src.models.agent import Agent  # 循環インポート回避
 
     # project_root を決定（複数のソースから取得を試みる）
     project_root = app_ctx.project_root

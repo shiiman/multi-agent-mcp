@@ -1,11 +1,10 @@
 """Git worktree管理ツールのテスト。"""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.config.settings import Settings, TerminalApp
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -87,8 +86,9 @@ class TestListWorktrees:
     @pytest.mark.asyncio
     async def test_list_worktrees_success(self, worktree_mock_ctx, git_repo):
         """worktree一覧の取得が成功することをテスト。"""
-        from src.tools.worktree import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -125,8 +125,9 @@ class TestListWorktrees:
     @pytest.mark.asyncio
     async def test_list_worktrees_invalid_repo(self, worktree_mock_ctx, git_repo, tmp_path):
         """無効なリポジトリでエラーになることをテスト。"""
-        from src.tools.worktree import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -170,8 +171,9 @@ class TestAssignWorktree:
     @pytest.mark.asyncio
     async def test_assign_worktree_success(self, worktree_mock_ctx, git_repo):
         """worktreeの割り当てが成功することをテスト。"""
-        from src.tools.worktree import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -219,8 +221,9 @@ class TestAssignWorktree:
     @pytest.mark.asyncio
     async def test_assign_worktree_nonexistent_agent(self, worktree_mock_ctx, git_repo):
         """存在しないエージェントへの割り当てでエラーになることをテスト。"""
-        from src.tools.worktree import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -262,8 +265,9 @@ class TestGetWorktreeStatus:
     @pytest.mark.asyncio
     async def test_get_worktree_status_main_repo(self, worktree_mock_ctx, git_repo):
         """メインリポジトリのステータス取得をテスト。"""
-        from src.tools.worktree import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -304,8 +308,9 @@ class TestCheckGtrAvailable:
     @pytest.mark.asyncio
     async def test_check_gtr_available(self, worktree_mock_ctx, git_repo):
         """gtr利用可否のチェックをテスト。"""
-        from src.tools.worktree import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -345,8 +350,9 @@ class TestCreateWorktree:
     @pytest.mark.asyncio
     async def test_create_worktree_disabled(self, worktree_mock_ctx, git_repo):
         """worktreeが無効時にスキップされることをテスト。"""
-        from src.tools.worktree import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -371,8 +377,8 @@ class TestCreateWorktree:
         )
 
         # worktree を無効にして実行
-        with patch("src.tools.worktree.Settings") as MockSettings:
-            MockSettings.return_value.enable_worktree = False
+        with patch("src.tools.worktree.Settings") as mock_settings:
+            mock_settings.return_value.enable_worktree = False
             result = await create_worktree(
                 repo_path=str(git_repo),
                 worktree_path="/tmp/test-worktree",
@@ -391,8 +397,9 @@ class TestRemoveWorktree:
     @pytest.mark.asyncio
     async def test_remove_worktree_disabled(self, worktree_mock_ctx, git_repo):
         """worktreeが無効時にスキップされることをテスト。"""
-        from src.tools.worktree import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -417,8 +424,8 @@ class TestRemoveWorktree:
         )
 
         # worktree を無効にして実行
-        with patch("src.tools.worktree.Settings") as MockSettings:
-            MockSettings.return_value.enable_worktree = False
+        with patch("src.tools.worktree.Settings") as mock_settings:
+            mock_settings.return_value.enable_worktree = False
             result = await remove_worktree(
                 repo_path=str(git_repo),
                 worktree_path="/tmp/test-worktree",

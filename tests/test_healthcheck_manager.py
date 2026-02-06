@@ -2,8 +2,6 @@
 
 import pytest
 
-from src.managers.healthcheck_manager import HealthcheckManager
-
 
 class TestHealthcheckManager:
     """HealthcheckManagerのテスト。"""

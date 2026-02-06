@@ -1,8 +1,7 @@
 """SchedulerManagerのテスト。"""
 
-import pytest
 
-from src.managers.scheduler_manager import SchedulerManager, TaskPriority
+from src.managers.scheduler_manager import TaskPriority
 
 
 class TestSchedulerManager:

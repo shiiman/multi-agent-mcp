@@ -339,7 +339,6 @@ class TestTmuxManager:
     ):
         """launch_workspace_in_terminal の iTerm2 起動テスト（モック使用）。"""
         import src.managers.tmux_manager as tmux_module
-
         from src.managers.terminal import GhosttyExecutor, ITerm2Executor
 
         # get_project_name をモック（git リポジトリでなくても動作させる）
@@ -374,7 +373,6 @@ class TestTmuxManager:
     ):
         """launch_workspace_in_terminal の Terminal.app 起動テスト（モック使用）。"""
         import src.managers.tmux_manager as tmux_module
-
         from src.managers.terminal import (
             GhosttyExecutor,
             ITerm2Executor,

@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.config.settings import Settings, TerminalApp
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -101,8 +100,9 @@ class TestHealthcheckAgent:
     @pytest.mark.asyncio
     async def test_healthcheck_single_agent(self, healthcheck_mock_ctx, git_repo):
         """単一エージェントのヘルスチェックをテスト。"""
-        from src.tools.healthcheck import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.healthcheck import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -154,8 +154,9 @@ class TestHealthcheckAll:
     @pytest.mark.asyncio
     async def test_healthcheck_all_agents(self, healthcheck_mock_ctx, git_repo):
         """全エージェントのヘルスチェックをテスト。"""
-        from src.tools.healthcheck import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.healthcheck import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -220,8 +221,9 @@ class TestGetUnhealthyAgents:
     @pytest.mark.asyncio
     async def test_get_unhealthy_agents_empty(self, healthcheck_mock_ctx, git_repo):
         """異常エージェントがない場合の取得をテスト。"""
-        from src.tools.healthcheck import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.healthcheck import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -261,8 +263,9 @@ class TestAttemptRecovery:
     @pytest.mark.asyncio
     async def test_attempt_recovery(self, healthcheck_mock_ctx, git_repo):
         """エージェント復旧の試みをテスト。"""
-        from src.tools.healthcheck import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.healthcheck import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -314,8 +317,9 @@ class TestFullRecovery:
     @pytest.mark.asyncio
     async def test_full_recovery_non_worker_fails(self, healthcheck_mock_ctx, git_repo):
         """Worker以外の復旧試行でエラーになることをテスト。"""
-        from src.tools.healthcheck import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.healthcheck import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -354,8 +358,9 @@ class TestFullRecovery:
     @pytest.mark.asyncio
     async def test_full_recovery_nonexistent_agent(self, healthcheck_mock_ctx, git_repo):
         """存在しないエージェントの復旧でエラーになることをテスト。"""
-        from src.tools.healthcheck import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.healthcheck import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)

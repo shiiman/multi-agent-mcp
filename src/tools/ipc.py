@@ -126,7 +126,9 @@ def register_tools(mcp: FastMCP) -> None:
                             [
                                 "osascript",
                                 "-e",
-                                f'display notification "{notification_body}" with title "{notification_title}"',
+                                "display notification"
+                                f' "{notification_body}"'
+                                f' with title "{notification_title}"',
                             ],
                             capture_output=True,
                             timeout=5,

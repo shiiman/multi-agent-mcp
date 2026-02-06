@@ -297,7 +297,9 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             復元結果（success, entry, message または error）
         """
-        app_ctx, role_error = require_permission(ctx, "restore_from_memory_archive", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx, "restore_from_memory_archive", caller_agent_id
+        )
         if role_error:
             return role_error
 

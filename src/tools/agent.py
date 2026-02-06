@@ -13,7 +13,6 @@ from src.config.settings import AICli, Settings, TerminalApp
 from src.config.template_loader import get_template_loader
 from src.config.workflow_guides import get_role_guide
 from src.context import AppContext
-from src.managers.agent_manager import AgentManager
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
     MAIN_WINDOW_WORKER_PANES,
@@ -363,11 +362,7 @@ async def _send_task_to_worker(
         agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
         agent_model = profile_settings.get("worker_model")
 
-        base_thinking = AgentManager.get_thinking_tokens_for_role(
-            AgentRole.WORKER, app_ctx.settings
-        )
-        thinking_multiplier = profile_settings.get("thinking_multiplier", 1.0)
-        thinking_tokens = int(base_thinking * thinking_multiplier)
+        thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
 
         read_command = app_ctx.ai_cli.build_stdin_command(
             cli=agent_cli,
@@ -634,7 +629,10 @@ def register_tools(mcp: FastMCP) -> None:
         # ファイルに保存（MCP インスタンス間で共有）
         file_saved = save_agent_to_file(app_ctx, agent)
 
-        logger.info(f"エージェント {agent_id} を終了しました (status: terminated, file_saved: {file_saved})")
+        logger.info(
+            f"エージェント {agent_id} を終了しました"
+            f" (status: terminated, file_saved: {file_saved})"
+        )
 
         return {
             "success": True,
@@ -695,7 +693,10 @@ def register_tools(mcp: FastMCP) -> None:
         if agent.role == AgentRole.OWNER:
             return {
                 "success": False,
-                "error": "Owner エージェントは initialize_agent の対象外です（起点の AI CLI が担う）",
+                "error": (
+                    "Owner エージェントは initialize_agent の"
+                    "対象外です（起点の AI CLI が担う）"
+                ),
             }
 
         # 作業ディレクトリの確認
@@ -735,7 +736,10 @@ def register_tools(mcp: FastMCP) -> None:
             if not custom_prompt:
                 return {
                     "success": False,
-                    "error": "prompt_type='file' の場合、custom_prompt にファイルパスを指定してください",
+                    "error": (
+                        "prompt_type='file' の場合、"
+                        "custom_prompt にファイルパスを指定してください"
+                    ),
                 }
             file_path = Path(custom_prompt)
             if not file_path.exists():
@@ -905,7 +909,10 @@ def register_tools(mcp: FastMCP) -> None:
 
             # メインウィンドウが満杯の場合は警告（Worker の完了を待って再試行が必要）
             if slot is None:
-                logger.warning(f"Worker {i + 1}: 利用可能な pane がありません（Worker の完了を待って再試行してください）")
+                logger.warning(
+                    f"Worker {i + 1}: 利用可能な pane がありません"
+                    "（Worker の完了を待って再試行してください）"
+                )
 
             pre_assigned_slots.append(slot)
 
@@ -952,7 +959,10 @@ def register_tools(mcp: FastMCP) -> None:
                 if assigned_slot is None:
                     return {
                         "success": False,
-                        "error": f"Worker {worker_index + 1}: 利用可能なスロットがありません（事前割り当て失敗）",
+                        "error": (
+                            f"Worker {worker_index + 1}: "
+                            "利用可能なスロットがありません（事前割り当て失敗）"
+                        ),
                         "worker_index": worker_index,
                     }
                 window_index, pane_index = assigned_slot
@@ -1020,7 +1030,9 @@ def register_tools(mcp: FastMCP) -> None:
                         )
                         task_assigned = success
                         if not success:
-                            logger.warning(f"Worker {worker_index + 1}: タスク割り当て失敗 - {message}")
+                            logger.warning(
+                                f"Worker {worker_index + 1}: タスク割り当て失敗 - {message}"
+                            )
                     except Exception as e:
                         logger.warning(f"Worker {worker_index + 1}: タスク割り当てエラー - {e}")
 

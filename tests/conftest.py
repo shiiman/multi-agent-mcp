@@ -57,7 +57,6 @@ async def tmux_manager(settings):
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_tmux_sessions_at_end():
     """テストセッション終了時に残ったtmuxセッションをクリーンアップ。"""
-    import subprocess
 
     # テスト開始前に既存のテスト用セッションをクリーンアップ
     _cleanup_test_tmux_sessions()

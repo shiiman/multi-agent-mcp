@@ -289,10 +289,9 @@ class TestBuildStdinCommandWithThinkingTokens:
         assert "export MCP_PROJECT_ROOT" in cmd
         assert "export MAX_THINKING_TOKENS" in cmd
 
-    def test_thinking_tokens_with_multiplier(self, ai_cli_manager):
-        """倍率適用後の値が正しく渡されることをテスト（呼び出し側の責務）。"""
-        # base=1000, multiplier=2.0 → 2000
-        thinking_tokens = int(1000 * 2.0)
+    def test_thinking_tokens_direct_value(self, ai_cli_manager):
+        """プロファイル設定の直接値が正しく渡されることをテスト。"""
+        thinking_tokens = 2000
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
             thinking_tokens=thinking_tokens,

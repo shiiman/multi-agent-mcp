@@ -373,7 +373,8 @@ class TmuxManager:
 
         # 1. セッション作成（ウィンドウ名: settings.window_name_main）
         code, _, stderr = await self._run(
-            "new-session", "-d", "-s", session_name, "-c", working_dir, "-n", self.settings.window_name_main
+            "new-session", "-d", "-s", session_name,
+            "-c", working_dir, "-n", self.settings.window_name_main
         )
         if code != 0:
             logger.error(f"メインセッション作成エラー: {stderr}")

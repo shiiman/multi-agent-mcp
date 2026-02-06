@@ -188,8 +188,12 @@ class MemoryManager:
                 key=front_matter["key"],
                 content=body,
                 tags=front_matter.get("tags", []),
-                created_at=datetime.fromisoformat(front_matter["created_at"]) if "created_at" in front_matter else datetime.now(),
-                updated_at=datetime.fromisoformat(front_matter["updated_at"]) if "updated_at" in front_matter else datetime.now(),
+                created_at=datetime.fromisoformat(
+                    front_matter["created_at"]
+                ) if "created_at" in front_matter else datetime.now(),
+                updated_at=datetime.fromisoformat(
+                    front_matter["updated_at"]
+                ) if "updated_at" in front_matter else datetime.now(),
                 metadata=front_matter.get("metadata", {}),
             )
         except Exception as e:
@@ -212,7 +216,10 @@ class MemoryManager:
                 front_matter["metadata"] = entry.metadata
 
             # YAML + Markdown を結合
-            yaml_str = yaml.dump(front_matter, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            yaml_str = yaml.dump(
+                front_matter, allow_unicode=True,
+                default_flow_style=False, sort_keys=False,
+            )
             content = f"---\n{yaml_str}---\n\n{entry.content}\n"
 
             file_path.write_text(content, encoding="utf-8")

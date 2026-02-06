@@ -220,16 +220,6 @@ class Settings(BaseSettings):
     )
     """デフォルトで使用するターミナルアプリ"""
 
-    # Extended Thinking 設定（ロール別）
-    owner_thinking_tokens: int = 0
-    """Owner の思考トークン数（0 = 即断即決モード）"""
-
-    admin_thinking_tokens: int = 4000
-    """Admin の思考トークン数（中程度の思考）"""
-
-    worker_thinking_tokens: int = 1000
-    """Worker の思考トークン数（軽量な思考）"""
-
     # モデルプロファイル設定
     model_profile_active: ModelProfile = Field(
         default=ModelProfile.STANDARD,
@@ -254,9 +244,13 @@ class Settings(BaseSettings):
         default=6,
         description="standard プロファイルの Worker 数上限",
     )
-    model_profile_standard_thinking_multiplier: float = Field(
-        default=1.0,
-        description="standard プロファイルの思考トークン倍率",
+    model_profile_standard_admin_thinking_tokens: int = Field(
+        default=4000,
+        description="standard プロファイルの Admin 思考トークン数",
+    )
+    model_profile_standard_worker_thinking_tokens: int = Field(
+        default=4000,
+        description="standard プロファイルの Worker 思考トークン数",
     )
 
     # performance プロファイル設定
@@ -276,9 +270,13 @@ class Settings(BaseSettings):
         default=16,
         description="performance プロファイルの Worker 数上限",
     )
-    model_profile_performance_thinking_multiplier: float = Field(
-        default=2.0,
-        description="performance プロファイルの思考トークン倍率",
+    model_profile_performance_admin_thinking_tokens: int = Field(
+        default=30000,
+        description="performance プロファイルの Admin 思考トークン数",
+    )
+    model_profile_performance_worker_thinking_tokens: int = Field(
+        default=4000,
+        description="performance プロファイルの Worker 思考トークン数",
     )
 
     # CLI 別デフォルトモデル設定（Claude 固有名が非 Claude CLI で使われた場合のフォールバック）

@@ -211,7 +211,10 @@ def register_tools(mcp: FastMCP) -> None:
         # ファイルに保存（MCP インスタンス間で共有）
         file_saved = save_agent_to_file(app_ctx, agent)
 
-        logger.info(f"エージェント {agent_id} に worktree を割り当てました: {worktree_path} (file_saved: {file_saved})")
+        logger.info(
+            f"エージェント {agent_id} に worktree を割り当てました:"
+            f" {worktree_path} (file_saved: {file_saved})"
+        )
 
         return {
             "success": True,

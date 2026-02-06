@@ -69,7 +69,9 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             検索結果（success, entries, count）
         """
-        app_ctx, role_error = require_permission(ctx, "retrieve_from_global_memory", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx, "retrieve_from_global_memory", caller_agent_id
+        )
         if role_error:
             return role_error
 
@@ -201,7 +203,9 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             検索結果（success, entries, count）
         """
-        app_ctx, role_error = require_permission(ctx, "search_global_memory_archive", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx, "search_global_memory_archive", caller_agent_id
+        )
         if role_error:
             return role_error
 
@@ -263,7 +267,11 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             復元結果（success, entry, message または error）
         """
-        app_ctx, role_error = require_permission(ctx, "restore_from_global_memory_archive", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx,
+            "restore_from_global_memory_archive",
+            caller_agent_id,
+        )
         if role_error:
             return role_error
 
@@ -298,7 +306,11 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             サマリー情報（success, summary）
         """
-        app_ctx, role_error = require_permission(ctx, "get_global_memory_archive_summary", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx,
+            "get_global_memory_archive_summary",
+            caller_agent_id,
+        )
         if role_error:
             return role_error
 

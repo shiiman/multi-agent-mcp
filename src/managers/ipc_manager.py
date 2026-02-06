@@ -95,7 +95,9 @@ class IPCManager:
                 content=body,
                 metadata=front_matter.get("metadata", {}),
                 created_at=datetime.fromisoformat(front_matter["created_at"]),
-                read_at=datetime.fromisoformat(front_matter["read_at"]) if front_matter.get("read_at") else None,
+                read_at=datetime.fromisoformat(
+                    front_matter["read_at"]
+                ) if front_matter.get("read_at") else None,
             )
         except Exception as e:
             logger.warning(f"メッセージの読み込みに失敗 ({file_path}): {e}")
@@ -121,7 +123,10 @@ class IPCManager:
         if message.metadata:
             front_matter["metadata"] = message.metadata
 
-        yaml_str = yaml.dump(front_matter, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        yaml_str = yaml.dump(
+            front_matter, allow_unicode=True,
+            default_flow_style=False, sort_keys=False,
+        )
         content = f"---\n{yaml_str}---\n\n{message.content}\n"
 
         file_path.write_text(content, encoding="utf-8")
@@ -142,7 +147,10 @@ class IPCManager:
         if message.metadata:
             front_matter["metadata"] = message.metadata
 
-        yaml_str = yaml.dump(front_matter, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        yaml_str = yaml.dump(
+            front_matter, allow_unicode=True,
+            default_flow_style=False, sort_keys=False,
+        )
         content = f"---\n{yaml_str}---\n\n{message.content}\n"
 
         file_path.write_text(content, encoding="utf-8")

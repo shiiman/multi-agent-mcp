@@ -1,9 +1,6 @@
 """プロジェクト別 .env ファイル読み込みのテスト。"""
 
-import os
-from pathlib import Path
 
-import pytest
 
 import src.config.settings as settings_module
 from src.config.settings import ModelDefaults, get_mcp_dir, get_project_env_file
@@ -116,11 +113,12 @@ class TestGenerateEnvTemplate:
         assert ModelDefaults.GEMINI_LIGHT in template
 
     def test_template_contains_thinking_tokens(self):
-        """テンプレートに Extended Thinking 設定が含まれることをテスト。"""
+        """テンプレートにプロファイル別 Thinking Tokens 設定が含まれることをテスト。"""
         template = generate_env_template()
-        assert "MCP_OWNER_THINKING_TOKENS" in template
-        assert "MCP_ADMIN_THINKING_TOKENS" in template
-        assert "MCP_WORKER_THINKING_TOKENS" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS" in template
 
     def test_template_contains_cost_settings(self):
         """テンプレートにコスト設定が含まれることをテスト。"""

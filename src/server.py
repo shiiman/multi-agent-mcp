@@ -1,7 +1,6 @@
 """Multi-Agent MCP Server エントリーポイント。"""
 
 import logging
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 

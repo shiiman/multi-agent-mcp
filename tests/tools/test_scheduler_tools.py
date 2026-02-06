@@ -1,11 +1,10 @@
 """スケジューラー管理ツールのテスト。"""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.config.settings import Settings, TerminalApp
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -90,8 +89,9 @@ class TestEnqueueTask:
     @pytest.mark.asyncio
     async def test_enqueue_task_success(self, scheduler_mock_ctx, git_repo):
         """タスクのキュー追加が成功することをテスト。"""
-        from src.tools.scheduler import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.scheduler import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -129,8 +129,9 @@ class TestEnqueueTask:
     @pytest.mark.asyncio
     async def test_enqueue_task_invalid_priority(self, scheduler_mock_ctx, git_repo):
         """無効な優先度でエラーになることをテスト。"""
-        from src.tools.scheduler import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.scheduler import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -167,8 +168,9 @@ class TestEnqueueTask:
     @pytest.mark.asyncio
     async def test_enqueue_duplicate_task(self, scheduler_mock_ctx, git_repo):
         """重複タスクのキュー追加でエラーになることをテスト。"""
-        from src.tools.scheduler import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.scheduler import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -217,8 +219,9 @@ class TestEnqueueTask:
 
         enqueue_task は Owner と Admin の両方が使用可能。
         """
-        from src.tools.scheduler import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.scheduler import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -259,8 +262,9 @@ class TestAutoAssignTasks:
     @pytest.mark.asyncio
     async def test_auto_assign_no_tasks(self, scheduler_mock_ctx, git_repo):
         """タスクがない場合の自動割り当てをテスト。"""
-        from src.tools.scheduler import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.scheduler import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -299,8 +303,9 @@ class TestGetTaskQueue:
     @pytest.mark.asyncio
     async def test_get_task_queue_empty(self, scheduler_mock_ctx, git_repo):
         """空のキュー取得をテスト。"""
-        from src.tools.scheduler import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.scheduler import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -335,8 +340,9 @@ class TestGetTaskQueue:
     @pytest.mark.asyncio
     async def test_get_task_queue_with_tasks(self, scheduler_mock_ctx, git_repo):
         """タスクが存在する場合のキュー取得をテスト。"""
-        from src.tools.scheduler import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.scheduler import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)

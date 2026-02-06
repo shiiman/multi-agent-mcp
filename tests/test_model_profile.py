@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.config.settings import ModelDefaults, ModelProfile, Settings
+from src.config.settings import ModelDefaults, ModelProfile
 
 
 class TestModelProfile:
@@ -36,14 +36,16 @@ class TestSettingsModelProfile:
         assert settings.model_profile_standard_admin_model == ModelDefaults.OPUS
         assert settings.model_profile_standard_worker_model == ModelDefaults.SONNET
         assert settings.model_profile_standard_max_workers == 6
-        assert settings.model_profile_standard_thinking_multiplier == 1.0
+        assert settings.model_profile_standard_admin_thinking_tokens == 4000
+        assert settings.model_profile_standard_worker_thinking_tokens == 4000
 
     def test_performance_profile_settings_defaults(self, settings):
         """performance プロファイルのデフォルト値をテスト。"""
         assert settings.model_profile_performance_admin_model == ModelDefaults.OPUS
         assert settings.model_profile_performance_worker_model == ModelDefaults.OPUS
         assert settings.model_profile_performance_max_workers == 16
-        assert settings.model_profile_performance_thinking_multiplier == 2.0
+        assert settings.model_profile_performance_admin_thinking_tokens == 30000
+        assert settings.model_profile_performance_worker_thinking_tokens == 4000
 
     def test_switch_profile(self, settings):
         """プロファイルを切り替えられることをテスト。"""

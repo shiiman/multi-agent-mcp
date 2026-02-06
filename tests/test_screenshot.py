@@ -1,9 +1,6 @@
 """スクリーンショット機能のテスト。"""
 
 import base64
-from pathlib import Path
-
-import pytest
 
 
 class TestScreenshotDirectory:

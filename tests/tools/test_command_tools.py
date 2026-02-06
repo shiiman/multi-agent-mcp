@@ -1,12 +1,10 @@
 """コマンド実行ツールのテスト。"""
 
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.config.settings import AICli, Settings, TerminalApp
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -26,7 +24,9 @@ def command_test_ctx(git_repo, settings):
     mock_tmux.create_main_session = AsyncMock(return_value=True)
     mock_tmux.send_keys = AsyncMock(return_value=True)
     mock_tmux.send_keys_to_pane = AsyncMock(return_value=True)
-    mock_tmux.capture_pane_by_index = AsyncMock(return_value="mock output line 1\nmock output line 2")
+    mock_tmux.capture_pane_by_index = AsyncMock(
+        return_value="mock output line 1\nmock output line 2"
+    )
     mock_tmux.session_exists = AsyncMock(return_value=True)
     mock_tmux.set_pane_title = AsyncMock(return_value=True)
     mock_tmux.add_extra_worker_window = AsyncMock(return_value=True)
@@ -98,8 +98,9 @@ class TestSendCommand:
     @pytest.mark.asyncio
     async def test_send_command_to_worker(self, command_mock_ctx, git_repo):
         """Workerにコマンドを送信できることをテスト。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -151,8 +152,9 @@ class TestSendCommand:
         self, command_mock_ctx, git_repo
     ):
         """存在しないエージェントへのコマンド送信が失敗することをテスト。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -189,8 +191,9 @@ class TestSendCommand:
     @pytest.mark.asyncio
     async def test_send_command_to_owner_fails(self, command_mock_ctx, git_repo):
         """Ownerへのコマンド送信が失敗することをテスト（tmuxペインなし）。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -234,8 +237,9 @@ class TestGetOutput:
     @pytest.mark.asyncio
     async def test_capture_pane_output(self, command_mock_ctx, git_repo):
         """ペイン出力を取得できることをテスト。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -285,8 +289,9 @@ class TestGetOutput:
     @pytest.mark.asyncio
     async def test_get_output_with_custom_lines(self, command_mock_ctx, git_repo):
         """カスタム行数で出力を取得できることをテスト。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -339,8 +344,9 @@ class TestOpenSession:
     @pytest.mark.asyncio
     async def test_open_session_in_terminal(self, command_mock_ctx, git_repo):
         """ターミナルでセッションを開けることをテスト。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -391,8 +397,9 @@ class TestOpenSession:
         self, command_mock_ctx, git_repo
     ):
         """tmuxペインがないエージェントでエラーになることをテスト。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -436,8 +443,9 @@ class TestBroadcastCommand:
     @pytest.mark.asyncio
     async def test_broadcast_to_all_agents(self, command_mock_ctx, git_repo):
         """全エージェントにブロードキャストできることをテスト（Admin から）。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -500,8 +508,9 @@ class TestBroadcastCommand:
     @pytest.mark.asyncio
     async def test_broadcast_to_role_filter(self, command_mock_ctx, git_repo):
         """特定ロールにのみブロードキャストできることをテスト（Admin から）。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -581,8 +590,9 @@ class TestBroadcastCommand:
     @pytest.mark.asyncio
     async def test_broadcast_invalid_role_fails(self, command_mock_ctx, git_repo):
         """無効なロールでエラーになることをテスト（Admin から）。"""
-        from src.tools.command import register_tools
         from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
 
         mcp = FastMCP("test")
         register_tools(mcp)

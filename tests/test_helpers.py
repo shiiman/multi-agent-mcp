@@ -1,14 +1,12 @@
 """tools/helpers.py のテスト。"""
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.config.settings import Settings
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.tmux_manager import TmuxManager
@@ -80,7 +78,9 @@ class TestResolveProjectRoot:
         result = resolve_project_root(app_ctx, allow_env_fallback=True)
         assert Path(result).resolve() == git_repo.resolve()
 
-    def test_does_not_use_env_fallback_when_disabled(self, app_ctx, git_repo, temp_dir, monkeypatch):
+    def test_does_not_use_env_fallback_when_disabled(
+        self, app_ctx, git_repo, temp_dir, monkeypatch
+    ):
         """allow_env_fallback=False で環境変数を使用しないことをテスト。"""
         monkeypatch.chdir(temp_dir)
         monkeypatch.setenv("MCP_PROJECT_ROOT", str(git_repo))
@@ -324,16 +324,16 @@ class TestHelpersImportCompat:
     def test_registry_helpers_reexport(self):
         """helpers_registry のシンボルが helpers から import 可能。"""
         from src.tools.helpers import (
-            save_agent_to_registry,
+            _get_from_config,
+            ensure_session_id,
+            get_mcp_tool_prefix_from_config,
+            get_project_root_from_config,
             get_project_root_from_registry,
+            get_session_id_from_config,
             get_session_id_from_registry,
             remove_agent_from_registry,
             remove_agents_by_owner,
-            get_project_root_from_config,
-            get_mcp_tool_prefix_from_config,
-            get_session_id_from_config,
-            ensure_session_id,
-            _get_from_config,
+            save_agent_to_registry,
         )
         assert callable(save_agent_to_registry)
         assert callable(get_project_root_from_registry)
@@ -349,10 +349,10 @@ class TestHelpersImportCompat:
     def test_persistence_helpers_reexport(self):
         """helpers_persistence のシンボルが helpers から import 可能。"""
         from src.tools.helpers import (
-            save_agent_to_file,
             load_agents_from_file,
-            sync_agents_from_file,
             remove_agent_from_file,
+            save_agent_to_file,
+            sync_agents_from_file,
         )
         assert callable(save_agent_to_file)
         assert callable(load_agents_from_file)
@@ -362,15 +362,15 @@ class TestHelpersImportCompat:
     def test_managers_helpers_reexport(self):
         """helpers_managers のシンボルが helpers から import 可能。"""
         from src.tools.helpers import (
-            get_worktree_manager,
-            get_gtrconfig_manager,
-            ensure_ipc_manager,
             ensure_dashboard_manager,
-            ensure_scheduler_manager,
-            ensure_healthcheck_manager,
-            ensure_persona_manager,
-            ensure_memory_manager,
             ensure_global_memory_manager,
+            ensure_healthcheck_manager,
+            ensure_ipc_manager,
+            ensure_memory_manager,
+            ensure_persona_manager,
+            ensure_scheduler_manager,
+            get_gtrconfig_manager,
+            get_worktree_manager,
             search_memory_context,
         )
         assert callable(get_worktree_manager)
@@ -387,9 +387,9 @@ class TestHelpersImportCompat:
     def test_direct_submodule_imports(self):
         """各サブモジュールから直接 import も可能。"""
         from src.tools.helpers_git import resolve_main_repo_root
-        from src.tools.helpers_registry import save_agent_to_registry
-        from src.tools.helpers_persistence import save_agent_to_file
         from src.tools.helpers_managers import ensure_ipc_manager
+        from src.tools.helpers_persistence import save_agent_to_file
+        from src.tools.helpers_registry import save_agent_to_registry
         assert callable(resolve_main_repo_root)
         assert callable(save_agent_to_registry)
         assert callable(save_agent_to_file)
@@ -398,12 +398,12 @@ class TestHelpersImportCompat:
     def test_core_functions_remain_in_helpers(self):
         """コア関数が helpers.py に直接定義されていることを確認。"""
         from src.tools.helpers import (
-            check_tool_permission,
-            resolve_project_root,
-            ensure_project_root_from_caller,
-            get_agent_role,
-            find_agents_by_role,
             BOOTSTRAP_TOOLS,
+            check_tool_permission,
+            ensure_project_root_from_caller,
+            find_agents_by_role,
+            get_agent_role,
+            resolve_project_root,
         )
         assert callable(check_tool_permission)
         assert callable(resolve_project_root)

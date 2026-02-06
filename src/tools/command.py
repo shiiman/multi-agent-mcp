@@ -7,7 +7,6 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.workflow_guides import get_role_guide
-from src.managers.agent_manager import AgentManager
 from src.models.agent import AgentRole, AgentStatus
 from src.tools.helpers import (
     ensure_dashboard_manager,
@@ -291,13 +290,11 @@ def register_tools(mcp: FastMCP) -> None:
         # ロール名を build_stdin_command に渡す
         agent_role_name = "admin" if agent.role == AgentRole.ADMIN.value else "worker"
 
-        # Extended Thinking トークン数を計算（ベース × プロファイル倍率）
-        agent_role_enum = AgentRole.ADMIN if agent.role == AgentRole.ADMIN.value else AgentRole.WORKER
-        base_thinking = AgentManager.get_thinking_tokens_for_role(
-            agent_role_enum, app_ctx.settings
-        )
-        thinking_multiplier = profile_settings.get("thinking_multiplier", 1.0)
-        thinking_tokens = int(base_thinking * thinking_multiplier)
+        # Extended Thinking トークン数をプロファイル設定から取得
+        if agent.role == AgentRole.ADMIN.value:
+            thinking_tokens = profile_settings.get("admin_thinking_tokens", 4000)
+        else:
+            thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
 
         read_command = app_ctx.ai_cli.build_stdin_command(
             cli=agent_cli,

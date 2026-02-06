@@ -18,13 +18,13 @@ class Role(str, Enum):
 # キー: ツール名、値: 許可されたロールのリスト
 TOOL_PERMISSIONS: dict[str, list[str]] = {
     # ========== セッション管理 ==========
-    "init_workspace": ["owner"],
     "init_tmux_workspace": ["owner"],
     "cleanup_workspace": ["owner"],
     "cleanup_on_completion": ["owner"],
     "check_all_tasks_completed": ["owner", "admin"],
     # ========== エージェント管理 ==========
     "create_agent": ["owner", "admin"],
+    "create_workers_batch": ["owner", "admin"],
     "list_agents": ["owner", "admin", "worker"],
     "get_agent_status": ["owner", "admin", "worker"],
     "terminate_agent": ["owner", "admin"],
@@ -95,11 +95,7 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
     "search_global_memory_archive": ["owner", "admin", "worker"],
     "restore_from_global_memory_archive": ["owner", "admin"],
     "get_global_memory_archive_summary": ["owner", "admin", "worker"],
-    # ========== メトリクス・コスト ==========
-    "get_agent_metrics": ["owner", "admin"],
-    "get_task_metrics": ["owner", "admin"],
-    "get_workspace_metrics": ["owner", "admin"],
-    "get_metrics_summary": ["owner", "admin"],
+    # ========== コスト ==========
     "get_cost_estimate": ["owner", "admin"],
     "get_cost_summary": ["owner", "admin", "worker"],
     "reset_cost_counter": ["owner"],

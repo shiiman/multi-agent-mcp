@@ -328,16 +328,15 @@ cleanup_workspace()
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | opus | standardプロファイルのAdminモデル |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | sonnet | standardプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | 6 | standardプロファイルのWorker上限 |
-| `MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER` | 1.0 | standardプロファイルの思考倍率 |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | 4000 | standardプロファイルのAdmin思考トークン数 |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | 4000 | standardプロファイルのWorker思考トークン数 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | claude | performanceプロファイルのAI CLI |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | opus | performanceプロファイルのAdminモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | opus | performanceプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | 16 | performanceプロファイルのWorker上限 |
-| `MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER` | 2.0 | performanceプロファイルの思考倍率 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | 30000 | performanceプロファイルのAdmin思考トークン数 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | 4000 | performanceプロファイルのWorker思考トークン数 |
 | `MCP_PROJECT_ROOT` | - | プロジェクトルート（.env読み込み用） |
-| `MCP_OWNER_THINKING_TOKENS` | 0 | Ownerの思考トークン数 |
-| `MCP_ADMIN_THINKING_TOKENS` | 4000 | Adminの思考トークン数 |
-| `MCP_WORKER_THINKING_TOKENS` | 1000 | Workerの思考トークン数 |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.3-codex | Codex CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.3-codex | Codex CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro | Gemini CLIのAdminデフォルトモデル |

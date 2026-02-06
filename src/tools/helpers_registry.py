@@ -1,11 +1,17 @@
 """レジストリ・設定 JSON ヘルパー関数。"""
 
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.config.settings import get_mcp_dir
 from src.tools.helpers_git import resolve_main_repo_root
+
+if TYPE_CHECKING:
+    from src.context import AppContext
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +55,10 @@ def save_agent_to_registry(
         data["session_id"] = session_id
     with open(agent_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    logger.debug(f"エージェントをレジストリに保存: {agent_id} -> {project_root} (session: {session_id})")
+    logger.debug(
+        f"エージェントをレジストリに保存: {agent_id} -> {project_root}"
+        f" (session: {session_id})"
+    )
 
 
 def get_project_root_from_registry(agent_id: str) -> str | None:

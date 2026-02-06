@@ -161,7 +161,8 @@ class AiCliManager:
         working_dir = worktree_path or project_root
 
         if cli == AICli.CLAUDE:
-            # export MCP_PROJECT_ROOT=... && cd <path> && claude --model <model> --dangerously-skip-permissions < task.md
+            # export MCP_PROJECT_ROOT=... && cd <path> &&
+            # claude --model <model> --dangerously-skip-permissions < task.md
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
@@ -173,7 +174,8 @@ class AiCliManager:
             return f"{env_prefix}{command}"
 
         elif cli == AICli.CODEX:
-            # export MCP_PROJECT_ROOT=... && cd <path> && cat task.md | codex --model <model> -a never
+            # export MCP_PROJECT_ROOT=... && cd <path> &&
+            # cat task.md | codex --model <model> -a never
             parts = ["cat", shlex.quote(task_file_path), "|", cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
