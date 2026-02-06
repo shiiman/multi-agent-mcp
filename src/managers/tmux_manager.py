@@ -235,12 +235,28 @@ class TmuxManager:
             終了したセッション数
         """
         sessions = await self.list_sessions()
+        return await self.cleanup_sessions(sessions)
+
+    async def cleanup_sessions(self, sessions: list[str]) -> int:
+        """指定したセッションのみを終了する。
+
+        Args:
+            sessions: 終了対象のセッション名リスト
+
+        Returns:
+            終了したセッション数
+        """
+        # 重複・空文字を除外し、安定した順序で処理
+        targets = sorted({s for s in sessions if s})
         count = 0
-        for session in sessions:
-            # プレフィックスなしのため、そのまま kill_session を呼び出す
+        for session in targets:
             if await self.kill_session(session):
                 count += 1
         return count
+
+    async def cleanup_project_session(self, project_name: str) -> int:
+        """指定プロジェクト名に対応するセッションを終了する。"""
+        return await self.cleanup_sessions([project_name])
 
     async def _run_shell(self, command: str) -> tuple[int, str, str]:
         """シェルコマンドを実行する。

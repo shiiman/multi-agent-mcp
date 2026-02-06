@@ -1,7 +1,10 @@
 """DashboardManagerのテスト。"""
 
+import json
+from datetime import datetime
+
 from src.managers.dashboard_manager import DashboardManager
-from src.models.dashboard import TaskStatus
+from src.models.dashboard import AgentSummary, MessageSummary, TaskStatus
 
 
 class TestDashboardManagerInitialize:
@@ -360,6 +363,158 @@ class TestMarkdownDashboard:
         # 完了タスクのemojiが含まれていることを確認
         assert "✅" in md_content
         assert "Completed Task" in md_content
+
+    def test_agent_worktree_is_rendered_as_relative_path(self, dashboard_manager, temp_dir):
+        """エージェントの Worktree が workspace 相対パスで表示されることをテスト。"""
+        dashboard = dashboard_manager.get_dashboard()
+        dashboard.agents.append(
+            AgentSummary(
+                agent_id="worker-001",
+                role="worker",
+                status="busy",
+                current_task_id=None,
+                worktree_path=str(temp_dir / "worktrees" / "feature-worker-1"),
+                branch=None,
+                last_activity=datetime.now(),
+            )
+        )
+        dashboard.calculate_stats()
+        dashboard_manager._write_dashboard(dashboard)
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "`worktrees/feature-worker-1`" in md_content
+        assert str(temp_dir) not in md_content
+
+    def test_task_details_hidden_when_only_progress_exists(self, dashboard_manager):
+        """補足情報なし（進捗のみ）のタスクでは詳細セクションを表示しないことをテスト。"""
+        task = dashboard_manager.create_task(title="In Progress Task")
+        dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=70)
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "## タスク詳細" not in md_content
+
+    def test_message_history_uses_role_labels_and_details_body(self, dashboard_manager):
+        """メッセージ履歴が role ラベルと details 本文を表示することをテスト。"""
+        session_dir = dashboard_manager.dashboard_dir.parent
+        agents_file = session_dir / "agents.json"
+        agents_file.write_text(
+            json.dumps(
+                {
+                    "admin-001": {
+                        "id": "admin-001",
+                        "role": "admin",
+                        "status": "busy",
+                        "current_task": None,
+                        "worktree_path": None,
+                        "last_activity": datetime.now().isoformat(),
+                    },
+                    "worker-001": {
+                        "id": "worker-001",
+                        "role": "worker",
+                        "status": "busy",
+                        "current_task": None,
+                        "worktree_path": "/tmp/repo-worktrees/feature-worker-1",
+                        "last_activity": datetime.now().isoformat(),
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        ipc_dir = session_dir / "ipc" / "admin-001"
+        ipc_dir.mkdir(parents=True, exist_ok=True)
+        msg_file = ipc_dir / "20260206_170000_000000_test.md"
+        msg_file.write_text(
+            (
+                "---\n"
+                "id: test-msg-id\n"
+                "sender_id: worker-001\n"
+                "receiver_id: admin-001\n"
+                "message_type: request\n"
+                "priority: high\n"
+                "subject: 補足依頼\n"
+                "created_at: '2026-02-06T17:00:00'\n"
+                "read_at: null\n"
+                "---\n\n"
+                "詳細本文のテストメッセージです。\n"
+            ),
+            encoding="utf-8",
+        )
+
+        project_root = session_dir / "project"
+        project_root.mkdir(exist_ok=True)
+        md_path = dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+        md_content = md_path.read_text(encoding="utf-8")
+        assert "`worker1 (worker-0)`" in md_content
+        assert "`admin (admin-00)`" in md_content
+        assert "<details>" in md_content
+        assert "詳細本文のテストメッセージです。" in md_content
+
+    def test_cost_section_includes_role_and_agent_breakdown(self, dashboard_manager):
+        """コスト情報に role/agent 内訳が表示されることをテスト。"""
+        dashboard = dashboard_manager.get_dashboard()
+        dashboard.agents.extend(
+            [
+                AgentSummary(
+                    agent_id="admin-001",
+                    role="admin",
+                    status="busy",
+                    current_task_id=None,
+                    worktree_path=None,
+                    branch=None,
+                    last_activity=datetime.now(),
+                ),
+                AgentSummary(
+                    agent_id="worker-001",
+                    role="worker",
+                    status="busy",
+                    current_task_id=None,
+                    worktree_path="/tmp/repo-worktrees/feature-worker-1",
+                    branch=None,
+                    last_activity=datetime.now(),
+                ),
+            ]
+        )
+        dashboard_manager._write_dashboard(dashboard)
+
+        dashboard_manager.record_api_call(
+            ai_cli="codex", estimated_tokens=1000, agent_id="admin-001"
+        )
+        dashboard_manager.record_api_call(
+            ai_cli="codex", estimated_tokens=2000, agent_id="worker-001"
+        )
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "**役割別内訳**" in md_content
+        assert "`admin`: 1 calls / 1,000 tokens" in md_content
+        assert "`worker`: 1 calls / 2,000 tokens" in md_content
+        assert "**エージェント別呼び出し**" in md_content
+        assert "`admin (admin-00)`" in md_content
+        assert "`worker1 (worker-0)`" in md_content
+
+    def test_parse_ipc_message_keeps_full_content(self, dashboard_manager, temp_dir):
+        """IPC 本文が省略されずに保持されることをテスト。"""
+        msg_file = temp_dir / "message.md"
+        full_text = "A" * 180
+        msg_file.write_text(
+            (
+                "---\n"
+                "id: test-id\n"
+                "sender_id: worker-001\n"
+                "receiver_id: admin-001\n"
+                "message_type: request\n"
+                "subject: long body\n"
+                "created_at: '2026-02-06T17:00:00'\n"
+                "---\n\n"
+                f"{full_text}\n"
+            ),
+            encoding="utf-8",
+        )
+
+        msg = dashboard_manager._parse_ipc_message(msg_file)
+        assert msg is not None
+        assert msg.content == full_text
 
 
 class TestDashboardCost:

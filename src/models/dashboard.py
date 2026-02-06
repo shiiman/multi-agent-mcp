@@ -80,7 +80,7 @@ class MessageSummary(BaseModel):
     receiver_id: str | None = Field(None, description="宛先エージェントID")
     message_type: str = Field(..., description="メッセージタイプ")
     subject: str = Field(default="", description="件名")
-    content: str = Field(default="", description="メッセージ内容（先頭100文字）")
+    content: str = Field(default="", description="メッセージ内容")
     created_at: datetime | None = Field(None, description="作成日時")
 
 

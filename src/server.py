@@ -42,8 +42,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     finally:
         # クリーンアップ
         logger.info("サーバーをシャットダウンしています...")
-        count = await tmux.cleanup_all_sessions()
-        logger.info(f"{count} セッションをクリーンアップしました")
+        # サーバー停止時に tmux セッションを強制終了しない。
+        # セッション終了は cleanup_workspace / cleanup_on_completion で明示的に行う。
+        logger.info("tmux セッションの自動クリーンアップはスキップしました")
 
 
 # FastMCPサーバーを作成

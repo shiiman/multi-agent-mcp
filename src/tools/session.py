@@ -273,6 +273,22 @@ def _reset_app_context(app_ctx: AppContext) -> None:
     app_ctx.gtrconfig_managers.clear()
 
 
+def _collect_session_names(agents: dict[str, Any]) -> list[str]:
+    """エージェント一覧から tmux セッション名を収集する。"""
+    session_names: set[str] = set()
+    for agent in agents.values():
+        session_name = getattr(agent, "session_name", None)
+        if session_name:
+            session_names.add(session_name)
+            continue
+
+        tmux_session = getattr(agent, "tmux_session", None)
+        if tmux_session:
+            session_names.add(str(tmux_session).split(":", 1)[0])
+
+    return sorted(session_names)
+
+
 def register_tools(mcp: FastMCP) -> None:
     """セッション管理ツールを登録する。"""
 
@@ -340,7 +356,8 @@ def register_tools(mcp: FastMCP) -> None:
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
-        terminated_count = await tmux.cleanup_all_sessions()
+        session_names = _collect_session_names(agents)
+        terminated_count = await tmux.cleanup_sessions(session_names)
         agent_count = len(agents)
         agents.clear()
 
@@ -446,7 +463,8 @@ def register_tools(mcp: FastMCP) -> None:
         tmux = app_ctx.tmux
         agents = app_ctx.agents
 
-        terminated_count = await tmux.cleanup_all_sessions()
+        session_names = _collect_session_names(agents)
+        terminated_count = await tmux.cleanup_sessions(session_names)
         agent_count = len(agents)
 
         # グローバルレジストリからエージェント情報を削除

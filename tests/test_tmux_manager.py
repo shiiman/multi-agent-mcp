@@ -5,6 +5,7 @@ tmuxがインストールされていない環境ではスキップされます�
 """
 
 import shutil
+import uuid
 
 import pytest
 
@@ -110,6 +111,27 @@ class TestTmuxManager:
         count = await tmux_manager.cleanup_all_sessions()
 
         assert count >= 2
+
+    @pytest.mark.asyncio
+    async def test_cleanup_sessions_only_targets(self, tmux_manager, temp_dir):
+        """指定セッションのみクリーンアップできることをテスト。"""
+        session_a = f"test-scoped-{uuid.uuid4().hex[:8]}-a"
+        session_b = f"test-scoped-{uuid.uuid4().hex[:8]}-b"
+
+        await tmux_manager.create_session(session_a, str(temp_dir))
+        await tmux_manager.create_session(session_b, str(temp_dir))
+
+        try:
+            count = await tmux_manager.cleanup_sessions([session_a])
+            assert count >= 1
+
+            exists_a = await tmux_manager.session_exists(session_a)
+            exists_b = await tmux_manager.session_exists(session_b)
+            assert exists_a is False
+            assert exists_b is True
+        finally:
+            await tmux_manager.kill_session(session_a)
+            await tmux_manager.kill_session(session_b)
 
     @pytest.mark.asyncio
     async def test_session_not_exists(self, tmux_manager):

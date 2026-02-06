@@ -5,6 +5,7 @@ YAML Front Matter 付き Markdown で統一管理。
 """
 
 import logging
+import os
 import re
 import uuid
 from datetime import datetime
@@ -185,6 +186,54 @@ class DashboardManager(DashboardCostMixin):
 
         return "\n".join(lines)
 
+    def _format_worktree_path(self, worktree_path: str | None, workspace_path: str) -> str:
+        """Worktree パスを workspace 基準の相対表記に整形する。"""
+        if not worktree_path:
+            return "-"
+
+        try:
+            return os.path.relpath(worktree_path, workspace_path)
+        except Exception:
+            return worktree_path
+
+    def _extract_worker_number(self, worktree_path: str | None) -> str | None:
+        """worktree パスから worker 番号を抽出する。"""
+        if not worktree_path:
+            return None
+        match = re.search(r"worker-(\d+)\b", worktree_path)
+        return match.group(1) if match else None
+
+    def _build_agent_label_map(self, dashboard: Dashboard) -> dict[str, str]:
+        """agent_id から表示用ラベルへのマップを作成する。"""
+        labels: dict[str, str] = {}
+        for agent in dashboard.agents:
+            if agent.role == "owner":
+                label = "owner"
+            elif agent.role == "admin":
+                label = "admin"
+            elif agent.role == "worker":
+                worker_no = self._extract_worker_number(agent.worktree_path)
+                label = f"worker{worker_no}" if worker_no else "worker"
+            else:
+                label = agent.role
+            labels[agent.agent_id] = label
+        return labels
+
+    def _format_agent_display(
+        self,
+        agent_id: str | None,
+        agent_labels: dict[str, str],
+        with_id: bool = True,
+    ) -> str:
+        """メッセージ表示用のエージェント名を整形する。"""
+        if not agent_id:
+            return "all"
+
+        label = agent_labels.get(agent_id, "unknown")
+        if with_id:
+            return f"{label} ({agent_id[:8]})"
+        return label
+
     def _generate_agent_table(self, dashboard: Dashboard) -> list[str]:
         """エージェント状態テーブルを生成する。"""
         status_emoji = {
@@ -207,7 +256,9 @@ class DashboardManager(DashboardCostMixin):
         for agent in dashboard.agents:
             emoji = status_emoji.get(str(agent.status).lower(), "⚪")
             current_task = agent.current_task_id or "-"
-            worktree = agent.worktree_path or "-"
+            worktree = self._format_worktree_path(
+                agent.worktree_path, dashboard.workspace_path
+            )
             lines.append(
                 f"| `{agent.agent_id[:8]}` | {agent.role} | {emoji} {agent.status} | "
                 f"{current_task} | `{worktree}` |"
@@ -249,7 +300,10 @@ class DashboardManager(DashboardCostMixin):
     def _generate_task_details(self, dashboard: Dashboard) -> list[str]:
         """進行中タスクの詳細セクションを生成する。"""
         in_progress_tasks = [
-            t for t in dashboard.tasks if t.status == TaskStatus.IN_PROGRESS
+            t
+            for t in dashboard.tasks
+            if t.status == TaskStatus.IN_PROGRESS
+            and (t.checklist or t.logs or t.error_message)
         ]
         if not in_progress_tasks:
             return []
@@ -268,6 +322,9 @@ class DashboardManager(DashboardCostMixin):
                 "",
                 f"**進捗**: {task.progress}%",
             ])
+
+            if task.error_message:
+                lines.extend(["", f"**エラー**: {task.error_message}"])
 
             if task.checklist:
                 lines.extend(["", "**チェックリスト**:"])
@@ -308,17 +365,45 @@ class DashboardManager(DashboardCostMixin):
             "|:---|:---|:---|:---|:---|",
         ]
 
+        agent_labels = self._build_agent_label_map(dashboard)
+
         # 最新20件のみ表示
-        for msg in dashboard.messages[-20:]:
+        latest_messages = dashboard.messages[-20:]
+        for msg in latest_messages:
             time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
             emoji = type_emoji.get(msg.message_type, "📨")
-            sender = f"`{msg.sender_id[:8]}`"
-            receiver = f"`{msg.receiver_id[:8]}`" if msg.receiver_id else "all"
-            subject = msg.subject[:40] if msg.subject else msg.content[:40]
+            sender = self._format_agent_display(msg.sender_id, agent_labels)
+            receiver = self._format_agent_display(msg.receiver_id, agent_labels)
+            subject = msg.subject if msg.subject else msg.content
+            subject = subject.replace("\n", " ").replace("|", "\\|")
+            if len(subject) > 60:
+                subject = f"{subject[:60]}..."
             lines.append(
                 f"| {time_str} | {emoji} {msg.message_type} | "
-                f"{sender} | {receiver} | {subject} |"
+                f"`{sender}` | `{receiver}` | {subject} |"
             )
+
+        lines.extend([
+            "",
+            "### メッセージ本文",
+        ])
+        for msg in latest_messages:
+            time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
+            emoji = type_emoji.get(msg.message_type, "📨")
+            sender = self._format_agent_display(msg.sender_id, agent_labels)
+            receiver = self._format_agent_display(msg.receiver_id, agent_labels)
+            subject = msg.subject.strip() if msg.subject else "(件名なし)"
+            content = msg.content.strip() if msg.content else "(本文なし)"
+            lines.extend([
+                "",
+                "<details>",
+                f"<summary>{time_str} {emoji} {msg.message_type} {sender} -> {receiver} / {subject}</summary>",
+                "",
+                "```text",
+                content,
+                "```",
+                "</details>",
+            ])
 
         return lines
 
@@ -339,6 +424,27 @@ class DashboardManager(DashboardCostMixin):
 
         cost = dashboard.cost
         if cost.total_api_calls > 0:
+            agent_labels = self._build_agent_label_map(dashboard)
+            role_map = {agent.agent_id: agent.role for agent in dashboard.agents}
+            role_stats: dict[str, dict[str, float | int]] = {}
+            agent_stats: dict[str, dict[str, int]] = {}
+
+            for call in cost.calls:
+                role = role_map.get(call.agent_id, "unknown") if call.agent_id else "unknown"
+                call_cost = self._calculate_call_cost(call)
+
+                role_data = role_stats.setdefault(
+                    role, {"calls": 0, "tokens": 0, "cost": 0.0}
+                )
+                role_data["calls"] += 1
+                role_data["tokens"] += call.tokens
+                role_data["cost"] += call_cost
+
+                agent_key = call.agent_id or "unknown"
+                agent_data = agent_stats.setdefault(agent_key, {"calls": 0, "tokens": 0})
+                agent_data["calls"] += 1
+                agent_data["tokens"] += call.tokens
+
             lines.extend([
                 "",
                 "---",
@@ -349,7 +455,31 @@ class DashboardManager(DashboardCostMixin):
                 f"- **推定トークン数**: {cost.estimated_tokens:,}",
                 f"- **推定コスト**: ${cost.estimated_cost_usd:.4f}",
                 f"- **警告閾値**: ${cost.warning_threshold_usd:.2f}",
+                "",
+                "**役割別内訳**:",
             ])
+
+            for role in sorted(role_stats):
+                data = role_stats[role]
+                lines.append(
+                    f"- `{role}`: {int(data['calls'])} calls / "
+                    f"{int(data['tokens']):,} tokens / ${float(data['cost']):.4f}"
+                )
+
+            lines.extend(["", "**エージェント別呼び出し**:"])
+            for agent_id, data in sorted(
+                agent_stats.items(),
+                key=lambda item: item[1]["calls"],
+                reverse=True,
+            ):
+                if agent_id == "unknown":
+                    display = "unknown"
+                else:
+                    label = agent_labels.get(agent_id, "unknown")
+                    display = f"{label} ({agent_id[:8]})"
+                lines.append(
+                    f"- `{display}`: {data['calls']} calls / {data['tokens']:,} tokens"
+                )
 
             if cost.estimated_cost_usd >= cost.warning_threshold_usd:
                 lines.extend([
@@ -922,7 +1052,7 @@ class DashboardManager(DashboardCostMixin):
                 receiver_id=front_matter.get("receiver_id"),
                 message_type=front_matter.get("message_type", ""),
                 subject=front_matter.get("subject", ""),
-                content=parts[2].strip()[:100],
+                content=parts[2].strip(),
                 created_at=created_at,
             )
         except Exception:
