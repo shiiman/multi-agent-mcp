@@ -104,6 +104,17 @@ class TestGenerateEnvTemplate:
         assert "MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL" in template
         assert "MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS" in template
 
+    def test_template_contains_cli_default_models(self):
+        """テンプレートに CLI 別デフォルトモデル設定が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL" in template
+        assert "MCP_CLI_DEFAULT_CODEX_WORKER_MODEL" in template
+        assert "MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL" in template
+        assert "MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL" in template
+        assert ModelDefaults.CODEX_DEFAULT in template
+        assert ModelDefaults.GEMINI_DEFAULT in template
+        assert ModelDefaults.GEMINI_LIGHT in template
+
     def test_template_contains_thinking_tokens(self):
         """テンプレートに Extended Thinking 設定が含まれることをテスト。"""
         template = generate_env_template()

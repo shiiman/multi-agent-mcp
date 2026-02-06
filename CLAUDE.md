@@ -226,8 +226,12 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER` | Performance thinking multiplier | 2.0 |
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
 | `MCP_OWNER_THINKING_TOKENS` | Owner thinking tokens | 0 |
-| `MCP_ADMIN_THINKING_TOKENS` | Admin thinking tokens | 1000 |
-| `MCP_WORKER_THINKING_TOKENS` | Worker thinking tokens | 10000 |
+| `MCP_ADMIN_THINKING_TOKENS` | Admin thinking tokens | 4000 |
+| `MCP_WORKER_THINKING_TOKENS` | Worker thinking tokens | 1000 |
+| `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | Codex CLI Admin default model | gpt-5.3-codex |
+| `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | Codex CLI Worker default model | gpt-5.3-codex |
+| `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | Gemini CLI Admin default model | gemini-3-pro |
+| `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | Gemini CLI Worker default model | gemini-3-flash |
 | `MCP_QUALITY_CHECK_MAX_ITERATIONS` | Max quality check iterations | 5 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | Same issue repeat limit | 3 |
 | `MCP_MEMORY_MAX_ENTRIES` | Max memory entries | 1000 |

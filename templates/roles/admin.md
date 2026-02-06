@@ -312,9 +312,9 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 - ✅ 全 Worker に同じ session_id を使用（例: `tetris-2player-battle`）
 - **理由**: session_id がディレクトリ名として使用されるため、異なる session_id を使用するとタスクファイルが分散し、Dashboard の一元管理ができなくなる
 
-### F005: Claude 内部の Task ツール（サブエージェント）を使用しない
+### F005: AI CLI 内部のサブエージェント機能を使用しない
 
-- ❌ Claude の内部 Task ツール（`Task agents`, `Running N Task agents...`）を使用
+- ❌ AI CLI 内部のサブエージェント機能を使用（例: Claude の Task ツール、Codex の内部エージェント等）
 - ❌ 内部サブエージェントでファイル作成・編集を実行
 - ✅ 必ず MCP の `create_agent(role="worker")` で Worker を作成
 - ✅ 必ず MCP の `create_task` でタスクを登録
@@ -370,7 +370,7 @@ Worker 2: feature-2/src/utils-b.ts を編集 → マージ ✅
 | `remove_worktree` | worktree の削除 |
 | `assign_worktree` | エージェントに worktree 割り当て |
 | `check_gtr_available` | gtr が利用可能か確認 |
-| `open_worktree_with_ai` | Claude Code で worktree を開く（gtr） |
+| `open_worktree_with_ai` | AI CLI で worktree を開く（gtr） |
 
 #### タスク管理
 
@@ -483,9 +483,9 @@ send_message(
 
 ---
 
-### コンパクション復帰時の確認
+### コンテキスト圧縮からの復帰時の確認
 
-コンパクション（コンテキスト圧縮）後、以下を確認してください：
+コンテキスト圧縮（コンパクション）後、以下を確認してください：
 
 **まず `get_role_guide` でロール情報を再取得してください：**
 

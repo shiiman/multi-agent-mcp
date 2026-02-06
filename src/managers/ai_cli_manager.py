@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from src.config.settings import DEFAULT_AI_CLI_COMMANDS, AICli, TerminalApp
+from src.config.settings import DEFAULT_AI_CLI_COMMANDS, AICli, TerminalApp, resolve_model_for_cli
 
 if TYPE_CHECKING:
     from src.config.settings import Settings
@@ -111,6 +111,8 @@ class AiCliManager:
         worktree_path: str | None = None,
         project_root: str | None = None,
         model: str | None = None,
+        role: str = "worker",
+        thinking_tokens: int | None = None,
     ) -> str:
         """AI CLIでstdinからタスクを読み込むコマンドを構築する。
 
@@ -119,7 +121,9 @@ class AiCliManager:
             task_file_path: タスクファイルのパス
             worktree_path: 作業ディレクトリのパス（オプション）
             project_root: プロジェクトルートパス（MCP_PROJECT_ROOT 環境変数用）
-            model: 使用するモデル（オプション、Claude CLI のみ対応）
+            model: 使用するモデル（オプション）
+            role: エージェントのロール（"admin" or "worker"、モデル解決に使用）
+            thinking_tokens: Extended Thinking のトークン数（0 で無効、None で省略）
 
         Returns:
             実行コマンド文字列
@@ -129,10 +133,29 @@ class AiCliManager:
             cli = AICli(cli)
         cmd = self.get_command(cli)
 
-        # 環境変数設定（プロジェクトルートを MCP に伝える）
-        env_prefix = ""
+        # Settings から CLI 別デフォルトモデルを構築
+        cli_defaults = {
+            "codex": {
+                "admin": self.settings.cli_default_codex_admin_model,
+                "worker": self.settings.cli_default_codex_worker_model,
+            },
+            "gemini": {
+                "admin": self.settings.cli_default_gemini_admin_model,
+                "worker": self.settings.cli_default_gemini_worker_model,
+            },
+        }
+
+        # CLI に応じてモデル名を解決
+        resolved_model = resolve_model_for_cli(cli.value, model, role, cli_defaults)
+
+        # 環境変数設定（プロジェクトルート + thinking tokens）
+        env_parts = []
         if project_root:
-            env_prefix = f"export MCP_PROJECT_ROOT={shlex.quote(project_root)} && "
+            env_parts.append(f"export MCP_PROJECT_ROOT={shlex.quote(project_root)}")
+        # MAX_THINKING_TOKENS は Claude Code 専用（0 も明示設定する）
+        if cli == AICli.CLAUDE and thinking_tokens is not None:
+            env_parts.append(f"export MAX_THINKING_TOKENS={thinking_tokens}")
+        env_prefix = " && ".join(env_parts) + " && " if env_parts else ""
 
         # 作業ディレクトリ: worktree_path > project_root > なし
         working_dir = worktree_path or project_root
@@ -140,8 +163,8 @@ class AiCliManager:
         if cli == AICli.CLAUDE:
             # export MCP_PROJECT_ROOT=... && cd <path> && claude --model <model> --dangerously-skip-permissions < task.md
             parts = [cmd]
-            if model:
-                parts.extend(["--model", model])
+            if resolved_model:
+                parts.extend(["--model", resolved_model])
             parts.append("--dangerously-skip-permissions")
             parts.append(f"< {shlex.quote(task_file_path)}")
             command = " ".join(parts)
@@ -150,16 +173,22 @@ class AiCliManager:
             return f"{env_prefix}{command}"
 
         elif cli == AICli.CODEX:
-            # export MCP_PROJECT_ROOT=... && cd <path> && cat task.md | codex -a never
-            parts = ["cat", shlex.quote(task_file_path), "|", cmd, "-a", "never"]
+            # export MCP_PROJECT_ROOT=... && cd <path> && cat task.md | codex --model <model> -a never
+            parts = ["cat", shlex.quote(task_file_path), "|", cmd]
+            if resolved_model:
+                parts.extend(["--model", resolved_model])
+            parts.extend(["-a", "never"])
             command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
         else:  # AICli.GEMINI
-            # export MCP_PROJECT_ROOT=... && cd <path> && gemini --yolo < task.md
-            parts = [cmd, "--yolo"]
+            # export MCP_PROJECT_ROOT=... && cd <path> && gemini --model <model> --yolo < task.md
+            parts = [cmd]
+            if resolved_model:
+                parts.extend(["--model", resolved_model])
+            parts.append("--yolo")
             parts.append(f"< {shlex.quote(task_file_path)}")
             command = " ".join(parts)
             if working_dir:

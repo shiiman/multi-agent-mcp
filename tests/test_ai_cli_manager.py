@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.config.settings import AICli, TerminalApp
+from src.config.settings import AICli, ModelDefaults, TerminalApp, resolve_model_for_cli
 
 
 class TestAiCliManager:
@@ -123,6 +123,181 @@ class TestBuildStdinCommand:
         assert "--yolo" in cmd
         # worktree なしの場合は cd も含まれない
         assert "cd" not in cmd
+
+
+class TestBuildStdinCommandWithModel:
+    """build_stdin_command のモデル指定テスト。"""
+
+    def test_build_stdin_command_codex_with_model(self, ai_cli_manager):
+        """Codex で --model フラグが含まれることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
+            model="gpt-5.3-codex",
+        )
+        assert "--model" in cmd
+        assert "gpt-5.3-codex" in cmd
+        assert "-a never" in cmd
+
+    def test_build_stdin_command_gemini_with_model(self, ai_cli_manager):
+        """Gemini で --model フラグが含まれることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.GEMINI, "/tmp/task.md", "/path/to/worktree",
+            model="gemini-3-pro",
+        )
+        assert "--model" in cmd
+        assert "gemini-3-pro" in cmd
+        assert "--yolo" in cmd
+
+    def test_build_stdin_command_codex_claude_alias_resolved(self, ai_cli_manager):
+        """Codex で Claude 固有モデル名が CLI デフォルトに解決されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
+            model="opus", role="admin",
+        )
+        assert "--model" in cmd
+        assert ModelDefaults.CODEX_DEFAULT in cmd
+
+    def test_build_stdin_command_gemini_claude_alias_resolved(self, ai_cli_manager):
+        """Gemini で Claude 固有モデル名が CLI デフォルトに解決されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.GEMINI, "/tmp/task.md", "/path/to/worktree",
+            model="sonnet", role="worker",
+        )
+        assert "--model" in cmd
+        assert ModelDefaults.GEMINI_LIGHT in cmd
+
+    def test_build_stdin_command_claude_model_passthrough(self, ai_cli_manager):
+        """Claude で model がそのまま渡されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+            model="opus",
+        )
+        assert "--model" in cmd
+        assert "opus" in cmd
+
+    def test_build_stdin_command_no_model(self, ai_cli_manager):
+        """model=None の場合 --model が含まれないことをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
+        )
+        assert "--model" not in cmd
+
+
+class TestResolveModelForCli:
+    """resolve_model_for_cli() のテスト。"""
+
+    def test_claude_passthrough(self):
+        """Claude は変換なしでそのまま返すことをテスト。"""
+        assert resolve_model_for_cli("claude", "opus", "admin") == "opus"
+        assert resolve_model_for_cli("claude", "sonnet", "worker") == "sonnet"
+
+    def test_codex_fallback_admin(self):
+        """Codex で opus → gpt-5.3-codex に解決されることをテスト。"""
+        result = resolve_model_for_cli("codex", "opus", "admin")
+        assert result == ModelDefaults.CODEX_DEFAULT
+
+    def test_codex_fallback_worker(self):
+        """Codex で sonnet → gpt-5.3-codex に解決されることをテスト。"""
+        result = resolve_model_for_cli("codex", "sonnet", "worker")
+        assert result == ModelDefaults.CODEX_DEFAULT
+
+    def test_gemini_fallback_admin(self):
+        """Gemini で opus → gemini-3-pro に解決されることをテスト。"""
+        result = resolve_model_for_cli("gemini", "opus", "admin")
+        assert result == ModelDefaults.GEMINI_DEFAULT
+
+    def test_gemini_fallback_worker(self):
+        """Gemini で sonnet → gemini-3-flash に解決されることをテスト。"""
+        result = resolve_model_for_cli("gemini", "sonnet", "worker")
+        assert result == ModelDefaults.GEMINI_LIGHT
+
+    def test_explicit_model_not_converted(self):
+        """明示指定されたモデル名は変換されないことをテスト。"""
+        assert resolve_model_for_cli("codex", "gpt-5.3-codex", "worker") == "gpt-5.3-codex"
+        assert resolve_model_for_cli("gemini", "gemini-3-pro", "admin") == "gemini-3-pro"
+
+    def test_none_model_returns_none(self):
+        """model=None の場合 None を返すことをテスト。"""
+        assert resolve_model_for_cli("claude", None) is None
+        assert resolve_model_for_cli("codex", None) is None
+        assert resolve_model_for_cli("gemini", None) is None
+
+    def test_custom_cli_defaults_override(self):
+        """cli_defaults を渡すとハードコード値を上書きできることをテスト。"""
+        custom = {
+            "codex": {"admin": "custom-codex-model", "worker": "custom-codex-worker"},
+        }
+        result = resolve_model_for_cli("codex", "opus", "admin", cli_defaults=custom)
+        assert result == "custom-codex-model"
+
+        result = resolve_model_for_cli("codex", "sonnet", "worker", cli_defaults=custom)
+        assert result == "custom-codex-worker"
+
+
+class TestBuildStdinCommandWithThinkingTokens:
+    """build_stdin_command の thinking_tokens テスト。"""
+
+    def test_thinking_tokens_included_in_claude(self, ai_cli_manager):
+        """Claude で MAX_THINKING_TOKENS が環境変数に含まれることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+            thinking_tokens=4000,
+        )
+        assert "MAX_THINKING_TOKENS=4000" in cmd
+
+    def test_thinking_tokens_zero_included_in_claude(self, ai_cli_manager):
+        """Claude で thinking_tokens=0 でも明示的に設定されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+            thinking_tokens=0,
+        )
+        assert "MAX_THINKING_TOKENS=0" in cmd
+
+    def test_thinking_tokens_excluded_from_codex(self, ai_cli_manager):
+        """Codex では MAX_THINKING_TOKENS が設定されないことをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
+            thinking_tokens=1000,
+        )
+        assert "MAX_THINKING_TOKENS" not in cmd
+
+    def test_thinking_tokens_excluded_from_gemini(self, ai_cli_manager):
+        """Gemini では MAX_THINKING_TOKENS が設定されないことをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.GEMINI, "/tmp/task.md", "/path/to/worktree",
+            thinking_tokens=2000,
+        )
+        assert "MAX_THINKING_TOKENS" not in cmd
+
+    def test_thinking_tokens_none_excluded(self, ai_cli_manager):
+        """thinking_tokens=None の場合 MAX_THINKING_TOKENS が含まれないことをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+            thinking_tokens=None,
+        )
+        assert "MAX_THINKING_TOKENS" not in cmd
+
+    def test_thinking_tokens_with_project_root(self, ai_cli_manager):
+        """thinking_tokens と project_root が両方含まれることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+            project_root="/project",
+            thinking_tokens=4000,
+        )
+        assert "MCP_PROJECT_ROOT" in cmd
+        assert "MAX_THINKING_TOKENS=4000" in cmd
+        assert "export MCP_PROJECT_ROOT" in cmd
+        assert "export MAX_THINKING_TOKENS" in cmd
+
+    def test_thinking_tokens_with_multiplier(self, ai_cli_manager):
+        """倍率適用後の値が正しく渡されることをテスト（呼び出し側の責務）。"""
+        # base=1000, multiplier=2.0 → 2000
+        thinking_tokens = int(1000 * 2.0)
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+            thinking_tokens=thinking_tokens,
+        )
+        assert "MAX_THINKING_TOKENS=2000" in cmd
 
 
 class TestAiCliManagerTerminal:

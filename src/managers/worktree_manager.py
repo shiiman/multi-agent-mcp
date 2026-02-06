@@ -374,7 +374,7 @@ class WorktreeManager:
         )
 
     async def open_with_ai(self, branch: str) -> tuple[bool, str]:
-        """gtr ai コマンドでworktreeをAIツール（Claude Code）で開く。
+        """gtr ai コマンドでworktreeをAIツール（AI CLI）で開く。
 
         Args:
             branch: ブランチ名

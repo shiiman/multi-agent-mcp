@@ -185,10 +185,11 @@ class GtrconfigManager:
         if list(self.project_root.glob("*.md")):
             config["copy"]["include"].append("*.md")
 
-        # CLAUDE.mdがあれば特別扱い
-        if (self.project_root / "CLAUDE.md").exists():
-            if "CLAUDE.md" not in config["copy"]["include"]:
-                config["copy"]["include"].append("CLAUDE.md")
+        # AI CLI の設定ファイルがあれば include に追加
+        for cli_file in ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "CODEX.md", ".cursorrules"]:
+            if (self.project_root / cli_file).exists():
+                if cli_file not in config["copy"]["include"]:
+                    config["copy"]["include"].append(cli_file)
 
         # 重複を除去
         config["copy"]["include"] = list(set(config["copy"]["include"]))
@@ -224,7 +225,7 @@ class GtrconfigManager:
         config = self.analyze_project()
         config["defaults"] = {
             "editor": "cursor",
-            "ai": "claude",
+            "ai": "auto",
         }
 
         example_path = self.project_root / self.GTRCONFIG_EXAMPLE_FILENAME

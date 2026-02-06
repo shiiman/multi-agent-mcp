@@ -31,7 +31,7 @@
 
 {memory_context}
 
-### Self-Check（コンパクション復帰用）
+### Self-Check（コンテキスト圧縮からの復帰用）
 
 コンテキストが失われた場合、以下を確認してください：
 
@@ -94,7 +94,7 @@ git commit -m "feat: {{作業内容の要約}}"
 **作業が完了したら、Dashboard を更新してください。**
 
 ```
-mcp__multi-agent-mcp__report_task_completion(
+{mcp_tool_prefix}report_task_completion(
     task_id="{task_id}",
     status="completed",  # または "failed"
     message="作業内容の要約",

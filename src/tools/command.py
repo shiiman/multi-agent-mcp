@@ -7,6 +7,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.context import AppContext
+from src.managers.agent_manager import AgentManager
 from src.models.agent import AgentRole, AgentStatus
 from src.config.workflow_guides import get_role_guide
 from src.tools.helpers import (
@@ -160,7 +161,7 @@ def register_tools(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """タスク指示をファイル経由でエージェントに送信する。
 
-        長いマルチライン指示に対応。エージェントは claude < TASK.md でタスクを実行。
+        長いマルチライン指示に対応。エージェントはファイル経由でタスクを実行。
         auto_enhance=True の場合:
         - Admin: 計画書 + Worker管理手順を自動生成
         - Worker: 7セクション構造・ペルソナ・メモリを自動統合
@@ -260,11 +261,12 @@ def register_tools(mcp: FastMCP) -> None:
             # プロジェクト名を取得
             project_name = project_root.name
 
+            # config.json から MCP ツールプレフィックスを取得（Admin/Worker 共通）
+            mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
+
             if is_admin:
                 # Admin 用: 計画書 + Worker管理手順
                 actual_branch = branch_name or f"feature/{session_id}"
-                # config.json から MCP ツールプレフィックスを取得
-                mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
                 final_task_content = generate_admin_task(
                     session_id=session_id,
                     agent_id=agent_id,
@@ -298,6 +300,7 @@ def register_tools(mcp: FastMCP) -> None:
                     worktree_path=worker_worktree,
                     branch_name=worker_branch,
                     admin_id=caller_agent_id,  # Worker に Admin の ID を渡す
+                    mcp_tool_prefix=mcp_prefix,
                 )
 
             # ロールテンプレートを先頭に追加
@@ -324,12 +327,25 @@ def register_tools(mcp: FastMCP) -> None:
         else:  # WORKER
             agent_model = profile_settings.get("worker_model")
 
+        # ロール名を build_stdin_command に渡す
+        agent_role_name = "admin" if agent.role == AgentRole.ADMIN.value else "worker"
+
+        # Extended Thinking トークン数を計算（ベース × プロファイル倍率）
+        agent_role_enum = AgentRole.ADMIN if agent.role == AgentRole.ADMIN.value else AgentRole.WORKER
+        base_thinking = AgentManager.get_thinking_tokens_for_role(
+            agent_role_enum, app_ctx.settings
+        )
+        thinking_multiplier = profile_settings.get("thinking_multiplier", 1.0)
+        thinking_tokens = int(base_thinking * thinking_multiplier)
+
         read_command = app_ctx.ai_cli.build_stdin_command(
             cli=agent_cli,
             task_file_path=str(task_file),
             worktree_path=agent.worktree_path,
             project_root=str(project_root),  # MCP_PROJECT_ROOT 環境変数用
             model=agent_model,
+            role=agent_role_name,
+            thinking_tokens=thinking_tokens,
         )
         # tmux ペインが設定されていない場合（Owner）はエラー
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:

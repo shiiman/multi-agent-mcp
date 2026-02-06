@@ -381,3 +381,32 @@ class TestGenerate7SectionTask:
         )
         assert "## Notes（メモ）" in result
         assert "report_task_completion" in result
+
+    def test_includes_custom_mcp_tool_prefix(self):
+        """カスタムMCPツールプレフィックスが反映されることをテスト。"""
+        result = generate_7section_task(
+            task_id="001",
+            agent_id="worker-001",
+            task_description="テスト",
+            persona_name="Engineer",
+            persona_prompt="...",
+            memory_context="",
+            project_name="test-project",
+            mcp_tool_prefix="mcp__custom-server__",
+        )
+        assert "mcp__custom-server__report_task_completion" in result
+        # デフォルトのプレフィックスが含まれないことを確認
+        assert "mcp__multi-agent-mcp__report_task_completion" not in result
+
+    def test_uses_default_mcp_tool_prefix(self):
+        """デフォルトのMCPツールプレフィックスが使用されることをテスト。"""
+        result = generate_7section_task(
+            task_id="001",
+            agent_id="worker-001",
+            task_description="テスト",
+            persona_name="Engineer",
+            persona_prompt="...",
+            memory_context="",
+            project_name="test-project",
+        )
+        assert "mcp__multi-agent-mcp__report_task_completion" in result

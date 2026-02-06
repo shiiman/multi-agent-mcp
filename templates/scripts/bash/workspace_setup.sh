@@ -38,7 +38,7 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     tmux split-window -v -t "$SESSION:main.1"
     # pane 0 = Admin, pane 1-6 = Workers
 
-    # Owner の分割は不要（起点 Claude Code が Owner の役割を担う）
+    # Owner の分割は不要（起点の AI CLI が Owner の役割を担う）
 
     echo "Workspace layout created"
 else

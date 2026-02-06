@@ -71,11 +71,71 @@ class ModelProfile(str, Enum):
 class ModelDefaults:
     """デフォルトモデル名の定数。"""
 
+    # Claude CLI
     OPUS = "opus"
     """Claude Opus モデル（Claude CLI が最新バージョンに自動解決）"""
 
     SONNET = "sonnet"
     """Claude Sonnet モデル（Claude CLI が最新バージョンに自動解決）"""
+
+    # Codex CLI
+    CODEX_DEFAULT = "gpt-5.3-codex"
+    """Codex デフォルトモデル"""
+
+    # Gemini CLI
+    GEMINI_DEFAULT = "gemini-3-pro"
+    """Gemini デフォルトモデル"""
+
+    GEMINI_LIGHT = "gemini-3-flash"
+    """Gemini 軽量モデル"""
+
+    # CLI 別デフォルトモデルマッピング
+    CLI_DEFAULTS: dict[str, dict[str, str]] = {
+        "claude": {"admin": OPUS, "worker": SONNET},
+        "codex": {"admin": CODEX_DEFAULT, "worker": CODEX_DEFAULT},
+        "gemini": {"admin": GEMINI_DEFAULT, "worker": GEMINI_LIGHT},
+    }
+
+    # Claude 固有のモデル名（非 Claude CLI で使用された場合、CLI デフォルトに置換）
+    CLAUDE_ALIASES: set[str] = {"opus", "sonnet", "haiku", "default"}
+
+
+def resolve_model_for_cli(
+    cli: str,
+    model: str | None,
+    role: str = "worker",
+    cli_defaults: dict[str, dict[str, str]] | None = None,
+) -> str | None:
+    """CLI に応じてモデル名を解決する。
+
+    Claude 固有の省略名（opus, sonnet）が非 Claude CLI で使われた場合、
+    CLI のデフォルトモデルにフォールバックする。
+
+    Args:
+        cli: AI CLI 名（"claude", "codex", "gemini"）
+        model: 設定されたモデル名
+        role: ロール（"admin" or "worker"）
+        cli_defaults: CLI 別デフォルトモデルマッピング（Settings から構築）。
+            None の場合は ModelDefaults.CLI_DEFAULTS を使用。
+
+    Returns:
+        解決されたモデル名（None の場合は None を返す）
+    """
+    if model is None:
+        return None
+
+    # Claude CLI の場合はそのまま返す
+    if cli == "claude":
+        return model
+
+    # 非 Claude CLI で Claude 固有のモデル名が設定されている場合、CLI デフォルトに置換
+    if model in ModelDefaults.CLAUDE_ALIASES:
+        defaults_map = cli_defaults if cli_defaults is not None else ModelDefaults.CLI_DEFAULTS
+        defaults = defaults_map.get(cli, {})
+        return defaults.get(role, model)
+
+    # ユーザーが CLI 固有のモデル名を明示指定した場合はそのまま返す
+    return model
 
 
 # AI CLI のデフォルトコマンドマッピング
@@ -164,11 +224,11 @@ class Settings(BaseSettings):
     owner_thinking_tokens: int = 0
     """Owner の思考トークン数（0 = 即断即決モード）"""
 
-    admin_thinking_tokens: int = 1000
+    admin_thinking_tokens: int = 4000
     """Admin の思考トークン数（中程度の思考）"""
 
-    worker_thinking_tokens: int = 10000
-    """Worker の思考トークン数（深い思考が可能）"""
+    worker_thinking_tokens: int = 1000
+    """Worker の思考トークン数（軽量な思考）"""
 
     # モデルプロファイル設定
     model_profile_active: ModelProfile = Field(
@@ -220,6 +280,31 @@ class Settings(BaseSettings):
         default=2.0,
         description="performance プロファイルの思考トークン倍率",
     )
+
+    # CLI 別デフォルトモデル設定（Claude 固有名が非 Claude CLI で使われた場合のフォールバック）
+    cli_default_codex_admin_model: str = Field(
+        default=ModelDefaults.CODEX_DEFAULT,
+        description="Codex CLI の Admin デフォルトモデル",
+    )
+    """Codex CLI で Admin に使用するデフォルトモデル"""
+
+    cli_default_codex_worker_model: str = Field(
+        default=ModelDefaults.CODEX_DEFAULT,
+        description="Codex CLI の Worker デフォルトモデル",
+    )
+    """Codex CLI で Worker に使用するデフォルトモデル"""
+
+    cli_default_gemini_admin_model: str = Field(
+        default=ModelDefaults.GEMINI_DEFAULT,
+        description="Gemini CLI の Admin デフォルトモデル",
+    )
+    """Gemini CLI で Admin に使用するデフォルトモデル"""
+
+    cli_default_gemini_worker_model: str = Field(
+        default=ModelDefaults.GEMINI_LIGHT,
+        description="Gemini CLI の Worker デフォルトモデル",
+    )
+    """Gemini CLI で Worker に使用するデフォルトモデル"""
 
     # スクリーンショット設定
     screenshot_extensions: list[str] = Field(

@@ -12,6 +12,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from src.config.settings import AICli, Settings, TerminalApp
 from src.config.template_loader import get_template_loader
 from src.context import AppContext
+from src.managers.agent_manager import AgentManager
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
     MAIN_WINDOW_WORKER_PANES,
@@ -26,6 +27,7 @@ from src.tools.helpers import (
     ensure_ipc_manager,
     ensure_memory_manager,
     ensure_persona_manager,
+    get_mcp_tool_prefix_from_config,
     resolve_main_repo_root,
     save_agent_to_file,
     sync_agents_from_file,
@@ -248,7 +250,7 @@ def register_tools(mcp: FastMCP) -> None:
             log_location = tmux_session
         else:
             tmux_session = None
-            log_location = "tmux なし（起点 Claude Code）"
+            log_location = "tmux なし（起点の AI CLI（Owner））"
 
         # エージェント情報を登録
         now = datetime.now()
@@ -545,7 +547,7 @@ def register_tools(mcp: FastMCP) -> None:
         if agent.role == AgentRole.OWNER:
             return {
                 "success": False,
-                "error": "Owner エージェントは initialize_agent の対象外です（起点 Claude Code が担う）",
+                "error": "Owner エージェントは initialize_agent の対象外です（起点の AI CLI が担う）",
             }
 
         # 作業ディレクトリの確認
@@ -963,6 +965,7 @@ def register_tools(mcp: FastMCP) -> None:
                         persona = persona_manager.get_optimal_persona(task_content)
 
                         # 7セクション構造のタスクを生成
+                        mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
                         final_task_content = generate_7section_task(
                             task_id=session_id,
                             agent_id=agent_id,
@@ -974,6 +977,7 @@ def register_tools(mcp: FastMCP) -> None:
                             worktree_path=worktree_path if enable_worktree else None,
                             branch_name=branch,
                             admin_id=caller_agent_id,
+                            mcp_tool_prefix=mcp_prefix,
                         )
 
                         # ロールテンプレートを先頭に追加
@@ -993,12 +997,21 @@ def register_tools(mcp: FastMCP) -> None:
                             agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
                             agent_model = profile_settings.get("worker_model")
 
+                            # Extended Thinking トークン数を計算（ベース × プロファイル倍率）
+                            base_thinking = AgentManager.get_thinking_tokens_for_role(
+                                AgentRole.WORKER, app_ctx.settings
+                            )
+                            thinking_multiplier = profile_settings.get("thinking_multiplier", 1.0)
+                            thinking_tokens = int(base_thinking * thinking_multiplier)
+
                             read_command = app_ctx.ai_cli.build_stdin_command(
                                 cli=agent_cli,
                                 task_file_path=str(task_file),
                                 worktree_path=worktree_path if enable_worktree else None,
                                 project_root=str(project_root),
                                 model=agent_model,
+                                role="worker",
+                                thinking_tokens=thinking_tokens,
                             )
 
                             success = await tmux.send_keys_to_pane(

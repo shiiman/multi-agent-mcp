@@ -81,7 +81,8 @@ MCP_DEFAULT_TERMINAL={v(s.default_terminal)}
 MCP_MODEL_PROFILE_ACTIVE={v(s.model_profile_active)}
 
 # standard プロファイル設定（バランス重視）
-# Admin は Opus、Worker は Sonnet
+# Admin は Opus、Worker は Sonnet（Claude CLI の場合）
+# CLI を変更した場合、Claude 固有モデル名は自動的に CLI デフォルトに解決されます
 MCP_MODEL_PROFILE_STANDARD_CLI={v(s.model_profile_standard_cli)}
 MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL={v(s.model_profile_standard_admin_model)}
 MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL={v(s.model_profile_standard_worker_model)}
@@ -89,12 +90,23 @@ MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS={v(s.model_profile_standard_max_workers)}
 MCP_MODEL_PROFILE_STANDARD_THINKING_MULTIPLIER={v(s.model_profile_standard_thinking_multiplier)}
 
 # performance プロファイル設定（性能重視）
-# Admin/Worker ともに Opus
+# Admin/Worker ともに Opus（Claude CLI の場合）
+# CLI を変更した場合、Claude 固有モデル名は自動的に CLI デフォルトに解決されます
 MCP_MODEL_PROFILE_PERFORMANCE_CLI={v(s.model_profile_performance_cli)}
 MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL={v(s.model_profile_performance_admin_model)}
 MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL={v(s.model_profile_performance_worker_model)}
 MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS={v(s.model_profile_performance_max_workers)}
 MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER={v(s.model_profile_performance_thinking_multiplier)}
+
+# ========== CLI 別デフォルトモデル ==========
+# Claude 固有モデル名（opus, sonnet 等）が非 Claude CLI で使われた場合のフォールバック先
+# Codex CLI
+MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL={v(s.cli_default_codex_admin_model)}
+MCP_CLI_DEFAULT_CODEX_WORKER_MODEL={v(s.cli_default_codex_worker_model)}
+
+# Gemini CLI
+MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL={v(s.cli_default_gemini_admin_model)}
+MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL={v(s.cli_default_gemini_worker_model)}
 
 # ========== コスト設定 ==========
 # コスト警告の閾値（USD）
@@ -188,7 +200,7 @@ def _setup_mcp_directories(
     # 注意: project_root はグローバルレジストリ (~/.multi-agent-mcp/agents/) で管理
     config_file = mcp_dir / "config.json"
     config_created = False
-    # MCP ツールの完全名プレフィックス（Claude Code が MCP ツールを呼び出す際に使用）
+    # MCP ツールの完全名プレフィックス（AI CLI が MCP ツールを呼び出す際に使用）
     mcp_tool_prefix = "mcp__multi-agent-mcp__"
     config_data = {
         "mcp_tool_prefix": mcp_tool_prefix,

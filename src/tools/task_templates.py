@@ -98,6 +98,7 @@ def generate_7section_task(
     worktree_path: str | None = None,
     branch_name: str | None = None,
     admin_id: str | None = None,
+    mcp_tool_prefix: str = "mcp__multi-agent-mcp__",
 ) -> str:
     """7セクション構造のタスクファイルを生成する。
 
@@ -112,6 +113,7 @@ def generate_7section_task(
         worktree_path: 作業ディレクトリパス（省略可）
         branch_name: 作業ブランチ名（省略可）
         admin_id: Admin エージェントID（省略可）
+        mcp_tool_prefix: MCP ツールの完全名プレフィックス
 
     Returns:
         7セクション構造のMarkdown文字列
@@ -146,4 +148,5 @@ def generate_7section_task(
         branch_name=branch_name if branch_name else "HEAD",
         timestamp=timestamp,
         admin_id=admin_id if admin_id else "{{ADMIN_ID}}",
+        mcp_tool_prefix=mcp_tool_prefix,
     )

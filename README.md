@@ -336,8 +336,12 @@ cleanup_workspace()
 | `MCP_MODEL_PROFILE_PERFORMANCE_THINKING_MULTIPLIER` | 2.0 | performanceプロファイルの思考倍率 |
 | `MCP_PROJECT_ROOT` | - | プロジェクトルート（.env読み込み用） |
 | `MCP_OWNER_THINKING_TOKENS` | 0 | Ownerの思考トークン数 |
-| `MCP_ADMIN_THINKING_TOKENS` | 1000 | Adminの思考トークン数 |
-| `MCP_WORKER_THINKING_TOKENS` | 10000 | Workerの思考トークン数 |
+| `MCP_ADMIN_THINKING_TOKENS` | 4000 | Adminの思考トークン数 |
+| `MCP_WORKER_THINKING_TOKENS` | 1000 | Workerの思考トークン数 |
+| `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.3-codex | Codex CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.3-codex | Codex CLIのWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro | Gemini CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash | Gemini CLIのWorkerデフォルトモデル |
 | `MCP_QUALITY_CHECK_MAX_ITERATIONS` | 5 | 品質チェックの最大イテレーション回数 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | 3 | 同一問題の繰り返し上限 |
 | `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリの最大エントリ数 |

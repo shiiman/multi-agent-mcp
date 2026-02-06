@@ -319,7 +319,7 @@ def register_tools(mcp: FastMCP) -> None:
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
-        """gtr ai コマンドでworktreeをAIツール（Claude Code）で開く。
+        """gtr ai コマンドでworktreeをAIツール（AI CLI）で開く。
 
         gtr がインストールされている場合のみ使用可能。
 

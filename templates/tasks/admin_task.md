@@ -464,7 +464,7 @@ for msg in messages:
 
 {memory_context}
 
-## Self-Check（コンパクション復帰用）
+## Self-Check（コンテキスト圧縮からの復帰用）
 
 コンテキストが失われた場合：
 - **セッションID**: {session_id}
