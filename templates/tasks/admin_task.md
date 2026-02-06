@@ -352,6 +352,18 @@ while (品質に問題あり && イテレーション < {max_iterations}):
 - 最大イテレーション回数: {max_iterations}回（超えたら Owner に報告）
 - 修正内容はメモリに保存（`save_to_memory`）して学習
 
+### 6.1 Owner 完了通知前の必須ゲート
+
+Owner に `task_complete` を送る前に、以下を満たしていること:
+
+- 実装タスクが統合先ブランチにマージ済み
+- 品質証跡タスク（test/QA/検証）が完了済み
+- UI 関連変更がある場合は Playwright 証跡タスクが完了済み
+- 計画書の要件に未達がない
+
+満たしていない場合は **通知せず**、不足点を起点に再計画して Worker へ再割り当てすること。
+このループを繰り返し、上限は `{max_iterations}` / `{same_issue_limit}` を使用する。
+
 ### 7. 完了報告（🔴 save_to_memory + send_message）
 
 **⚠️ 完了報告の前に、必ずメモリに保存してください。**

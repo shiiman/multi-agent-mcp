@@ -113,6 +113,18 @@ def register_tools(mcp: FastMCP) -> None:
             error_message=error_message,
         )
 
+        # agents.json 側の current_task も同期する（Dashboard 再同期時の巻き戻りを防ぐ）
+        if success and task_status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+            task = dashboard.get_task(task_id)
+            if task and task.assigned_agent_id:
+                assigned = app_ctx.agents.get(task.assigned_agent_id)
+                if assigned and assigned.current_task == task_id:
+                    assigned.current_task = None
+                    if assigned.role == AgentRole.WORKER.value:
+                        assigned.status = AgentStatus.IDLE
+                    assigned.last_activity = datetime.now()
+                    save_agent_to_file(app_ctx, assigned)
+
         return {
             "success": success,
             "task_id": task_id,
@@ -165,6 +177,16 @@ def register_tools(mcp: FastMCP) -> None:
             branch=branch,
             worktree_path=worktree_path,
         )
+
+        if success:
+            # agents.json 側の current_task を更新
+            agent = app_ctx.agents.get(agent_id)
+            if agent:
+                agent.current_task = task_id
+                if agent.role == AgentRole.WORKER.value:
+                    agent.status = AgentStatus.BUSY
+                agent.last_activity = datetime.now()
+                save_agent_to_file(app_ctx, agent)
 
         return {
             "success": success,
@@ -617,4 +639,3 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "summary": summary,
         }
-

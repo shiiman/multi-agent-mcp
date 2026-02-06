@@ -216,6 +216,61 @@ class TestSendMessage:
         assert result["success"] is True
         assert "ブロードキャスト" in result["message"]
 
+    @pytest.mark.asyncio
+    async def test_admin_task_complete_is_blocked_when_quality_gate_not_met(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Admin→Owner の task_complete は品質ゲート未達時に抑止されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_message(
+            sender_id="admin-001",
+            receiver_id="owner-001",
+            message_type="task_complete",
+            content="実装完了しました",
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert result["next_action"] == "replan_and_reassign"
+        assert result["gate"]["status"] == "needs_replan"
+
 
 class TestReadMessages:
     """read_messages ツールのテスト。"""

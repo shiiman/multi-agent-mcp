@@ -97,6 +97,15 @@ def _get_next_worker_slot(
     return None
 
 
+def _resolve_tmux_session_name(agent: Agent) -> str | None:
+    """Agent から tmux セッション名を解決する。"""
+    if agent.session_name:
+        return agent.session_name
+    if agent.tmux_session:
+        return str(agent.tmux_session).split(":", 1)[0]
+    return None
+
+
 def _validate_agent_creation(
     agents: dict[str, Agent],
     role: str,
@@ -574,7 +583,10 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"エージェント {agent_id} が見つかりません",
             }
 
-        session_exists = await tmux.session_exists(agent.tmux_session)
+        session_name = _resolve_tmux_session_name(agent)
+        session_exists = False
+        if session_name:
+            session_exists = await tmux.session_exists(session_name)
 
         return {
             "success": True,

@@ -393,8 +393,8 @@ class TestMarkdownDashboard:
         md_content = dashboard_manager.generate_markdown_dashboard()
         assert "## タスク詳細" not in md_content
 
-    def test_message_history_uses_role_labels_and_details_body(self, dashboard_manager):
-        """メッセージ履歴が role ラベルと details 本文を表示することをテスト。"""
+    def test_message_history_written_to_messages_md(self, dashboard_manager):
+        """メッセージ履歴が messages.md に分離保存されることをテスト。"""
         session_dir = dashboard_manager.dashboard_dir.parent
         agents_file = session_dir / "agents.json"
         agents_file.write_text(
@@ -446,10 +446,15 @@ class TestMarkdownDashboard:
         project_root.mkdir(exist_ok=True)
         md_path = dashboard_manager.save_markdown_dashboard(project_root, "test-session")
         md_content = md_path.read_text(encoding="utf-8")
-        assert "`worker1 (worker-0)`" in md_content
-        assert "`admin (admin-00)`" in md_content
-        assert "<details>" in md_content
-        assert "詳細本文のテストメッセージです。" in md_content
+        assert "## メッセージ履歴" not in md_content
+
+        messages_path = md_path.parent / "messages.md"
+        assert messages_path.exists()
+        messages_content = messages_path.read_text(encoding="utf-8")
+        assert "`worker1`" in messages_content
+        assert "`admin`" in messages_content
+        assert "<details open>" in messages_content
+        assert "詳細本文のテストメッセージです。" in messages_content
 
     def test_cost_section_includes_role_and_agent_breakdown(self, dashboard_manager):
         """コスト情報に role/agent 内訳が表示されることをテスト。"""
@@ -490,8 +495,8 @@ class TestMarkdownDashboard:
         assert "`admin`: 1 calls / 1,000 tokens" in md_content
         assert "`worker`: 1 calls / 2,000 tokens" in md_content
         assert "**エージェント別呼び出し**" in md_content
-        assert "`admin (admin-00)`" in md_content
-        assert "`worker1 (worker-0)`" in md_content
+        assert "`admin`" in md_content
+        assert "`worker1`" in md_content
 
     def test_parse_ipc_message_keeps_full_content(self, dashboard_manager, temp_dir):
         """IPC 本文が省略されずに保持されることをテスト。"""

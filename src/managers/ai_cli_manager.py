@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+import os
 import shlex
 import shutil
 from pathlib import Path
@@ -175,13 +176,27 @@ class AiCliManager:
 
         elif cli == AICli.CODEX:
             # export MCP_PROJECT_ROOT=... && cd <path> &&
-            # codex exec --model <model> - < task.md
-            parts = [cmd, "exec"]
-            if resolved_model:
-                parts.extend(["--model", resolved_model])
-            parts.append("-")
-            parts.append(f"< {shlex.quote(task_file_path)}")
-            command = " ".join(parts)
+            # codex --model <model> "$(cat task.md)"
+            # 大きすぎるタスクは argv 制限回避のため exec にフォールバックする。
+            prompt_size = 0
+            try:
+                prompt_size = os.path.getsize(task_file_path)
+            except OSError:
+                prompt_size = 0
+
+            if prompt_size > 16_000:
+                parts = [cmd, "exec"]
+                if resolved_model:
+                    parts.extend(["--model", resolved_model])
+                parts.append("-")
+                parts.append(f"< {shlex.quote(task_file_path)}")
+                command = " ".join(parts)
+            else:
+                parts = [cmd]
+                if resolved_model:
+                    parts.extend(["--model", resolved_model])
+                parts.append(f'"$(cat {shlex.quote(task_file_path)})"')
+                command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"

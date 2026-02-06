@@ -79,8 +79,9 @@ class TestBuildStdinCommand:
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CODEX, "/tmp/task.md", "/path/to/worktree"
         )
-        assert "codex exec" in cmd
-        assert " - < /tmp/task.md" in cmd
+        assert "codex " in cmd
+        assert "codex exec" not in cmd
+        assert '"$(cat /tmp/task.md)"' in cmd
         # 全 CLI で cd && command 形式
         assert "cd" in cmd
         assert "/path/to/worktree" in cmd
@@ -109,8 +110,9 @@ class TestBuildStdinCommand:
     def test_build_stdin_command_codex_without_worktree(self, ai_cli_manager):
         """worktree なしで Codex コマンドが構築されることをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(AICli.CODEX, "/tmp/task.md")
-        assert "codex exec" in cmd
-        assert " - < /tmp/task.md" in cmd
+        assert "codex " in cmd
+        assert "codex exec" not in cmd
+        assert '"$(cat /tmp/task.md)"' in cmd
         # worktree なしの場合は cd も含まれない
         assert "cd" not in cmd
 
@@ -134,7 +136,8 @@ class TestBuildStdinCommandWithModel:
         )
         assert "--model" in cmd
         assert "gpt-5.3-codex" in cmd
-        assert "codex exec" in cmd
+        assert "codex exec" not in cmd
+        assert '"$(cat /tmp/task.md)"' in cmd
 
     def test_build_stdin_command_gemini_with_model(self, ai_cli_manager):
         """Gemini で --model フラグが含まれることをテスト。"""
@@ -179,6 +182,18 @@ class TestBuildStdinCommandWithModel:
             AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
         )
         assert "--model" not in cmd
+
+    def test_build_stdin_command_codex_fallback_to_exec_for_large_prompt(
+        self, ai_cli_manager, tmp_path
+    ):
+        """Codex の大きなタスクは exec にフォールバックすることをテスト。"""
+        task_file = tmp_path / "large.md"
+        task_file.write_text("A" * 20000, encoding="utf-8")
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX, str(task_file), "/path/to/worktree"
+        )
+        assert "codex exec" in cmd
+        assert f"< {task_file}" in cmd
 
 
 class TestResolveModelForCli:

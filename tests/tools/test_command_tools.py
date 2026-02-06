@@ -710,4 +710,5 @@ class TestSendTask:
         )
 
         assert result["success"] is True
-        assert "codex exec --model gpt-5.3-codex - <" in result["command_sent"]
+        assert "codex --model gpt-5.3-codex" in result["command_sent"]
+        assert "codex exec" not in result["command_sent"]

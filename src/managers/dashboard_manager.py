@@ -79,17 +79,21 @@ class DashboardManager(DashboardCostMixin):
 
     def cleanup(self) -> None:
         """ダッシュボード環境をクリーンアップする。"""
-        dashboard_path = self._get_dashboard_path()
-        if dashboard_path.exists():
-            try:
-                dashboard_path.unlink()
-            except OSError as e:
-                logger.warning(f"ダッシュボードファイル削除エラー: {e}")
+        for path in (self._get_dashboard_path(), self._get_messages_path()):
+            if path.exists():
+                try:
+                    path.unlink()
+                except OSError as e:
+                    logger.warning(f"ダッシュボードファイル削除エラー: {e}")
         logger.info("ダッシュボード環境をクリーンアップしました")
 
     def _get_dashboard_path(self) -> Path:
         """ダッシュボードファイルパスを取得する。"""
         return self.dashboard_dir / "dashboard.md"
+
+    def _get_messages_path(self) -> Path:
+        """メッセージ履歴ファイルパスを取得する。"""
+        return self.dashboard_dir / "messages.md"
 
     def _write_dashboard(self, dashboard: Dashboard) -> None:
         """ダッシュボードをファイルに保存する（YAML Front Matter + Markdown）。
@@ -181,7 +185,6 @@ class DashboardManager(DashboardCostMixin):
         lines.extend(self._generate_agent_table(dashboard))
         lines.extend(self._generate_task_table(dashboard))
         lines.extend(self._generate_task_details(dashboard))
-        lines.extend(self._generate_message_history(dashboard))
         lines.extend(self._generate_stats_section(dashboard))
 
         return "\n".join(lines)
@@ -219,18 +222,29 @@ class DashboardManager(DashboardCostMixin):
             labels[agent.agent_id] = label
         return labels
 
+    def _label_for_agent(self, agent: AgentSummary) -> str:
+        """エージェントの表示名を返す。"""
+        if agent.role == "owner":
+            return "owner"
+        if agent.role == "admin":
+            return "admin"
+        if agent.role == "worker":
+            worker_no = self._extract_worker_number(agent.worktree_path)
+            return f"worker{worker_no}" if worker_no else "worker"
+        return agent.role
+
     def _format_agent_display(
         self,
         agent_id: str | None,
         agent_labels: dict[str, str],
-        with_id: bool = True,
+        with_id: bool = False,
     ) -> str:
         """メッセージ表示用のエージェント名を整形する。"""
         if not agent_id:
             return "all"
 
         label = agent_labels.get(agent_id, "unknown")
-        if with_id:
+        if with_id and label != "unknown":
             return f"{label} ({agent_id[:8]})"
         return label
 
@@ -249,18 +263,19 @@ class DashboardManager(DashboardCostMixin):
             "",
             "## エージェント状態",
             "",
-            "| ID | 役割 | 状態 | 現在のタスク | Worktree |",
+            "| 役割 | 名前 | 状態 | 現在のタスク | Worktree |",
             "|:---|:---|:---|:---|:---|",
         ]
 
         for agent in dashboard.agents:
             emoji = status_emoji.get(str(agent.status).lower(), "⚪")
             current_task = agent.current_task_id or "-"
+            name = self._label_for_agent(agent)
             worktree = self._format_worktree_path(
                 agent.worktree_path, dashboard.workspace_path
             )
             lines.append(
-                f"| `{agent.agent_id[:8]}` | {agent.role} | {emoji} {agent.status} | "
+                f"| {agent.role} | `{name}` | {emoji} {agent.status} | "
                 f"{current_task} | `{worktree}` |"
             )
 
@@ -340,10 +355,19 @@ class DashboardManager(DashboardCostMixin):
 
         return lines
 
-    def _generate_message_history(self, dashboard: Dashboard) -> list[str]:
-        """メッセージ履歴セクションを生成する。"""
+    def _generate_messages_markdown(self, dashboard: Dashboard) -> str:
+        """messages.md の本文を生成する。"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines = [
+            "# Multi-Agent Messages",
+            "",
+            f"**更新時刻**: {now}",
+            "",
+        ]
+
         if not dashboard.messages:
-            return []
+            lines.append("メッセージはまだありません。")
+            return "\n".join(lines)
 
         type_emoji = {
             "task_progress": "📊",
@@ -354,49 +378,39 @@ class DashboardManager(DashboardCostMixin):
             "task_approved": "👍",
             "error": "🔴",
         }
+        agent_labels = self._build_agent_label_map(dashboard)
 
-        lines = [
-            "",
-            "---",
-            "",
+        lines.extend([
             "## メッセージ履歴",
             "",
             "| 時刻 | 種類 | 送信元 | 宛先 | 件名 |",
             "|:---|:---|:---|:---|:---|",
-        ]
-
-        agent_labels = self._build_agent_label_map(dashboard)
-
-        # 最新20件のみ表示
-        latest_messages = dashboard.messages[-20:]
-        for msg in latest_messages:
+        ])
+        for msg in dashboard.messages:
             time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
             emoji = type_emoji.get(msg.message_type, "📨")
-            sender = self._format_agent_display(msg.sender_id, agent_labels)
-            receiver = self._format_agent_display(msg.receiver_id, agent_labels)
+            sender = self._format_agent_display(msg.sender_id, agent_labels, with_id=False)
+            receiver = self._format_agent_display(msg.receiver_id, agent_labels, with_id=False)
             subject = msg.subject if msg.subject else msg.content
             subject = subject.replace("\n", " ").replace("|", "\\|")
-            if len(subject) > 60:
-                subject = f"{subject[:60]}..."
+            if len(subject) > 100:
+                subject = f"{subject[:100]}..."
             lines.append(
                 f"| {time_str} | {emoji} {msg.message_type} | "
                 f"`{sender}` | `{receiver}` | {subject} |"
             )
 
-        lines.extend([
-            "",
-            "### メッセージ本文",
-        ])
-        for msg in latest_messages:
+        lines.extend(["", "## メッセージ本文"])
+        for msg in dashboard.messages:
             time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
             emoji = type_emoji.get(msg.message_type, "📨")
-            sender = self._format_agent_display(msg.sender_id, agent_labels)
-            receiver = self._format_agent_display(msg.receiver_id, agent_labels)
+            sender = self._format_agent_display(msg.sender_id, agent_labels, with_id=False)
+            receiver = self._format_agent_display(msg.receiver_id, agent_labels, with_id=False)
             subject = msg.subject.strip() if msg.subject else "(件名なし)"
             content = msg.content.strip() if msg.content else "(本文なし)"
             lines.extend([
                 "",
-                "<details>",
+                "<details open>",
                 f"<summary>{time_str} {emoji} {msg.message_type} {sender} -> {receiver} / {subject}</summary>",
                 "",
                 "```text",
@@ -405,7 +419,18 @@ class DashboardManager(DashboardCostMixin):
                 "</details>",
             ])
 
-        return lines
+        return "\n".join(lines)
+
+    def _write_messages_markdown(self, dashboard: Dashboard) -> None:
+        """messages.md を保存する。"""
+        messages_path = self._get_messages_path()
+        try:
+            messages_path.write_text(
+                self._generate_messages_markdown(dashboard),
+                encoding="utf-8",
+            )
+        except OSError as e:
+            logger.error(f"messages.md 保存エラー: {e}")
 
     def _generate_stats_section(self, dashboard: Dashboard) -> list[str]:
         """統計・コスト情報セクションを生成する。"""
@@ -476,7 +501,7 @@ class DashboardManager(DashboardCostMixin):
                     display = "unknown"
                 else:
                     label = agent_labels.get(agent_id, "unknown")
-                    display = f"{label} ({agent_id[:8]})"
+                    display = label
                 lines.append(
                     f"- `{display}`: {data['calls']} calls / {data['tokens']:,} tokens"
                 )
@@ -1015,14 +1040,15 @@ class DashboardManager(DashboardCostMixin):
                             msg = self._parse_ipc_message(msg_file)
                             if msg:
                                 all_messages.append(msg)
-                # 時系列順ソート、最新20件
+                # 時系列順ソート（全件保持）
                 all_messages.sort(key=lambda m: m.created_at or datetime.min)
-                dashboard.messages = all_messages[-20:]
+                dashboard.messages = all_messages
                 logger.debug(f"IPC メッセージ {len(dashboard.messages)} 件を収集")
             except Exception as e:
                 logger.warning(f"IPC メッセージの収集に失敗: {e}")
 
         self._write_dashboard(dashboard)
+        self._write_messages_markdown(dashboard)
         return self._get_dashboard_path()
 
     def _parse_ipc_message(self, file_path: Path) -> MessageSummary | None:

@@ -1,6 +1,7 @@
 """IPC/メッセージング管理ツール。"""
 
 import logging
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,12 @@ from mcp.server.fastmcp import Context, FastMCP
 from src.models.agent import AgentRole
 from src.models.dashboard import TaskStatus
 from src.models.message import Message, MessagePriority, MessageType
-from src.tools.helpers import ensure_ipc_manager, require_permission, sync_agents_from_file
+from src.tools.helpers import (
+    ensure_ipc_manager,
+    require_permission,
+    save_agent_to_file,
+    sync_agents_from_file,
+)
 from src.tools.helpers_managers import ensure_dashboard_manager
 
 logger = logging.getLogger(__name__)
@@ -48,19 +54,36 @@ def _auto_update_dashboard_from_messages(
                 progress = msg.metadata.get("progress", 0)
                 checklist = msg.metadata.get("checklist")
                 message_text = msg.metadata.get("message")
+                reporter = msg.metadata.get("reporter")
                 if checklist:
                     dashboard.update_task_checklist(
                         task_id, checklist, log_message=message_text
                     )
                 dashboard.update_task_status(task_id, TaskStatus.IN_PROGRESS, progress)
+                if reporter and reporter in app_ctx.agents:
+                    agent = app_ctx.agents[reporter]
+                    agent.current_task = task_id
+                    save_agent_to_file(app_ctx, agent)
 
             elif msg.message_type == MessageType.TASK_COMPLETE:
+                reporter = msg.metadata.get("reporter")
                 dashboard.update_task_status(
                     task_id, TaskStatus.COMPLETED, progress=100
                 )
+                if reporter and reporter in app_ctx.agents:
+                    agent = app_ctx.agents[reporter]
+                    if agent.current_task == task_id:
+                        agent.current_task = None
+                    save_agent_to_file(app_ctx, agent)
 
             elif msg.message_type == MessageType.TASK_FAILED:
+                reporter = msg.metadata.get("reporter")
                 dashboard.update_task_status(task_id, TaskStatus.FAILED)
+                if reporter and reporter in app_ctx.agents:
+                    agent = app_ctx.agents[reporter]
+                    if agent.current_task == task_id:
+                        agent.current_task = None
+                    save_agent_to_file(app_ctx, agent)
         except Exception as e:
             logger.debug(f"タスク {task_id} の Dashboard 更新をスキップ: {e}")
 
@@ -74,6 +97,133 @@ def _auto_update_dashboard_from_messages(
         logger.debug(f"Markdown ダッシュボード更新をスキップ: {e}")
 
     return True
+
+
+def _resolve_session_name(agent: Any) -> str | None:
+    """Agent から tmux セッション名を解決する。"""
+    session_name = getattr(agent, "session_name", None)
+    if session_name:
+        return session_name
+    tmux_session = getattr(agent, "tmux_session", None)
+    if tmux_session:
+        return str(tmux_session).split(":", 1)[0]
+    return None
+
+
+def _is_quality_task(title: str, description: str) -> bool:
+    text = f"{title} {description}".lower()
+    keywords = ("qa", "quality", "test", "e2e", "検証", "テスト", "品質", "playwright")
+    return any(keyword in text for keyword in keywords)
+
+
+def _is_playwright_task(title: str, description: str) -> bool:
+    text = f"{title} {description}".lower()
+    return "playwright" in text
+
+
+def _is_ui_related_task(title: str, description: str) -> bool:
+    text = f"{title} {description}".lower()
+    keywords = ("ui", "frontend", "画面", "表示", "フロント", "browser", "e2e")
+    return any(keyword in text for keyword in keywords)
+
+
+def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[str]:
+    """現在ブランチに未マージのブランチ一覧を返す。"""
+    try:
+        current_branch = subprocess.check_output(
+            ["git", "-C", project_root, "rev-parse", "--abbrev-ref", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return []
+
+    unmerged: list[str] = []
+    for branch in sorted(set(branches)):
+        if not branch or branch == current_branch:
+            continue
+        try:
+            exists = subprocess.run(
+                ["git", "-C", project_root, "rev-parse", "--verify", branch],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if exists.returncode != 0:
+                continue
+            merged = subprocess.run(
+                ["git", "-C", project_root, "merge-base", "--is-ancestor", branch, "HEAD"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if merged.returncode != 0:
+                unmerged.append(branch)
+        except Exception:
+            continue
+    return unmerged
+
+
+def _validate_admin_completion_gate(
+    app_ctx: Any, sender_id: str, receiver_id: str | None, msg_type: MessageType
+) -> tuple[bool, dict[str, Any]]:
+    """Admin -> Owner の task_complete を品質ゲートで検証する。"""
+    if msg_type != MessageType.TASK_COMPLETE or not receiver_id:
+        return True, {}
+
+    sender = app_ctx.agents.get(sender_id)
+    receiver = app_ctx.agents.get(receiver_id)
+    if not sender or not receiver:
+        return True, {}
+    if sender.role != AgentRole.ADMIN.value or receiver.role != AgentRole.OWNER.value:
+        return True, {}
+
+    dashboard = ensure_dashboard_manager(app_ctx)
+    tasks = dashboard.list_tasks()
+    summary = dashboard.get_summary()
+    settings = app_ctx.settings
+
+    reasons: list[str] = []
+    suggestions: list[str] = []
+
+    if summary["pending_tasks"] > 0 or summary["in_progress_tasks"] > 0 or summary["failed_tasks"] > 0:
+        reasons.append(
+            "未完了タスクがあります"
+            f" (pending={summary['pending_tasks']}, in_progress={summary['in_progress_tasks']}, failed={summary['failed_tasks']})"
+        )
+        suggestions.append("未完了/失敗タスクを再計画し、Worker に再割り当てしてください。")
+
+    completed_tasks = [t for t in tasks if t.status == TaskStatus.COMPLETED]
+    quality_tasks = [t for t in completed_tasks if _is_quality_task(t.title, t.description)]
+    if not quality_tasks:
+        reasons.append("品質証跡タスク（test/QA/検証）が完了していません")
+        suggestions.append("品質チェック専用タスクを作成し、証跡を揃えてください。")
+
+    ui_required = any(_is_ui_related_task(t.title, t.description) for t in tasks)
+    playwright_done = any(_is_playwright_task(t.title, t.description) for t in quality_tasks)
+    if ui_required and not playwright_done:
+        reasons.append("UI関連タスクに対する Playwright 証跡が不足しています")
+        suggestions.append("Playwright 実行タスクを追加し、完了報告を取り込んでください。")
+
+    branches = [t.branch for t in completed_tasks if t.branch]
+    if app_ctx.project_root and branches:
+        unmerged = _check_branch_merge_state(str(app_ctx.project_root), branches)
+        if unmerged:
+            reasons.append(f"未マージの完了タスクブランチがあります: {', '.join(unmerged[:5])}")
+            suggestions.append("未マージブランチを統合後に再度完了通知を送ってください。")
+
+    if reasons:
+        return False, {
+            "status": "needs_replan",
+            "reasons": reasons,
+            "suggestions": suggestions,
+            "quality_limits": {
+                "max_iterations": settings.quality_check_max_iterations,
+                "same_issue_limit": settings.quality_check_same_issue_limit,
+            },
+        }
+
+    return True, {"status": "passed"}
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -109,6 +259,7 @@ def register_tools(mcp: FastMCP) -> None:
             return role_error
 
         ipc = ensure_ipc_manager(app_ctx)
+        sync_agents_from_file(app_ctx)
 
         # メッセージタイプの検証
         try:
@@ -138,6 +289,17 @@ def register_tools(mcp: FastMCP) -> None:
         if receiver_id and receiver_id not in ipc.get_all_agent_ids():
             ipc.register_agent(receiver_id)
 
+        gate_ok, gate_detail = _validate_admin_completion_gate(
+            app_ctx, sender_id, receiver_id, msg_type
+        )
+        if not gate_ok:
+            return {
+                "success": False,
+                "error": "品質ゲート未達のため Owner への完了通知を保留しました",
+                "next_action": "replan_and_reassign",
+                "gate": gate_detail,
+            }
+
         message = ipc.send_message(
             sender_id=sender_id,
             receiver_id=receiver_id,
@@ -165,7 +327,8 @@ def register_tools(mcp: FastMCP) -> None:
                     and receiver_agent.pane_index is not None
                 ):
                     notification_text = (
-                        f"[IPC] 新しいメッセージ: {msg_type.value} from {sender_id}"
+                        "echo '[IPC] 新しいメッセージ:"
+                        f" {msg_type.value} from {sender_id}'"
                     )
                     try:
                         await tmux.send_keys_to_pane(
@@ -212,6 +375,7 @@ def register_tools(mcp: FastMCP) -> None:
             "message_id": message.id,
             "notification_sent": notification_sent,
             "notification_method": notification_method,  # "tmux" or "macos" or None
+            "gate": gate_detail if gate_detail else None,
             "message": (
                 "ブロードキャストを送信しました"
                 if receiver_id is None

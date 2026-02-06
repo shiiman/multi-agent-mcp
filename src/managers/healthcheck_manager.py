@@ -69,6 +69,17 @@ class HealthcheckManager:
         self.agents = agents
         self.healthcheck_interval_seconds = healthcheck_interval_seconds
 
+    @staticmethod
+    def _resolve_session_name(agent: "Agent") -> str | None:
+        """Agent から tmux のセッション名を解決する。"""
+        if getattr(agent, "session_name", None):
+            return agent.session_name
+
+        tmux_session = getattr(agent, "tmux_session", None)
+        if tmux_session:
+            return str(tmux_session).split(":", 1)[0]
+        return None
+
     async def check_agent(self, agent_id: str) -> HealthStatus:
         """単一エージェントのヘルスチェックを行う。
 
@@ -88,7 +99,16 @@ class HealthcheckManager:
             )
 
         # tmux セッション確認のみで健全性を判断
-        tmux_alive = await self.tmux_manager.session_exists(agent.tmux_session)
+        session_name = self._resolve_session_name(agent)
+        if not session_name:
+            return HealthStatus(
+                agent_id=agent_id,
+                is_healthy=False,
+                tmux_session_alive=False,
+                error_message="tmux セッション情報が未設定です",
+            )
+
+        tmux_alive = await self.tmux_manager.session_exists(session_name)
 
         is_healthy = tmux_alive
         error_message = None if is_healthy else "tmux セッションが見つかりません"
@@ -153,8 +173,11 @@ class HealthcheckManager:
         # tmux セッションを再作成
         logger.info(f"エージェント {agent_id} の tmux セッションを再作成します")
         working_dir = agent.worktree_path or "."
+        session_name = self._resolve_session_name(agent)
+        if not session_name:
+            return False, f"エージェント {agent_id} の tmux セッション情報がありません"
         success = await self.tmux_manager.create_session(
-            agent.tmux_session, working_dir
+            session_name, working_dir
         )
         if success:
             return True, f"エージェント {agent_id} の tmux セッションを再作成しました"
