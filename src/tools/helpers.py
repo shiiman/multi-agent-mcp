@@ -8,6 +8,7 @@ import logging
 import os
 from typing import Any
 
+from src.config.settings import load_settings_for_project, resolve_project_env_file
 from src.context import AppContext
 from src.models.agent import AgentRole
 
@@ -15,6 +16,32 @@ logger = logging.getLogger(__name__)
 
 
 # ========== プロジェクトルート解決 ==========
+
+
+def refresh_app_settings(app_ctx: AppContext, project_root: str) -> None:
+    """project_root に紐づく .env を読み込み、AppContext の settings を同期する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        project_root: プロジェクトルート
+    """
+    from src.tools.helpers_git import resolve_main_repo_root
+
+    main_repo_root = resolve_main_repo_root(project_root)
+    env_file = resolve_project_env_file(main_repo_root)
+    settings = load_settings_for_project(main_repo_root)
+
+    app_ctx.settings = settings
+    app_ctx.ai_cli.settings = settings
+    app_ctx.tmux.settings = settings
+
+    if env_file:
+        logger.info(f"project settings を .env から再読み込み: {env_file}")
+    else:
+        logger.info(
+            "project settings をデフォルトで再読み込み（.env なし）: "
+            f"{main_repo_root}/.multi-agent-mcp/.env"
+        )
 
 
 def resolve_project_root(
@@ -99,6 +126,7 @@ def ensure_project_root_from_caller(
             project_root = get_project_root_from_registry(caller_agent_id)
             if project_root:
                 app_ctx.project_root = project_root
+                refresh_app_settings(app_ctx, project_root)
                 logger.debug(
                     f"caller_agent_id {caller_agent_id} から project_root を設定: {project_root}"
                 )

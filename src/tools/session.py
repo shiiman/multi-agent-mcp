@@ -12,6 +12,7 @@ from src.managers.tmux_manager import get_project_name
 from src.tools.helpers import (
     get_gtrconfig_manager,
     get_worktree_manager,
+    refresh_app_settings,
     require_permission,
 )
 
@@ -662,6 +663,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         # project_root を設定（screenshot 等で使用）
         app_ctx.project_root = working_dir
+        refresh_app_settings(app_ctx, working_dir)
         logger.info(f"project_root を設定しました: {working_dir}")
 
         # Dashboard マネージャーを初期化（Owner のみが行う）

@@ -3,7 +3,13 @@
 
 
 import src.config.settings as settings_module
-from src.config.settings import ModelDefaults, get_mcp_dir, get_project_env_file
+from src.config.settings import (
+    AICli,
+    ModelDefaults,
+    get_mcp_dir,
+    get_project_env_file,
+    load_settings_for_project,
+)
 from src.tools.session import generate_env_template
 
 
@@ -145,6 +151,41 @@ class TestGenerateEnvTemplate:
         assert "MCP_MODEL_PROFILE_ACTIVE=standard" in template
         assert ModelDefaults.SONNET in template
         assert ModelDefaults.OPUS in template
+
+
+class TestLoadSettingsForProject:
+    """load_settings_for_project 関数のテスト。"""
+
+    def test_loads_env_file_without_mcp_project_root(self, temp_dir, monkeypatch):
+        """MCP_PROJECT_ROOT 未設定でも project_root 指定で .env を読み込める。"""
+        monkeypatch.delenv("MCP_PROJECT_ROOT", raising=False)
+        monkeypatch.delenv("MCP_MODEL_PROFILE_STANDARD_CLI", raising=False)
+        monkeypatch.delenv("MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL", raising=False)
+
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        env_file = mcp_dir / ".env"
+        env_file.write_text(
+            "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n"
+            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.3-codex\n",
+            encoding="utf-8",
+        )
+
+        settings = load_settings_for_project(str(temp_dir))
+
+        assert settings.model_profile_standard_cli == AICli.CODEX
+        assert settings.model_profile_standard_admin_model == "gpt-5.3-codex"
+
+    def test_falls_back_to_default_when_env_file_not_exists(self, temp_dir, monkeypatch):
+        """.env がない場合はデフォルト設定を使用する。"""
+        monkeypatch.delenv("MCP_PROJECT_ROOT", raising=False)
+        monkeypatch.delenv("MCP_MODEL_PROFILE_STANDARD_CLI", raising=False)
+        monkeypatch.delenv("MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL", raising=False)
+
+        settings = load_settings_for_project(str(temp_dir))
+
+        assert settings.model_profile_standard_cli == AICli.CLAUDE
+        assert settings.model_profile_standard_admin_model == ModelDefaults.OPUS
 
 
 class TestSetupMcpDirectories:

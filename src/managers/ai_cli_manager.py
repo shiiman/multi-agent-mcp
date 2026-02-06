@@ -175,11 +175,12 @@ class AiCliManager:
 
         elif cli == AICli.CODEX:
             # export MCP_PROJECT_ROOT=... && cd <path> &&
-            # cat task.md | codex --model <model> -a never
-            parts = ["cat", shlex.quote(task_file_path), "|", cmd]
+            # codex exec --model <model> - < task.md
+            parts = [cmd, "exec"]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
-            parts.extend(["-a", "never"])
+            parts.append("-")
+            parts.append(f"< {shlex.quote(task_file_path)}")
             command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"

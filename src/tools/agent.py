@@ -24,6 +24,7 @@ from src.tools.helpers import (
     ensure_ipc_manager,
     ensure_persona_manager,
     get_mcp_tool_prefix_from_config,
+    refresh_app_settings,
     require_permission,
     resolve_main_repo_root,
     save_agent_to_file,
@@ -449,8 +450,8 @@ def register_tools(mcp: FastMCP) -> None:
             # Owner 作成時は working_dir から project_root を自動設定
             # （init_tmux_workspace より前に create_agent(owner) が呼ばれるため）
             if not app_ctx.project_root and working_dir:
-                from src.tools.helpers import resolve_main_repo_root
                 app_ctx.project_root = resolve_main_repo_root(working_dir)
+                refresh_app_settings(app_ctx, app_ctx.project_root)
                 logger.info(f"Owner 作成時に project_root を自動設定: {app_ctx.project_root}")
 
         # 入力検証

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.config.settings import AICli
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -119,6 +120,46 @@ class TestCreateAgent:
         assert result["success"] is True
         assert "agent" in result
         assert result["agent"]["role"] == "owner"
+
+    @pytest.mark.asyncio
+    async def test_create_owner_refreshes_settings_from_project_env(self, mock_ctx, git_repo):
+        """Owner 作成時に project .env の設定へ再同期されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_agent = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_agent":
+                create_agent = tool.fn
+                break
+
+        assert create_agent is not None
+
+        mcp_dir = git_repo / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        env_file = mcp_dir / ".env"
+        env_file.write_text(
+            "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n"
+            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.3-codex\n",
+            encoding="utf-8",
+        )
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        app_ctx.project_root = None
+
+        result = await create_agent(
+            role="owner",
+            working_dir=str(git_repo),
+            ctx=mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert app_ctx.settings.model_profile_standard_cli == AICli.CODEX
+        assert app_ctx.ai_cli.settings.model_profile_standard_cli == AICli.CODEX
 
     @pytest.mark.asyncio
     async def test_create_admin_success(self, mock_ctx, git_repo):

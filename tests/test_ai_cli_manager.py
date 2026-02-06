@@ -79,9 +79,8 @@ class TestBuildStdinCommand:
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CODEX, "/tmp/task.md", "/path/to/worktree"
         )
-        assert "cat" in cmd
-        assert "codex" in cmd
-        assert "-a never" in cmd
+        assert "codex exec" in cmd
+        assert " - < /tmp/task.md" in cmd
         # 全 CLI で cd && command 形式
         assert "cd" in cmd
         assert "/path/to/worktree" in cmd
@@ -110,9 +109,8 @@ class TestBuildStdinCommand:
     def test_build_stdin_command_codex_without_worktree(self, ai_cli_manager):
         """worktree なしで Codex コマンドが構築されることをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(AICli.CODEX, "/tmp/task.md")
-        assert "cat" in cmd
-        assert "codex" in cmd
-        assert "-a never" in cmd
+        assert "codex exec" in cmd
+        assert " - < /tmp/task.md" in cmd
         # worktree なしの場合は cd も含まれない
         assert "cd" not in cmd
 
@@ -136,7 +134,7 @@ class TestBuildStdinCommandWithModel:
         )
         assert "--model" in cmd
         assert "gpt-5.3-codex" in cmd
-        assert "-a never" in cmd
+        assert "codex exec" in cmd
 
     def test_build_stdin_command_gemini_with_model(self, ai_cli_manager):
         """Gemini で --model フラグが含まれることをテスト。"""

@@ -638,3 +638,76 @@ class TestBroadcastCommand:
 
         assert result["success"] is False
         assert "無効な役割" in result["error"]
+
+
+class TestSendTask:
+    """send_task ツールのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_send_task_uses_codex_command_from_project_env(
+        self, command_mock_ctx, git_repo
+    ):
+        """project .env 設定に従って codex コマンドを生成できることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+        from src.tools.helpers import refresh_app_settings
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+
+        assert send_task is not None
+
+        mcp_dir = git_repo / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        env_file = mcp_dir / ".env"
+        env_file.write_text(
+            "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n"
+            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.3-codex\n"
+            "MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL=gpt-5.3-codex\n",
+            encoding="utf-8",
+        )
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        refresh_app_settings(app_ctx, str(git_repo))
+
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="test task",
+            session_id="issue-001",
+            auto_enhance=False,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert "codex exec --model gpt-5.3-codex - <" in result["command_sent"]

@@ -8,6 +8,24 @@ from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
 
 
+def resolve_project_env_file(project_root: str | os.PathLike[str] | None) -> str | None:
+    """指定した project_root から .env ファイルを解決する。
+
+    Args:
+        project_root: プロジェクトルートパス
+
+    Returns:
+        .env ファイルのパス（存在する場合）、または None
+    """
+    if not project_root:
+        return None
+
+    env_file = Path(project_root) / ".multi-agent-mcp" / ".env"
+    if env_file.exists():
+        return str(env_file)
+    return None
+
+
 def get_project_env_file() -> str | None:
     """プロジェクト別 .env ファイルのパスを取得。
 
@@ -17,12 +35,7 @@ def get_project_env_file() -> str | None:
     Returns:
         .env ファイルのパス（存在する場合）、または None
     """
-    project_root = os.getenv("MCP_PROJECT_ROOT")
-    if project_root:
-        env_file = Path(project_root) / ".multi-agent-mcp" / ".env"
-        if env_file.exists():
-            return str(env_file)
-    return None
+    return resolve_project_env_file(os.getenv("MCP_PROJECT_ROOT"))
 
 
 class AICli(str, Enum):
@@ -379,3 +392,24 @@ def get_mcp_dir() -> str:
     if _settings_instance is None:
         _settings_instance = Settings()
     return _settings_instance.mcp_dir
+
+
+def load_settings_for_project(project_root: str | os.PathLike[str] | None) -> Settings:
+    """指定 project_root の .env を優先して Settings を生成する。
+
+    優先順位:
+    1. プロセス環境変数 MCP_*
+    2. {project_root}/.multi-agent-mcp/.env
+    3. デフォルト値
+
+    Args:
+        project_root: プロジェクトルートパス
+
+    Returns:
+        読み込み済み Settings インスタンス
+    """
+    env_file = resolve_project_env_file(project_root)
+    if env_file:
+        return Settings(_env_file=env_file)
+    # model_config 側の env_file を使わず、環境変数 + デフォルトのみで構築
+    return Settings(_env_file=None)
