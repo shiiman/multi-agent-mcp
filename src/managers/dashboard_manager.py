@@ -20,6 +20,7 @@ from src.models.dashboard import (
     AgentSummary,
     ChecklistItem,
     Dashboard,
+    MessageSummary,
     TaskInfo,
     TaskLog,
     TaskStatus,
@@ -97,8 +98,10 @@ class DashboardManager(DashboardCostMixin):
         """
         dashboard_path = self._get_dashboard_path()
         try:
-            # YAML Front Matter 用のデータ
-            front_matter_data = dashboard.model_dump(mode="json")
+            # YAML Front Matter 用のデータ（messages は Markdown 本体のみに表示）
+            front_matter_data = dashboard.model_dump(
+                mode="json", exclude={"messages"}
+            )
 
             # Markdown コンテンツを生成
             md_content = self._generate_markdown_body(dashboard)
@@ -177,6 +180,7 @@ class DashboardManager(DashboardCostMixin):
         lines.extend(self._generate_agent_table(dashboard))
         lines.extend(self._generate_task_table(dashboard))
         lines.extend(self._generate_task_details(dashboard))
+        lines.extend(self._generate_message_history(dashboard))
         lines.extend(self._generate_stats_section(dashboard))
 
         return "\n".join(lines)
@@ -276,6 +280,45 @@ class DashboardManager(DashboardCostMixin):
                 for log in task.logs[-5:]:
                     time_str = log.timestamp.strftime("%H:%M")
                     lines.append(f"- {time_str} - {log.message}")
+
+        return lines
+
+    def _generate_message_history(self, dashboard: Dashboard) -> list[str]:
+        """メッセージ履歴セクションを生成する。"""
+        if not dashboard.messages:
+            return []
+
+        type_emoji = {
+            "task_progress": "📊",
+            "task_complete": "✅",
+            "task_failed": "❌",
+            "request": "❓",
+            "response": "💬",
+            "task_approved": "👍",
+            "error": "🔴",
+        }
+
+        lines = [
+            "",
+            "---",
+            "",
+            "## メッセージ履歴",
+            "",
+            "| 時刻 | 種類 | 送信元 | 宛先 | 件名 |",
+            "|:---|:---|:---|:---|:---|",
+        ]
+
+        # 最新20件のみ表示
+        for msg in dashboard.messages[-20:]:
+            time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
+            emoji = type_emoji.get(msg.message_type, "📨")
+            sender = f"`{msg.sender_id[:8]}`"
+            receiver = f"`{msg.receiver_id[:8]}`" if msg.receiver_id else "all"
+            subject = msg.subject[:40] if msg.subject else msg.content[:40]
+            lines.append(
+                f"| {time_str} | {emoji} {msg.message_type} | "
+                f"{sender} | {receiver} | {subject} |"
+            )
 
         return lines
 
@@ -831,5 +874,56 @@ class DashboardManager(DashboardCostMixin):
             except Exception as e:
                 logger.warning(f"agents.json の読み込みに失敗: {e}")
 
+        # 🔴 IPC メッセージを収集（Dashboard 表示用）
+        ipc_dir = session_dir / "ipc"
+        if ipc_dir.exists():
+            try:
+                all_messages: list[MessageSummary] = []
+                for agent_dir in ipc_dir.iterdir():
+                    if agent_dir.is_dir():
+                        for msg_file in agent_dir.glob("*.md"):
+                            msg = self._parse_ipc_message(msg_file)
+                            if msg:
+                                all_messages.append(msg)
+                # 時系列順ソート、最新20件
+                all_messages.sort(key=lambda m: m.created_at or datetime.min)
+                dashboard.messages = all_messages[-20:]
+                logger.debug(f"IPC メッセージ {len(dashboard.messages)} 件を収集")
+            except Exception as e:
+                logger.warning(f"IPC メッセージの収集に失敗: {e}")
+
         self._write_dashboard(dashboard)
         return self._get_dashboard_path()
+
+    def _parse_ipc_message(self, file_path: Path) -> MessageSummary | None:
+        """IPC メッセージファイルを軽量パースする。
+
+        Args:
+            file_path: メッセージファイルのパス
+
+        Returns:
+            MessageSummary またはパース失敗時は None
+        """
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            if not content.startswith("---"):
+                return None
+            parts = content.split("---", 2)
+            if len(parts) < 3:
+                return None
+            front_matter = yaml.safe_load(parts[1])
+            if not front_matter:
+                return None
+            created_at = front_matter.get("created_at")
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+            return MessageSummary(
+                sender_id=front_matter.get("sender_id", ""),
+                receiver_id=front_matter.get("receiver_id"),
+                message_type=front_matter.get("message_type", ""),
+                subject=front_matter.get("subject", ""),
+                content=parts[2].strip()[:100],
+                created_at=created_at,
+            )
+        except Exception:
+            return None

@@ -432,6 +432,7 @@ def register_tools(mcp: FastMCP) -> None:
                 worker_agent = agents.get(caller_agent_id)
                 if worker_agent and worker_agent.role == AgentRole.WORKER.value:
                     worker_agent.status = AgentStatus.IDLE
+                    worker_agent.current_task = None
                     worker_agent.last_activity = datetime.now()
                     save_agent_to_file(app_ctx, worker_agent)
                     logger.info(f"Worker {caller_agent_id} を IDLE にリセットしました")

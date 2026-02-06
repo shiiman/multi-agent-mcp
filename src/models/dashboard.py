@@ -73,6 +73,17 @@ class AgentSummary(BaseModel):
     last_activity: datetime | None = Field(None, description="最終活動日時")
 
 
+class MessageSummary(BaseModel):
+    """メッセージサマリー（Dashboard 表示用）。"""
+
+    sender_id: str = Field(..., description="送信元エージェントID")
+    receiver_id: str | None = Field(None, description="宛先エージェントID")
+    message_type: str = Field(..., description="メッセージタイプ")
+    subject: str = Field(default="", description="件名")
+    content: str = Field(default="", description="メッセージ内容（先頭100文字）")
+    created_at: datetime | None = Field(None, description="作成日時")
+
+
 class ApiCallRecord(BaseModel):
     """API呼び出し記録。"""
 
@@ -127,6 +138,11 @@ class Dashboard(BaseModel):
 
     # コスト情報
     cost: CostInfo = Field(default_factory=CostInfo, description="コスト情報")
+
+    # メッセージ履歴（Dashboard 表示用、YAML には保存しない）
+    messages: list[MessageSummary] = Field(
+        default_factory=list, description="メッセージ履歴"
+    )
 
     def get_task(self, task_id: str) -> TaskInfo | None:
         """タスクを取得する。"""

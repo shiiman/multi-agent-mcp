@@ -1,14 +1,79 @@
 """IPC/メッセージング管理ツール。"""
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.models.message import MessagePriority, MessageType
+from src.models.agent import AgentRole
+from src.models.dashboard import TaskStatus
+from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import ensure_ipc_manager, require_permission, sync_agents_from_file
+from src.tools.helpers_managers import ensure_dashboard_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _auto_update_dashboard_from_messages(
+    app_ctx: Any, messages: list[Message]
+) -> bool:
+    """Admin の read_messages 時に、タスク関連メッセージから Dashboard を自動更新する。"""
+    task_messages = [
+        m
+        for m in messages
+        if m.message_type
+        in (
+            MessageType.TASK_PROGRESS,
+            MessageType.TASK_COMPLETE,
+            MessageType.TASK_FAILED,
+        )
+    ]
+    if not task_messages:
+        return False
+
+    try:
+        dashboard = ensure_dashboard_manager(app_ctx)
+    except Exception as e:
+        logger.debug(f"Dashboard 自動更新をスキップ: {e}")
+        return False
+
+    for msg in task_messages:
+        task_id = msg.metadata.get("task_id")
+        if not task_id:
+            continue
+
+        try:
+            if msg.message_type == MessageType.TASK_PROGRESS:
+                progress = msg.metadata.get("progress", 0)
+                checklist = msg.metadata.get("checklist")
+                message_text = msg.metadata.get("message")
+                if checklist:
+                    dashboard.update_task_checklist(
+                        task_id, checklist, log_message=message_text
+                    )
+                dashboard.update_task_status(task_id, TaskStatus.IN_PROGRESS, progress)
+
+            elif msg.message_type == MessageType.TASK_COMPLETE:
+                dashboard.update_task_status(
+                    task_id, TaskStatus.COMPLETED, progress=100
+                )
+
+            elif msg.message_type == MessageType.TASK_FAILED:
+                dashboard.update_task_status(task_id, TaskStatus.FAILED)
+        except Exception as e:
+            logger.debug(f"タスク {task_id} の Dashboard 更新をスキップ: {e}")
+
+    # Markdown ダッシュボードも更新
+    try:
+        if app_ctx.session_id and app_ctx.project_root:
+            dashboard.save_markdown_dashboard(
+                Path(app_ctx.project_root), app_ctx.session_id
+            )
+    except Exception as e:
+        logger.debug(f"Markdown ダッシュボード更新をスキップ: {e}")
+
+    return True
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -107,7 +172,8 @@ def register_tools(mcp: FastMCP) -> None:
                             receiver_agent.session_name,
                             receiver_agent.window_index,
                             receiver_agent.pane_index,
-                            f"echo '{notification_text}'",
+                            notification_text,
+                            clear_input=False,
                         )
                         notification_sent = True
                         notification_method = "tmux"
@@ -206,10 +272,21 @@ def register_tools(mcp: FastMCP) -> None:
             mark_as_read=mark_as_read,
         )
 
+        # Admin の場合: タスク関連メッセージから Dashboard を自動更新
+        dashboard_updated = False
+        sync_agents_from_file(app_ctx)
+        caller = app_ctx.agents.get(caller_agent_id)
+        caller_role = getattr(caller, "role", None)
+        if caller_role in (AgentRole.ADMIN.value, "admin"):
+            dashboard_updated = _auto_update_dashboard_from_messages(
+                app_ctx, messages
+            )
+
         return {
             "success": True,
             "messages": [m.model_dump(mode="json") for m in messages],
             "count": len(messages),
+            "dashboard_updated": dashboard_updated,
         }
 
     @mcp.tool()

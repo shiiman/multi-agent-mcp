@@ -383,6 +383,18 @@ async def _send_task_to_worker(
             agent.last_activity = datetime.now()
             save_agent_to_file(app_ctx, agent)
             dashboard.save_markdown_dashboard(project_root, session_id)
+
+            # コスト記録（Worker CLI 起動）
+            try:
+                dashboard.record_api_call(
+                    ai_cli=agent_cli or "claude",
+                    estimated_tokens=profile_settings.get("worker_thinking_tokens", 4000),
+                    agent_id=agent.id,
+                    task_id=session_id,
+                )
+            except Exception:
+                pass
+
             logger.info(
                 f"Worker {worker_index + 1} (ID: {agent.id}) にタスクを送信しました"
             )

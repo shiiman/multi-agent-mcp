@@ -319,6 +319,22 @@ def register_tools(mcp: FastMCP) -> None:
             # ダッシュボード更新
             dashboard.save_markdown_dashboard(project_root, session_id)
 
+            # コスト記録（CLI 起動 = API 呼び出し）
+            try:
+                thinking_tokens = (
+                    profile_settings.get("admin_thinking_tokens", 4000)
+                    if is_admin
+                    else profile_settings.get("worker_thinking_tokens", 4000)
+                )
+                dashboard.record_api_call(
+                    ai_cli=agent_cli,
+                    estimated_tokens=thinking_tokens,
+                    agent_id=agent_id,
+                    task_id=session_id,
+                )
+            except Exception as e:
+                logger.debug(f"コスト記録をスキップ: {e}")
+
         result = {
             "success": success,
             "agent_id": agent_id,
