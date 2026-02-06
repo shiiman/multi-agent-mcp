@@ -86,6 +86,7 @@ class TestBuildStdinCommand:
         )
         assert "codex " in cmd
         assert "codex exec" not in cmd
+        assert "--dangerously-bypass-approvals-and-sandbox" in cmd
         assert "--message" not in cmd
         # 全 CLI で cd && command 形式
         assert "cd" in cmd
@@ -121,6 +122,7 @@ class TestBuildStdinCommand:
         cmd = ai_cli_manager.build_stdin_command(AICli.CODEX, "/tmp/task.md")
         assert "codex " in cmd
         assert "codex exec" not in cmd
+        assert "--dangerously-bypass-approvals-and-sandbox" in cmd
         assert "--message" not in cmd
         # worktree なしの場合は cd も含まれない
         assert "cd" not in cmd

@@ -188,6 +188,9 @@ class AiCliManager:
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
+            # Claude Code の --dangerously-skip-permissions 相当。
+            # 外部サンドボックス前提で、Codex 側の確認プロンプトを抑止する。
+            parts.append("--dangerously-bypass-approvals-and-sandbox")
             # Codex CLI はプロンプトを位置引数で受け取る（--message は未対応）。
             parts.append(quoted_prompt)
             command = " ".join(parts)

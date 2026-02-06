@@ -649,9 +649,9 @@ class TmuxManager:
         target = f"{session_name}:{window_name}.{pane}"
 
         # 入力バッファをクリア（残存文字による @export 問題を防止）
+        # C-c はシェル再描画（先頭 '%' 表示や重複表示）を誘発しやすいため送らない。
         # 通知送信時は clear_input=False でスキップ（Claude Code の処理を中断させない）
         if clear_input:
-            await self._run("send-keys", "-t", target, "C-c")
             await self._run("send-keys", "-t", target, "C-u")
 
         # コマンド送信
