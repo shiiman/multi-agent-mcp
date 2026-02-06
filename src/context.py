@@ -1,5 +1,6 @@
 """アプリケーションコンテキストの定義。"""
 
+import asyncio
 from dataclasses import dataclass, field
 
 from src.config.settings import Settings
@@ -30,6 +31,10 @@ class AppContext:
     dashboard_manager: DashboardManager | None = None
     scheduler_manager: SchedulerManager | None = None
     healthcheck_manager: HealthcheckManager | None = None
+    healthcheck_daemon_task: asyncio.Task | None = None
+    healthcheck_daemon_stop_event: asyncio.Event | None = None
+    healthcheck_daemon_lock: asyncio.Lock | None = None
+    healthcheck_idle_cycles: int = 0
     persona_manager: PersonaManager | None = None
     memory_manager: MemoryManager | None = None
     workspace_id: str | None = None

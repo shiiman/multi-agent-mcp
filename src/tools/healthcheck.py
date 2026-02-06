@@ -10,6 +10,166 @@ from src.tools.helpers import ensure_healthcheck_manager, require_permission
 logger = logging.getLogger(__name__)
 
 
+async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
+    """異常な Worker の完全復旧を実行する。"""
+    agents = app_ctx.agents
+    tmux = app_ctx.tmux
+    old_agent = agents.get(agent_id)
+    if not old_agent:
+        return {
+            "success": False,
+            "error": f"エージェント {agent_id} が見つかりません",
+        }
+
+    from src.models.agent import AgentRole
+
+    if old_agent.role != AgentRole.WORKER.value:
+        return {
+            "success": False,
+            "error": f"Worker のみ復旧可能です（対象: {old_agent.role}）",
+        }
+
+    old_worktree_path = old_agent.worktree_path
+    old_branch = getattr(old_agent, "branch", None)
+    old_ai_cli = old_agent.ai_cli
+    old_session_name = old_agent.session_name
+    old_window_index = old_agent.window_index
+    old_pane_index = old_agent.pane_index
+
+    from src.tools.helpers import ensure_dashboard_manager
+
+    dashboard = ensure_dashboard_manager(app_ctx)
+    from src.models.dashboard import TaskStatus
+
+    reassigned_tasks = []
+    if dashboard:
+        tasks = dashboard.list_tasks()
+        for task in tasks:
+            if (
+                task.assigned_agent_id == agent_id
+                and task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED]
+            ):
+                reassigned_tasks.append(task)
+
+    logger.info(f"full_recovery 開始: agent={agent_id}, tasks={len(reassigned_tasks)}")
+
+    if (
+        old_session_name is not None
+        and old_window_index is not None
+        and old_pane_index is not None
+    ):
+        try:
+            window_name = tmux._get_window_name(old_window_index)
+            target = f"{old_session_name}:{window_name}.{old_pane_index}"
+            await tmux._run("send-keys", "-t", target, "C-c")
+            await tmux._run("send-keys", "-t", target, "clear", "Enter")
+        except Exception as e:
+            logger.warning(f"tmux ペインのクリアに失敗: {e}")
+
+    del agents[agent_id]
+
+    new_worktree_path = old_worktree_path
+    if old_worktree_path and old_branch:
+        from src.managers.worktree_manager import WorktreeManager
+
+        try:
+            worktree_manager = WorktreeManager(app_ctx.project_root)
+            await worktree_manager.remove_worktree(old_worktree_path, force=True)
+            logger.info(f"古い worktree を削除: {old_worktree_path}")
+
+            result = await worktree_manager.create_worktree(
+                worktree_path=old_worktree_path,
+                branch=old_branch,
+                base_branch="main",
+            )
+            if not result:
+                import uuid
+
+                new_worktree_path = f"{old_worktree_path}-{uuid.uuid4().hex[:8]}"
+                await worktree_manager.create_worktree(
+                    worktree_path=new_worktree_path,
+                    branch=old_branch,
+                    base_branch="main",
+                )
+            logger.info(f"新しい worktree を作成: {new_worktree_path}")
+        except Exception as e:
+            logger.warning(f"worktree 操作に失敗: {e}")
+            new_worktree_path = old_worktree_path
+
+    import uuid
+    from datetime import datetime
+
+    from src.models.agent import Agent, AgentStatus
+    from src.tools.helpers import save_agent_to_file
+
+    new_agent_id = f"worker-{uuid.uuid4().hex[:8]}"
+    tmux_session = None
+    if (
+        old_session_name is not None
+        and old_window_index is not None
+        and old_pane_index is not None
+    ):
+        tmux_session = f"{old_session_name}:{old_window_index}.{old_pane_index}"
+    new_agent = Agent(
+        id=new_agent_id,
+        role=AgentRole.WORKER,
+        status=AgentStatus.IDLE,
+        tmux_session=tmux_session,
+        created_at=datetime.now(),
+        last_activity=datetime.now(),
+        worktree_path=new_worktree_path,
+        ai_cli=old_ai_cli,
+        session_name=old_session_name,
+        window_index=old_window_index,
+        pane_index=old_pane_index,
+    )
+    agents[new_agent_id] = new_agent
+    save_agent_to_file(app_ctx, new_agent)
+    logger.info(f"新しい agent を作成: {new_agent_id}")
+
+    if (
+        old_session_name is not None
+        and old_window_index is not None
+        and old_pane_index is not None
+        and new_worktree_path
+    ):
+        try:
+            window_name = tmux._get_window_name(old_window_index)
+            target = f"{old_session_name}:{window_name}.{old_pane_index}"
+            await tmux._run("send-keys", "-t", target, f"cd {new_worktree_path}", "Enter")
+            await tmux.set_pane_title(
+                old_session_name, old_window_index, old_pane_index, new_agent_id
+            )
+        except Exception as e:
+            logger.warning(f"tmux ペインの設定に失敗: {e}")
+
+    for task in reassigned_tasks:
+        task_id = task.id
+        if task_id and dashboard:
+            try:
+                dashboard.assign_task(
+                    task_id=task_id,
+                    agent_id=new_agent_id,
+                    branch=task.branch,
+                    worktree_path=new_worktree_path,
+                )
+                logger.info(f"タスク {task_id} を {new_agent_id} に再割り当て")
+            except Exception as e:
+                logger.warning(f"タスク再割り当てに失敗: {e}")
+
+    return {
+        "success": True,
+        "old_agent_id": agent_id,
+        "new_agent_id": new_agent_id,
+        "new_worktree_path": new_worktree_path,
+        "reassigned_tasks": [t.id for t in reassigned_tasks],
+        "message": (
+            f"エージェント {agent_id} を {new_agent_id} として"
+            f"復旧しました（タスク: {len(reassigned_tasks)} 件再割り当て）"
+        ),
+    }
+
+
 def register_tools(mcp: FastMCP) -> None:
     """ヘルスチェック管理ツールを登録する。"""
 
@@ -166,169 +326,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
-        agents = app_ctx.agents
-        tmux = app_ctx.tmux
-        settings = app_ctx.settings
-
-        # 対象エージェント取得
-        old_agent = agents.get(agent_id)
-        if not old_agent:
-            return {
-                "success": False,
-                "error": f"エージェント {agent_id} が見つかりません",
-            }
-
-        # Worker のみ復旧対象
-        from src.models.agent import AgentRole
-        if old_agent.role != AgentRole.WORKER.value:
-            return {
-                "success": False,
-                "error": f"Worker のみ復旧可能です（対象: {old_agent.role}）",
-            }
-
-        # 元の情報を保存
-        old_worktree_path = old_agent.worktree_path
-        old_branch = old_agent.branch
-        old_ai_cli = old_agent.ai_cli
-        old_session_name = old_agent.session_name
-        old_window_index = old_agent.window_index
-        old_pane_index = old_agent.pane_index
-
-        # Dashboard からタスク情報を取得（agent に割り当てられていたタスク）
-        from src.tools.helpers import ensure_dashboard_manager
-        dashboard = ensure_dashboard_manager(app_ctx)
-
-        reassigned_tasks = []
-        if dashboard:
-            # 対象エージェントに割り当てられていた未完了タスク
-            tasks = dashboard.list_all_tasks()
-            for task in tasks:
-                if (
-                    task.get("assigned_to") == agent_id
-                    and task.get("status") not in ["completed", "failed"]
-                ):
-                    reassigned_tasks.append(task)
-
-        logger.info(f"full_recovery 開始: agent={agent_id}, tasks={len(reassigned_tasks)}")
-
-        # 1. 古い agent の tmux ペインをクリア（terminate）
-        if (
-            old_session_name is not None
-            and old_window_index is not None
-            and old_pane_index is not None
-        ):
-            try:
-                # Ctrl+C を送信してプロセスを停止
-                session_name = old_session_name
-                window_name = tmux._get_window_name(old_window_index)
-                target = f"{session_name}:{window_name}.{old_pane_index}"
-                await tmux._run("send-keys", "-t", target, "C-c")
-                # ペインをクリア
-                await tmux._run("send-keys", "-t", target, "clear", "Enter")
-            except Exception as e:
-                logger.warning(f"tmux ペインのクリアに失敗: {e}")
-
-        # 2. agents 辞書から削除
-        del agents[agent_id]
-
-        # 3. 古い worktree を削除（存在する場合）
-        new_worktree_path = old_worktree_path
-        if old_worktree_path and old_branch:
-            from src.managers.worktree_manager import WorktreeManager
-            try:
-                worktree_manager = WorktreeManager(app_ctx.project_root)
-                # 強制削除
-                await worktree_manager.remove_worktree(old_worktree_path, force=True)
-                logger.info(f"古い worktree を削除: {old_worktree_path}")
-
-                # 4. 新しい worktree を作成（同じブランチ名で）
-                # パスは同じ場所を再利用
-                result = await worktree_manager.create_worktree(
-                    worktree_path=old_worktree_path,
-                    branch=old_branch,
-                    base_branch="main",  # 既存ブランチを使用するため base_branch は無視される
-                )
-                if not result:
-                    # 新しいパスで作成
-                    import uuid
-                    new_worktree_path = f"{old_worktree_path}-{uuid.uuid4().hex[:8]}"
-                    result = await worktree_manager.create_worktree(
-                        worktree_path=new_worktree_path,
-                        branch=old_branch,
-                        base_branch="main",
-                    )
-                logger.info(f"新しい worktree を作成: {new_worktree_path}")
-            except Exception as e:
-                logger.warning(f"worktree 操作に失敗: {e}")
-                new_worktree_path = old_worktree_path
-
-        # 5. 新しい agent を作成
-        import uuid
-        from datetime import datetime
-
-        from src.models.agent import Agent, AgentStatus
-        from src.tools.helpers import save_agent_to_file
-
-        new_agent_id = f"worker-{uuid.uuid4().hex[:8]}"
-        new_agent = Agent(
-            id=new_agent_id,
-            role=AgentRole.WORKER,
-            status=AgentStatus.IDLE,
-            tmux_session=f"{settings.tmux_prefix}-{new_agent_id}",
-            created_at=datetime.now(),
-            last_activity=datetime.now(),
-            worktree_path=new_worktree_path,
-            branch=old_branch,
-            ai_cli=old_ai_cli,
-            session_name=old_session_name,
-            window_index=old_window_index,
-            pane_index=old_pane_index,
-        )
-        agents[new_agent_id] = new_agent
-        save_agent_to_file(app_ctx, new_agent)
-        logger.info(f"新しい agent を作成: {new_agent_id}")
-
-        # 6. tmux ペインで新しい agent を起動（working_dir を設定）
-        if (
-            old_session_name is not None
-            and old_window_index is not None
-            and old_pane_index is not None
-            and new_worktree_path
-        ):
-            try:
-                session_name = old_session_name
-                window_name = tmux._get_window_name(old_window_index)
-                target = f"{session_name}:{window_name}.{old_pane_index}"
-                # working directory を変更
-                await tmux._run("send-keys", "-t", target, f"cd {new_worktree_path}", "Enter")
-                # ペインタイトルを設定
-                await tmux.set_pane_title(
-                    old_session_name, old_window_index, old_pane_index, new_agent_id
-                )
-            except Exception as e:
-                logger.warning(f"tmux ペインの設定に失敗: {e}")
-
-        # 7. タスクを新しい agent に再割り当て
-        for task in reassigned_tasks:
-            task_id = task.get("id")
-            if task_id and dashboard:
-                try:
-                    dashboard.update_task(task_id, assigned_to=new_agent_id)
-                    logger.info(f"タスク {task_id} を {new_agent_id} に再割り当て")
-                except Exception as e:
-                    logger.warning(f"タスク再割り当てに失敗: {e}")
-
-        return {
-            "success": True,
-            "old_agent_id": agent_id,
-            "new_agent_id": new_agent_id,
-            "new_worktree_path": new_worktree_path,
-            "reassigned_tasks": [t.get("id") for t in reassigned_tasks],
-            "message": (
-                f"エージェント {agent_id} を {new_agent_id} として"
-                f"復旧しました（タスク: {len(reassigned_tasks)} 件再割り当て）"
-            ),
-        }
+        return await execute_full_recovery(app_ctx, agent_id)
 
     @mcp.tool()
     async def monitor_and_recover_workers(

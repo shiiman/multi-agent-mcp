@@ -51,6 +51,10 @@ def _reset_app_context(app_ctx: AppContext) -> None:
     app_ctx.dashboard_manager = None
     app_ctx.scheduler_manager = None
     app_ctx.healthcheck_manager = None
+    app_ctx.healthcheck_daemon_task = None
+    app_ctx.healthcheck_daemon_stop_event = None
+    app_ctx.healthcheck_daemon_lock = None
+    app_ctx.healthcheck_idle_cycles = 0
     app_ctx.persona_manager = None
     app_ctx.memory_manager = None
     app_ctx.worktree_managers.clear()
@@ -71,5 +75,4 @@ def _collect_session_names(agents: dict[str, Any]) -> list[str]:
             session_names.add(str(tmux_session).split(":", 1)[0])
 
     return sorted(session_names)
-
 

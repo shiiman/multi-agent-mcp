@@ -132,6 +132,15 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         # 後処理（IPC登録、ファイル保存、レジストリ、ダッシュボード）
         post_result = _post_create_agent(app_ctx, agent, agents)
 
+        # Worker 作成時は healthcheck daemon を起動（多重起動は内部で抑止）
+        if agent_role == AgentRole.WORKER:
+            try:
+                from src.managers.healthcheck_daemon import ensure_healthcheck_daemon_started
+
+                await ensure_healthcheck_daemon_started(app_ctx)
+            except Exception as e:
+                logger.warning(f"healthcheck daemon 起動に失敗: {e}")
+
         result = {
             "success": True,
             "agent": agent.model_dump(mode="json"),

@@ -1,6 +1,17 @@
 """HealthcheckManagerのテスト。"""
 
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+
+from src.context import AppContext
+from src.managers.ai_cli_manager import AiCliManager
+from src.managers.dashboard_manager import DashboardManager
+from src.managers.healthcheck_manager import HealthcheckManager
+from src.managers.ipc_manager import IPCManager
+from src.models.agent import Agent, AgentRole, AgentStatus
+from src.models.dashboard import TaskStatus
 
 
 class TestHealthcheckManager:
@@ -67,3 +78,130 @@ class TestHealthcheckManager:
         summary = healthcheck_manager.get_summary()
         assert "total_agents" in summary
         assert "healthcheck_interval_seconds" in summary
+
+
+class TestHealthcheckMonitoring:
+    """monitor_and_recover_workers の追加テスト。"""
+
+    @pytest.mark.asyncio
+    async def test_monitor_stall_is_ignored_when_pane_output_changes(self):
+        now = datetime.now() - timedelta(seconds=700)
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task="task-001",
+            created_at=now,
+            last_activity=now,
+        )
+        agents = {"worker-001": worker}
+
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=True)
+        tmux.capture_pane_by_index = AsyncMock(side_effect=["line-1", "line-2"])
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=agents,
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=10,
+            max_recovery_attempts=2,
+        )
+
+        first = await healthcheck.monitor_and_recover_workers()
+        second = await healthcheck.monitor_and_recover_workers()
+
+        assert first["recovered"] == []
+        assert first["escalated"] == []
+        assert second["recovered"] == []
+        assert second["escalated"] == []
+
+    @pytest.mark.asyncio
+    async def test_monitor_marks_task_failed_after_recovery_limit(self, temp_dir, settings):
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=False)
+        tmux.create_session = AsyncMock(return_value=False)
+        tmux._run = AsyncMock(return_value=(0, "", ""))
+        tmux._get_window_name = MagicMock(return_value=settings.window_name_main)
+        tmux.capture_pane_by_index = AsyncMock(return_value="")
+
+        ai_cli = AiCliManager(settings)
+
+        dashboard_dir = temp_dir / ".dashboard"
+        dashboard = DashboardManager(
+            workspace_id="test-workspace",
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        dashboard.initialize()
+
+        ipc_dir = temp_dir / ".ipc"
+        ipc = IPCManager(str(ipc_dir))
+        ipc.initialize()
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+        admin = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+
+        task = dashboard.create_task(
+            title="test",
+            description="healthcheck",
+            assigned_agent_id=worker.id,
+        )
+        dashboard.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=10)
+        worker.current_task = task.id
+
+        app_ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            agents={worker.id: worker, admin.id: admin},
+            ipc_manager=ipc,
+            dashboard_manager=dashboard,
+            workspace_id="test-workspace",
+            project_root=str(temp_dir),
+            session_id="test-session",
+        )
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=app_ctx.agents,
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=10,
+            max_recovery_attempts=1,
+        )
+        app_ctx.healthcheck_manager = healthcheck
+
+        result = await healthcheck.monitor_and_recover_workers(app_ctx)
+
+        assert len(result["failed_tasks"]) == 1
+        updated = dashboard.get_task(task.id)
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+        assert worker.current_task is None

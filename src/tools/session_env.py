@@ -168,9 +168,17 @@ MCP_MODEL_COST_TABLE_JSON={v(s.model_cost_table_json)}
 MCP_MODEL_COST_DEFAULT_PER_1K={v(s.model_cost_default_per_1k)}
 
 # ========== ヘルスチェック設定 ==========
-# ヘルスチェックの間隔（秒）- Admin が Worker の状態を確認する間隔
-# 応答がなければ即座に異常と判断
+# ヘルスチェックの実行間隔（秒）
 MCP_HEALTHCHECK_INTERVAL_SECONDS={v(s.healthcheck_interval_seconds)}
+
+# 無応答判定の閾値（秒）
+MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS={v(s.healthcheck_stall_timeout_seconds)}
+
+# 同一 worker/task の復旧試行上限
+MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS={v(s.healthcheck_max_recovery_attempts)}
+
+# 実作業なし状態が続いた場合に daemon を停止する連続回数
+MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE={v(s.healthcheck_idle_stop_consecutive)}
 
 # ========== 品質チェック設定 ==========
 # 品質チェックの最大イテレーション回数

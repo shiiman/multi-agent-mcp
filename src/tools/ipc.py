@@ -11,7 +11,6 @@ from src.models.agent import AgentRole
 from src.models.dashboard import TaskStatus
 from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import (
-    ensure_healthcheck_manager,
     ensure_ipc_manager,
     require_permission,
     save_agent_to_file,
@@ -500,15 +499,6 @@ def register_tools(mcp: FastMCP) -> None:
             ) = _auto_update_dashboard_from_messages(
                 app_ctx, messages
             )
-            try:
-                healthcheck = ensure_healthcheck_manager(app_ctx)
-                monitor_result = await healthcheck.monitor_and_recover_workers()
-                if monitor_result["escalated"]:
-                    dashboard_updates_skipped_reason.append(
-                        f"healthcheck_escalated:{len(monitor_result['escalated'])}"
-                    )
-            except Exception as e:
-                logger.debug(f"healthcheck monitor をスキップ: {e}")
 
         return {
             "success": True,

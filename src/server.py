@@ -37,11 +37,18 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     tmux = TmuxManager(settings)
     ai_cli = AiCliManager(settings)
 
+    app_ctx = AppContext(settings=settings, tmux=tmux, ai_cli=ai_cli)
     try:
-        yield AppContext(settings=settings, tmux=tmux, ai_cli=ai_cli)
+        yield app_ctx
     finally:
         # クリーンアップ
         logger.info("サーバーをシャットダウンしています...")
+        try:
+            from src.managers.healthcheck_daemon import stop_healthcheck_daemon
+
+            await stop_healthcheck_daemon(app_ctx)
+        except Exception as e:
+            logger.warning(f"healthcheck daemon 停止時に警告: {e}")
         # サーバー停止時に tmux セッションを強制終了しない。
         # セッション終了は cleanup_workspace / cleanup_on_completion で明示的に行う。
         logger.info("tmux セッションの自動クリーンアップはスキップしました")

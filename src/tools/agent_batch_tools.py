@@ -442,6 +442,13 @@ def register_batch_tools(mcp: FastMCP) -> None:
             else f"{len(workers)} 件の Worker 処理が完了（{failed_count} 件失敗）"
         )
 
+        try:
+            from src.managers.healthcheck_daemon import ensure_healthcheck_daemon_started
+
+            await ensure_healthcheck_daemon_started(app_ctx)
+        except Exception as e:
+            logger.warning(f"healthcheck daemon 起動に失敗: {e}")
+
         logger.info(message)
 
         return {

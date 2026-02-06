@@ -54,6 +54,14 @@ def register_tools(mcp: FastMCP) -> None:
         agent_count = len(agents)
         agents.clear()
 
+        # 常駐 healthcheck daemon を停止
+        try:
+            from src.managers.healthcheck_daemon import stop_healthcheck_daemon
+
+            await stop_healthcheck_daemon(app_ctx)
+        except Exception as e:
+            logger.warning(f"healthcheck daemon 停止に失敗: {e}")
+
         # インメモリ状態をリセット（次のセッションで古い値が使われることを防ぐ）
         _reset_app_context(app_ctx)
 
@@ -174,6 +182,14 @@ def register_tools(mcp: FastMCP) -> None:
             logger.info(f"レジストリから {registry_removed} エージェントを削除しました")
 
         agents.clear()
+
+        # 常駐 healthcheck daemon を停止
+        try:
+            from src.managers.healthcheck_daemon import stop_healthcheck_daemon
+
+            await stop_healthcheck_daemon(app_ctx)
+        except Exception as e:
+            logger.warning(f"healthcheck daemon 停止に失敗: {e}")
 
         # worktree を削除（git worktree list から取得）
         removed_worktrees = 0

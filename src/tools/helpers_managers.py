@@ -106,6 +106,8 @@ def ensure_healthcheck_manager(app_ctx: AppContext) -> HealthcheckManager:
             app_ctx.tmux,
             app_ctx.agents,
             app_ctx.settings.healthcheck_interval_seconds,
+            app_ctx.settings.healthcheck_stall_timeout_seconds,
+            app_ctx.settings.healthcheck_max_recovery_attempts,
         )
     return app_ctx.healthcheck_manager
 

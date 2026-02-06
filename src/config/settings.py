@@ -244,8 +244,17 @@ class Settings(BaseSettings):
 
     # ヘルスチェック設定
     healthcheck_interval_seconds: int = 60
-    """ヘルスチェックの間隔（秒）- Admin が Worker の状態を確認する間隔。
-    応答がなければ即座に異常と判断する。"""
+    """ヘルスチェックの実行間隔（秒）。"""
+
+    healthcheck_stall_timeout_seconds: int = 600
+    """無応答判定の閾値（秒）。
+    last_activity 超過かつ tmux 出力が変化しない場合に異常と判定する。"""
+
+    healthcheck_max_recovery_attempts: int = 3
+    """同一 worker/task に対する復旧試行の上限回数。"""
+
+    healthcheck_idle_stop_consecutive: int = 3
+    """実作業なし状態を連続検出した際に daemon を停止する閾値。"""
 
     # ターミナル設定
     default_terminal: TerminalApp = Field(
