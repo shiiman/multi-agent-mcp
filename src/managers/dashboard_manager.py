@@ -199,12 +199,20 @@ class DashboardManager(DashboardCostMixin):
         except Exception:
             return worktree_path
 
-    def _extract_worker_number(self, worktree_path: str | None) -> str | None:
-        """worktree パスから worker 番号を抽出する。"""
-        if not worktree_path:
-            return None
-        match = re.search(r"worker-(\d+)\b", worktree_path)
-        return match.group(1) if match else None
+    def _extract_agent_index(self, agent_id: str) -> str:
+        """agent_id 末尾の数字を抽出する。"""
+        match = re.search(r"(\d+)$", agent_id)
+        if match:
+            value = match.group(1).lstrip("0")
+            return value or "0"
+        return agent_id[:4]
+
+    def _build_worker_name(self, agent_id: str, fallback: str = "worker") -> str:
+        """Worker の表示名を作成する（cli + index）。"""
+        cli_prefix = fallback.lower()
+        if cli_prefix not in ("claude", "codex", "gemini"):
+            cli_prefix = "worker"
+        return f"{cli_prefix}{self._extract_agent_index(agent_id)}"
 
     def _build_agent_label_map(self, dashboard: Dashboard) -> dict[str, str]:
         """agent_id から表示用ラベルへのマップを作成する。"""
@@ -215,8 +223,7 @@ class DashboardManager(DashboardCostMixin):
             elif agent.role == "admin":
                 label = "admin"
             elif agent.role == "worker":
-                worker_no = self._extract_worker_number(agent.worktree_path)
-                label = f"worker{worker_no}" if worker_no else "worker"
+                label = agent.name or self._build_worker_name(agent.agent_id)
             else:
                 label = agent.role
             labels[agent.agent_id] = label
@@ -224,13 +231,14 @@ class DashboardManager(DashboardCostMixin):
 
     def _label_for_agent(self, agent: AgentSummary) -> str:
         """エージェントの表示名を返す。"""
+        if agent.name:
+            return agent.name
         if agent.role == "owner":
             return "owner"
         if agent.role == "admin":
             return "admin"
         if agent.role == "worker":
-            worker_no = self._extract_worker_number(agent.worktree_path)
-            return f"worker{worker_no}" if worker_no else "worker"
+            return self._build_worker_name(agent.agent_id)
         return agent.role
 
     def _format_agent_display(
@@ -389,14 +397,11 @@ class DashboardManager(DashboardCostMixin):
         for msg in dashboard.messages:
             time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
             emoji = type_emoji.get(msg.message_type, "📨")
-            sender = self._format_agent_display(msg.sender_id, agent_labels, with_id=False)
-            receiver = self._format_agent_display(msg.receiver_id, agent_labels, with_id=False)
-            subject = msg.subject.strip() if msg.subject else "(件名なし)"
             content = msg.content.strip() if msg.content else "(本文なし)"
             lines.extend([
                 "",
                 "<details open>",
-                f"<summary>{time_str} {emoji} {msg.message_type} {sender} -> {receiver} / {subject}</summary>",
+                f"<summary>{time_str} {emoji} メッセージ履歴</summary>",
                 "",
                 "```text",
                 content,
@@ -441,7 +446,11 @@ class DashboardManager(DashboardCostMixin):
 
             for call in cost.calls:
                 role = role_map.get(call.agent_id, "unknown") if call.agent_id else "unknown"
-                call_cost = self._calculate_call_cost(call)
+                call_cost = (
+                    call.actual_cost_usd
+                    if call.cost_source == "actual" and call.actual_cost_usd is not None
+                    else call.estimated_cost_usd
+                )
 
                 role_data = role_stats.setdefault(
                     role, {"calls": 0, "tokens": 0, "cost": 0.0}
@@ -463,7 +472,9 @@ class DashboardManager(DashboardCostMixin):
                 "",
                 f"- **総API呼び出し数**: {cost.total_api_calls}",
                 f"- **推定トークン数**: {cost.estimated_tokens:,}",
-                f"- **推定コスト**: ${cost.estimated_cost_usd:.4f}",
+                f"- **実測コスト (Claude)**: ${cost.actual_cost_usd:.4f}",
+                f"- **推定コスト (全CLI)**: ${cost.estimated_cost_usd:.4f}",
+                f"- **合算コスト**: ${cost.total_cost_usd:.4f}",
                 f"- **警告閾値**: ${cost.warning_threshold_usd:.2f}",
                 "",
                 "**役割別内訳**:",
@@ -491,10 +502,10 @@ class DashboardManager(DashboardCostMixin):
                     f"- `{display}`: {data['calls']} calls / {data['tokens']:,} tokens"
                 )
 
-            if cost.estimated_cost_usd >= cost.warning_threshold_usd:
+            if cost.total_cost_usd >= cost.warning_threshold_usd:
                 lines.extend([
                     "",
-                    "⚠️ **警告**: 推定コストが閾値を超えています！",
+                    "⚠️ **警告**: 合算コストが閾値を超えています！",
                 ])
 
         return lines
@@ -759,6 +770,7 @@ class DashboardManager(DashboardCostMixin):
 
         summary = AgentSummary(
             agent_id=agent.id,
+            name=self._compute_agent_name(agent),
             role=agent.role,  # use_enum_values=True のため既に文字列
             status=agent.status,  # use_enum_values=True のため既に文字列
             current_task_id=agent.current_task,
@@ -834,6 +846,7 @@ class DashboardManager(DashboardCostMixin):
         for agent in agent_manager.agents.values():
             summary = AgentSummary(
                 agent_id=agent.id,
+                name=self._compute_agent_name(agent),
                 role=agent.role,
                 status=agent.status,
                 current_task_id=agent.current_task,
@@ -874,9 +887,21 @@ class DashboardManager(DashboardCostMixin):
                 "total_api_calls": cost.total_api_calls,
                 "estimated_tokens": cost.estimated_tokens,
                 "estimated_cost_usd": round(cost.estimated_cost_usd, 4),
+                "actual_cost_usd": round(cost.actual_cost_usd, 4),
+                "total_cost_usd": round(cost.total_cost_usd, 4),
                 "warning_threshold_usd": cost.warning_threshold_usd,
             },
         }
+
+    def _compute_agent_name(self, agent: Agent) -> str:
+        """Agent から表示名を計算する。"""
+        role = str(agent.role)
+        if role == "owner":
+            return "owner"
+        if role == "admin":
+            return "admin"
+        cli = agent.ai_cli.value if hasattr(agent.ai_cli, "value") else str(agent.ai_cli or "worker")
+        return self._build_worker_name(agent.id, cli)
 
     # タスクファイル管理メソッド（ファイルベースのタスク配布）
 

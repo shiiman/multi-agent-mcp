@@ -330,3 +330,24 @@ def register_tools(mcp: FastMCP) -> None:
             ),
         }
 
+    @mcp.tool()
+    async def monitor_and_recover_workers(
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """Worker を監視し、異常時に復旧を実行する。"""
+        app_ctx, role_error = require_permission(ctx, "monitor_and_recover_workers", caller_agent_id)
+        if role_error:
+            return role_error
+
+        healthcheck = ensure_healthcheck_manager(app_ctx)
+        result = await healthcheck.monitor_and_recover_workers()
+
+        return {
+            "success": True,
+            **result,
+            "message": (
+                f"recovered={len(result['recovered'])}, "
+                f"escalated={len(result['escalated'])}, skipped={len(result['skipped'])}"
+            ),
+        }

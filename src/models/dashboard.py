@@ -65,6 +65,7 @@ class AgentSummary(BaseModel):
     """エージェントサマリー情報。"""
 
     agent_id: str = Field(..., description="エージェントID")
+    name: str | None = Field(None, description="表示名")
     role: str = Field(..., description="役割")
     status: str = Field(..., description="ステータス")
     current_task_id: str | None = Field(None, description="現在のタスクID")
@@ -89,6 +90,10 @@ class ApiCallRecord(BaseModel):
 
     ai_cli: str = Field(..., description="使用したAI CLI（claude/codex/gemini）")
     tokens: int = Field(..., description="推定トークン数")
+    estimated_cost_usd: float = Field(default=0.0, description="推定コスト（USD）")
+    actual_cost_usd: float | None = Field(default=None, description="実測コスト（USD）")
+    cost_source: str = Field(default="estimated", description="コスト取得元（actual/estimated）")
+    status_line: str | None = Field(default=None, description="コスト抽出に使用した statusLine")
     timestamp: datetime = Field(default_factory=datetime.now, description="呼び出し時刻")
     agent_id: str | None = Field(None, description="エージェントID")
     task_id: str | None = Field(None, description="タスクID")
@@ -99,7 +104,9 @@ class CostInfo(BaseModel):
 
     total_api_calls: int = Field(default=0, description="総API呼び出し回数")
     estimated_tokens: int = Field(default=0, description="推定総トークン数")
-    estimated_cost_usd: float = Field(default=0.0, description="推定総コスト（USD）")
+    estimated_cost_usd: float = Field(default=0.0, description="推定総コスト（USD, 参考値）")
+    actual_cost_usd: float = Field(default=0.0, description="実測総コスト（USD, Claude statusLine）")
+    total_cost_usd: float = Field(default=0.0, description="合算コスト（実測優先 + 推定）")
     warning_threshold_usd: float = Field(default=10.0, description="コスト警告閾値（USD）")
     calls: list[ApiCallRecord] = Field(default_factory=list, description="呼び出し記録")
 

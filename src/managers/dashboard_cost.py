@@ -25,6 +25,9 @@ class DashboardCostMixin:
         estimated_tokens: int | None = None,
         agent_id: str | None = None,
         task_id: str | None = None,
+        actual_cost_usd: float | None = None,
+        status_line: str | None = None,
+        cost_source: str | None = None,
     ) -> None:
         """API呼び出しを記録する。
 
@@ -33,14 +36,34 @@ class DashboardCostMixin:
             estimated_tokens: 推定トークン数（Noneでデフォルト値）
             agent_id: エージェントID（オプション）
             task_id: タスクID（オプション）
+            actual_cost_usd: 実測コスト（Claude の statusLine から抽出時のみ）
+            status_line: コスト抽出元の statusLine
+            cost_source: コスト種別（actual / estimated）
         """
         settings = Settings()
+        normalized_cli = ai_cli.lower()
         tokens = estimated_tokens or settings.estimated_tokens_per_call
+        estimated_cost = (tokens / 1000) * self._get_cost_per_1k_tokens().get(normalized_cli, 0.01)
+
+        # 実測コストは Claude のみ許可
+        source = (cost_source or ("actual" if actual_cost_usd is not None else "estimated")).lower()
+        if normalized_cli != "claude":
+            actual_cost_usd = None
+            status_line = None
+            source = "estimated"
+        elif source != "actual":
+            actual_cost_usd = None
+            status_line = None
+            source = "estimated"
 
         dashboard = self._read_dashboard()
         record = ApiCallRecord(
-            ai_cli=ai_cli.lower(),
+            ai_cli=normalized_cli,
             tokens=tokens,
+            estimated_cost_usd=estimated_cost,
+            actual_cost_usd=actual_cost_usd,
+            cost_source=source,
+            status_line=status_line,
             timestamp=datetime.now(),
             agent_id=agent_id,
             task_id=task_id,
@@ -51,7 +74,12 @@ class DashboardCostMixin:
         self._recalculate_cost_stats(dashboard)
         self._write_dashboard(dashboard)
 
-        logger.debug(f"API呼び出しを記録: {ai_cli} ({tokens} tokens)")
+        logger.debug(
+            "API呼び出しを記録: %s (%s tokens, source=%s)",
+            normalized_cli,
+            tokens,
+            source,
+        )
 
     def _get_cost_per_1k_tokens(self) -> dict[str, float]:
         """CLI 別の 1000 トークンあたりコストを取得する。"""
@@ -84,8 +112,12 @@ class DashboardCostMixin:
         """
         dashboard.cost.total_api_calls = len(dashboard.cost.calls)
         dashboard.cost.estimated_tokens = sum(c.tokens for c in dashboard.cost.calls)
-        dashboard.cost.estimated_cost_usd = sum(
-            self._calculate_call_cost(c) for c in dashboard.cost.calls
+        dashboard.cost.estimated_cost_usd = sum(c.estimated_cost_usd for c in dashboard.cost.calls)
+        dashboard.cost.actual_cost_usd = sum(c.actual_cost_usd or 0.0 for c in dashboard.cost.calls)
+        dashboard.cost.total_cost_usd = sum(
+            c.actual_cost_usd if c.cost_source == "actual" and c.actual_cost_usd is not None
+            else c.estimated_cost_usd
+            for c in dashboard.cost.calls
         )
 
     def get_cost_estimate(self) -> dict:
@@ -102,6 +134,8 @@ class DashboardCostMixin:
             "total_api_calls": cost.total_api_calls,
             "estimated_tokens": cost.estimated_tokens,
             "estimated_cost_usd": round(cost.estimated_cost_usd, 4),
+            "actual_cost_usd": round(cost.actual_cost_usd, 4),
+            "total_cost_usd": round(cost.total_cost_usd, 4),
             "claude_calls": cli_counts.get("claude", 0),
             "codex_calls": cli_counts.get("codex", 0),
             "gemini_calls": cli_counts.get("gemini", 0),
@@ -122,6 +156,8 @@ class DashboardCostMixin:
             "total_api_calls": cost.total_api_calls,
             "estimated_tokens": cost.estimated_tokens,
             "estimated_cost_usd": round(cost.estimated_cost_usd, 4),
+            "actual_cost_usd": round(cost.actual_cost_usd, 4),
+            "total_cost_usd": round(cost.total_cost_usd, 4),
             "warning_threshold_usd": cost.warning_threshold_usd,
             "warning_message": warning,
             "by_cli": {
@@ -140,9 +176,9 @@ class DashboardCostMixin:
         dashboard = self._read_dashboard()
         cost = dashboard.cost
 
-        if cost.estimated_cost_usd >= cost.warning_threshold_usd:
+        if cost.total_cost_usd >= cost.warning_threshold_usd:
             return (
-                f"警告: 推定コスト (${cost.estimated_cost_usd:.2f}) が "
+                f"警告: 合算コスト (${cost.total_cost_usd:.2f}) が "
                 f"閾値 (${cost.warning_threshold_usd:.2f}) を超えています"
             )
         return None
@@ -182,7 +218,8 @@ class DashboardCostMixin:
         """
         dashboard = self._read_dashboard()
         return sum(
-            self._calculate_call_cost(c)
+            c.actual_cost_usd if c.cost_source == "actual" and c.actual_cost_usd is not None
+            else c.estimated_cost_usd
             for c in dashboard.cost.calls
             if c.agent_id == agent_id
         )
@@ -198,7 +235,8 @@ class DashboardCostMixin:
         """
         dashboard = self._read_dashboard()
         return sum(
-            self._calculate_call_cost(c)
+            c.actual_cost_usd if c.cost_source == "actual" and c.actual_cost_usd is not None
+            else c.estimated_cost_usd
             for c in dashboard.cost.calls
             if c.task_id == task_id
         )
@@ -216,7 +254,11 @@ class DashboardCostMixin:
         by_cli: dict[str, dict] = {}
 
         for call in dashboard.cost.calls:
-            call_cost = self._calculate_call_cost(call)
+            call_cost = (
+                call.actual_cost_usd
+                if call.cost_source == "actual" and call.actual_cost_usd is not None
+                else call.estimated_cost_usd
+            )
 
             # エージェント別
             if call.agent_id:

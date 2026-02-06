@@ -6,11 +6,12 @@ tmux セッションの存在確認のみで健全性を判断する。
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.managers.tmux_manager import TmuxManager
-    from src.models.agent import Agent
+    from src.models.agent import Agent, AgentRole, AgentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class HealthcheckManager:
         self.tmux_manager = tmux_manager
         self.agents = agents
         self.healthcheck_interval_seconds = healthcheck_interval_seconds
+        self.last_monitor_at: datetime | None = None
 
     @staticmethod
     def _resolve_session_name(agent: "Agent") -> str | None:
@@ -206,4 +208,48 @@ class HealthcheckManager:
         return {
             "total_agents": len(self.agents),
             "healthcheck_interval_seconds": self.healthcheck_interval_seconds,
+            "last_monitor_at": self.last_monitor_at.isoformat() if self.last_monitor_at else None,
+        }
+
+    async def monitor_and_recover_workers(self) -> dict:
+        """Worker の健全性を監視し、必要なら復旧する。"""
+        from src.models.agent import AgentRole, AgentStatus
+
+        now = datetime.now()
+        self.last_monitor_at = now
+        recovered: list[dict[str, str]] = []
+        escalated: list[dict[str, str]] = []
+        skipped: list[str] = []
+
+        for agent_id, agent in self.agents.items():
+            if agent.role != AgentRole.WORKER.value:
+                continue
+
+            # タスクなしの idle worker は監視対象外
+            if not agent.current_task and agent.status == AgentStatus.IDLE.value:
+                skipped.append(agent_id)
+                continue
+
+            # 明示的な tmux セッション障害
+            health = await self.check_agent(agent_id)
+            if not health.is_healthy:
+                success, message = await self.attempt_recovery(agent_id)
+                target = recovered if success else escalated
+                target.append({"agent_id": agent_id, "message": message})
+                continue
+
+            # 長時間活動なし + タスク中なら回復対象
+            if agent.last_activity and agent.current_task:
+                inactive_for = now - agent.last_activity
+                if inactive_for >= timedelta(seconds=self.healthcheck_interval_seconds):
+                    success, message = await self.attempt_recovery(agent_id)
+                    target = recovered if success else escalated
+                    target.append({"agent_id": agent_id, "message": message})
+
+        return {
+            "recovered": recovered,
+            "escalated": escalated,
+            "skipped": skipped,
+            "healthcheck_interval_seconds": self.healthcheck_interval_seconds,
+            "last_monitor_at": self.last_monitor_at.isoformat(),
         }

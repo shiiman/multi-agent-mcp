@@ -32,9 +32,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": {
-          "tools": ["Edit", "Write"]
-        },
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
@@ -48,8 +46,5 @@
     "pyright-lsp@claude-plugins-official"
   ],
   "alwaysThinkingEnabled": true,
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  },
   "language": "Japanese"
 }

@@ -11,7 +11,6 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import AICli, Settings, TerminalApp
 from src.config.template_loader import get_template_loader
-from src.config.workflow_guides import get_role_template_path
 from src.context import AppContext
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
@@ -104,6 +103,20 @@ def _resolve_tmux_session_name(agent: Agent) -> str | None:
     if agent.tmux_session:
         return str(agent.tmux_session).split(":", 1)[0]
     return None
+
+
+def _resolve_agent_cli_name(agent: Agent, app_ctx: AppContext) -> str:
+    """Agent の CLI 名を文字列で返す。"""
+    if agent.ai_cli:
+        return str(agent.ai_cli)
+    return str(app_ctx.ai_cli.get_default_cli().value)
+
+
+def _build_change_directory_command(cli_name: str, worktree_path: str) -> str:
+    """CLI ごとのディレクトリ移動コマンドを返す。"""
+    if cli_name == AICli.CLAUDE.value:
+        return f"!cd {worktree_path}"
+    return f"cd {worktree_path}"
 
 
 def _validate_agent_creation(
@@ -370,25 +383,24 @@ async def _send_task_to_worker(
             project_root, session_id, agent.id, final_task_content
         )
 
-        agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
-        agent_model = profile_settings.get("worker_model")
-
-        thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
-
-        read_command = app_ctx.ai_cli.build_stdin_command(
-            cli=agent_cli,
-            task_file_path=str(task_file),
-            worktree_path=worktree_path if enable_worktree else None,
-            project_root=str(project_root),
-            model=agent_model,
-            role="worker",
-            role_template_path=str(get_role_template_path("worker")),
-            thinking_tokens=thinking_tokens,
-        )
-
         tmux = app_ctx.tmux
+        agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
+
+        if enable_worktree:
+            change_dir = _build_change_directory_command(agent_cli_name, worktree_path)
+            await tmux.send_keys_to_pane(
+                agent.session_name,
+                agent.window_index,
+                agent.pane_index,
+                change_dir,
+            )
+
+        instruction = f"次のタスク指示ファイルを実行してください: {task_file}"
         success = await tmux.send_keys_to_pane(
-            agent.session_name, agent.window_index, agent.pane_index, read_command
+            agent.session_name,
+            agent.window_index,
+            agent.pane_index,
+            instruction,
         )
         if success:
             agent.status = AgentStatus.BUSY
@@ -399,7 +411,7 @@ async def _send_task_to_worker(
             # コスト記録（Worker CLI 起動）
             try:
                 dashboard.record_api_call(
-                    ai_cli=agent_cli or "claude",
+                    ai_cli=agent_cli_name,
                     estimated_tokens=profile_settings.get("worker_thinking_tokens", 4000),
                     agent_id=agent.id,
                     task_id=effective_task_id,
@@ -852,6 +864,7 @@ def register_tools(mcp: FastMCP) -> None:
         repo_path: str,
         base_branch: str,
         session_id: str | None = None,
+        reuse_idle_workers: bool = True,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -871,6 +884,7 @@ def register_tools(mcp: FastMCP) -> None:
             repo_path: メインリポジトリのパス
             base_branch: ベースブランチ名（worktree 作成時の基点）
             session_id: セッションID（task_content 指定時は必須）
+            reuse_idle_workers: idle Worker を再利用するか
             caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
@@ -894,20 +908,43 @@ def register_tools(mcp: FastMCP) -> None:
         profile_settings = get_current_profile_settings(app_ctx)
         profile_max_workers = profile_settings["max_workers"]
 
-        # Worker 数の上限チェック
+        # Worker 数の上限と再利用候補を確認
         agents = app_ctx.agents
         current_worker_count = sum(1 for a in agents.values() if a.role == AgentRole.WORKER)
         requested_count = len(worker_configs)
+        reusable_workers: list[Agent] = []
+        if reuse_idle_workers:
+            reusable_workers = sorted(
+                [
+                    a for a in agents.values()
+                    if a.role == AgentRole.WORKER
+                    and a.status == AgentStatus.IDLE
+                    and not a.current_task
+                    and a.session_name is not None
+                    and a.window_index is not None
+                    and a.pane_index is not None
+                ],
+                key=lambda a: a.last_activity,
+            )
 
-        if current_worker_count + requested_count > profile_max_workers:
+        reuse_count = min(requested_count, len(reusable_workers)) if reuse_idle_workers else 0
+        new_worker_needed = requested_count - reuse_count
+        new_worker_capacity = max(profile_max_workers - current_worker_count, 0)
+        if new_worker_needed > new_worker_capacity:
             return {
                 "success": False,
-                "error": f"Worker 数が上限を超えます（現在: {current_worker_count}, "
-                         f"要求: {requested_count}, 上限: {profile_max_workers}）",
+                "error": (
+                    "Worker 数が上限を超えます"
+                    f"（現在: {current_worker_count}, 要求: {requested_count}, "
+                    f"再利用可能: {reuse_count}, 新規上限: {new_worker_capacity}, "
+                    f"総上限: {profile_max_workers}）"
+                ),
             }
 
         # worktree 無効モードのチェック
         enable_worktree = settings.enable_worktree
+        reuse_configs = worker_configs[:reuse_count]
+        create_configs = worker_configs[reuse_count:]
 
         # 🔴 Race condition 対策: 並列実行前に pane を事前割り当て
         project_name = get_project_name(repo_path)
@@ -924,8 +961,8 @@ def register_tools(mcp: FastMCP) -> None:
             ):
                 used_slots.add((agent.window_index, agent.pane_index))
 
-        # 各 Worker に pane を事前割り当て
-        for i in range(len(worker_configs)):
+        # 各新規 Worker に pane を事前割り当て
+        for i in range(len(create_configs)):
             slot = None
             # メインウィンドウの空きを探す
             for pane_index in MAIN_WINDOW_WORKER_PANES:
@@ -943,7 +980,12 @@ def register_tools(mcp: FastMCP) -> None:
 
             pre_assigned_slots.append(slot)
 
-        logger.info(f"事前割り当て済み pane: {pre_assigned_slots}")
+        logger.info(
+            "Worker batch: reuse=%s, create=%s, slots=%s",
+            reuse_count,
+            len(create_configs),
+            pre_assigned_slots,
+        )
 
         async def create_single_worker(
             config: dict, worker_index: int, assigned_slot: tuple[int, int] | None
@@ -1025,6 +1067,7 @@ def register_tools(mcp: FastMCP) -> None:
                     session_name=project_name,
                     window_index=window_index,
                     pane_index=pane_index,
+                    ai_cli=app_ctx.ai_cli.get_default_cli(),
                     created_at=now,
                     last_activity=now,
                 )
@@ -1096,15 +1139,113 @@ def register_tools(mcp: FastMCP) -> None:
                     "worker_index": worker_index,
                 }
 
-        # 全 Worker を並列で作成（事前割り当てされた pane を渡す）
-        logger.info(f"{len(worker_configs)} 個の Worker を並列で作成開始")
-        results = await asyncio.gather(
-            *[
-                create_single_worker(config, i, pre_assigned_slots[i])
-                for i, config in enumerate(worker_configs)
-            ],
-            return_exceptions=True
+        async def reuse_single_worker(
+            config: dict, worker_index: int, worker: Agent
+        ) -> dict[str, Any]:
+            """既存 idle Worker を再利用してタスクを割り当てる。"""
+            branch = config.get("branch")
+            task_title = config.get("task_title", f"Worker {worker_index + 1}")
+            if enable_worktree and not branch:
+                return {
+                    "success": False,
+                    "error": f"Worker {worker_index + 1}: branch が指定されていません",
+                    "worker_index": worker_index,
+                }
+
+            worktree_path = worker.worktree_path or repo_path
+            if worker.ai_cli is None:
+                worker.ai_cli = app_ctx.ai_cli.get_default_cli()
+            if enable_worktree:
+                wt_path, wt_error = await _create_worktree_for_worker(
+                    app_ctx, repo_path, branch, base_branch, worker_index
+                )
+                if wt_error:
+                    return {
+                        "success": False,
+                        "error": wt_error,
+                        "worker_index": worker_index,
+                    }
+                worktree_path = wt_path
+                worker.worktree_path = wt_path
+                worker.working_dir = wt_path
+
+            task_assigned = False
+            task_id = config.get("task_id")
+            dashboard = None
+            if app_ctx.session_id and app_ctx.project_root:
+                try:
+                    dashboard = ensure_dashboard_manager(app_ctx)
+                except Exception as e:
+                    logger.debug(f"ダッシュボードマネージャー取得をスキップ: {e}")
+
+            if task_id and dashboard:
+                try:
+                    success, message = dashboard.assign_task(
+                        task_id=task_id,
+                        agent_id=worker.id,
+                        branch=branch,
+                        worktree_path=worktree_path,
+                    )
+                    task_assigned = success
+                    if not success:
+                        logger.warning(f"再利用Workerへのタスク割り当て失敗: {message}")
+                except Exception as e:
+                    logger.warning(f"再利用Workerへのタスク割り当てエラー: {e}")
+
+            task_sent = False
+            task_content = config.get("task_content")
+            if task_content and session_id:
+                task_sent = await _send_task_to_worker(
+                    app_ctx,
+                    worker,
+                    task_content,
+                    task_id,
+                    branch or "",
+                    worktree_path,
+                    session_id,
+                    worker_index,
+                    enable_worktree,
+                    profile_settings,
+                    caller_agent_id,
+                )
+
+            worker.last_activity = datetime.now()
+            save_agent_to_file(app_ctx, worker)
+
+            return {
+                "success": True,
+                "worker_index": worker_index,
+                "agent_id": worker.id,
+                "branch": branch,
+                "worktree_path": worktree_path,
+                "tmux_session": worker.tmux_session,
+                "task_title": task_title,
+                "reused": True,
+                "task_assigned": task_assigned,
+                "task_sent": task_sent,
+            }
+
+        # 再利用 Worker と新規 Worker を並列処理
+        logger.info(
+            "%s 件の再利用, %s 件の新規作成を実行します",
+            len(reuse_configs),
+            len(create_configs),
         )
+        reuse_results = await asyncio.gather(
+            *[
+                reuse_single_worker(config, i, reusable_workers[i])
+                for i, config in enumerate(reuse_configs)
+            ],
+            return_exceptions=True,
+        )
+        create_results = await asyncio.gather(
+            *[
+                create_single_worker(config, i + len(reuse_configs), pre_assigned_slots[i])
+                for i, config in enumerate(create_configs)
+            ],
+            return_exceptions=True,
+        )
+        results = [*reuse_results, *create_results]
 
         # 結果を整理
         workers = []
@@ -1123,9 +1264,9 @@ def register_tools(mcp: FastMCP) -> None:
 
         success = failed_count == 0
         message = (
-            f"{len(workers)} 個の Worker を作成しました"
+            f"{len(workers)} 件の Worker 処理が完了しました"
             if success
-            else f"{len(workers)} 個の Worker を作成（{failed_count} 個失敗）"
+            else f"{len(workers)} 件の Worker 処理が完了（{failed_count} 件失敗）"
         )
 
         logger.info(message)

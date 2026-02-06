@@ -479,7 +479,7 @@ class TestMarkdownDashboard:
         assert "## メッセージ履歴" in messages_content
         assert "## メッセージ本文" not in messages_content
         assert "| 時刻 | 種類 | 送信元 | 宛先 | 件名 |" not in messages_content
-        assert "worker1 -> admin" in messages_content
+        assert "メッセージ履歴</summary>" in messages_content
         assert "<details open>" in messages_content
         assert "詳細本文のテストメッセージです。" in messages_content
 

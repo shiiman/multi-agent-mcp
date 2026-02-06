@@ -1,5 +1,6 @@
 """コマンド実行ツール。"""
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,23 @@ from src.tools.helpers import (
 )
 from src.tools.model_profile import get_current_profile_settings
 from src.tools.task_templates import generate_7section_task, generate_admin_task
+
+
+def _extract_claude_statusline_cost(output: str) -> tuple[float, str] | None:
+    """Claude の statusLine からコスト値を抽出する。"""
+    patterns = (
+        r"(?:cost|Cost|COST)[^$\n]*\$\s*([0-9]+(?:\.[0-9]+)?)",
+        r"\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:cost|Cost|COST)",
+    )
+    for line in reversed(output.splitlines()):
+        for pattern in patterns:
+            match = re.search(pattern, line)
+            if match:
+                try:
+                    return float(match.group(1)), line.strip()
+                except ValueError:
+                    continue
+    return None
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -131,6 +149,34 @@ def register_tools(mcp: FastMCP) -> None:
         output = await tmux.capture_pane_by_index(
             agent.session_name, agent.window_index, agent.pane_index, lines
         )
+
+        # Claude の statusLine からのみ実測コストを取得
+        try:
+            agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
+            cli_value = agent_cli.value if hasattr(agent_cli, "value") else str(agent_cli)
+            if cli_value == "claude":
+                parsed = _extract_claude_statusline_cost(output)
+                if parsed:
+                    actual_cost_usd, status_line = parsed
+                    dashboard = ensure_dashboard_manager(app_ctx)
+                    latest_calls = dashboard.get_dashboard().cost.calls[-20:]
+                    already_recorded = any(
+                        c.agent_id == agent_id and c.status_line == status_line
+                        for c in latest_calls
+                    )
+                    if not already_recorded:
+                        dashboard.record_api_call(
+                            ai_cli="claude",
+                            estimated_tokens=app_ctx.settings.estimated_tokens_per_call,
+                            agent_id=agent_id,
+                            task_id=agent.current_task,
+                            actual_cost_usd=actual_cost_usd,
+                            status_line=status_line,
+                            cost_source="actual",
+                        )
+        except Exception:
+            # 実測コスト取得は補助機能のため失敗しても処理継続
+            pass
 
         return {
             "success": True,

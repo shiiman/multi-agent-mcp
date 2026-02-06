@@ -11,6 +11,7 @@ from src.models.agent import AgentRole
 from src.models.dashboard import TaskStatus
 from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import (
+    ensure_healthcheck_manager,
     ensure_ipc_manager,
     require_permission,
     save_agent_to_file,
@@ -21,9 +22,21 @@ from src.tools.helpers_managers import ensure_dashboard_manager
 logger = logging.getLogger(__name__)
 
 
+def _normalize_task_id(task_id: str | None) -> str:
+    """task_id を比較用に正規化する。"""
+    if not task_id:
+        return ""
+    normalized = task_id.strip().lower()
+    for prefix in ("task:", "task_", "task-"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            break
+    return normalized
+
+
 def _auto_update_dashboard_from_messages(
     app_ctx: Any, messages: list[Message]
-) -> bool:
+) -> tuple[bool, int, list[str]]:
     """Admin の read_messages 時に、タスク関連メッセージから Dashboard を自動更新する。"""
     task_messages = [
         m
@@ -36,17 +49,32 @@ def _auto_update_dashboard_from_messages(
         )
     ]
     if not task_messages:
-        return False
+        return False, 0, []
 
     try:
         dashboard = ensure_dashboard_manager(app_ctx)
     except Exception as e:
         logger.debug(f"Dashboard 自動更新をスキップ: {e}")
-        return False
+        return False, 0, ["dashboard_manager_unavailable"]
+
+    task_map: dict[str, str] = {}
+    for task in dashboard.list_tasks():
+        normalized = _normalize_task_id(task.id)
+        if normalized:
+            task_map[normalized] = task.id
+
+    applied = 0
+    skipped_reasons: list[str] = []
 
     for msg in task_messages:
-        task_id = msg.metadata.get("task_id")
+        raw_task_id = msg.metadata.get("task_id")
+        normalized_task_id = msg.metadata.get("normalized_task_id") or _normalize_task_id(raw_task_id)
+        if not normalized_task_id:
+            skipped_reasons.append("missing_task_id")
+            continue
+        task_id = task_map.get(normalized_task_id)
         if not task_id:
+            skipped_reasons.append(f"task_not_found:{normalized_task_id}")
             continue
 
         try:
@@ -64,9 +92,14 @@ def _auto_update_dashboard_from_messages(
                     agent = app_ctx.agents[reporter]
                     agent.current_task = task_id
                     save_agent_to_file(app_ctx, agent)
+                applied += 1
 
             elif msg.message_type == MessageType.TASK_COMPLETE:
                 reporter = msg.metadata.get("reporter")
+                task = dashboard.get_task(task_id)
+                if task and task.status == TaskStatus.COMPLETED:
+                    skipped_reasons.append(f"already_completed:{task_id}")
+                    continue
                 dashboard.update_task_status(
                     task_id, TaskStatus.COMPLETED, progress=100
                 )
@@ -75,17 +108,24 @@ def _auto_update_dashboard_from_messages(
                     if agent.current_task == task_id:
                         agent.current_task = None
                     save_agent_to_file(app_ctx, agent)
+                applied += 1
 
             elif msg.message_type == MessageType.TASK_FAILED:
                 reporter = msg.metadata.get("reporter")
+                task = dashboard.get_task(task_id)
+                if task and task.status == TaskStatus.FAILED:
+                    skipped_reasons.append(f"already_failed:{task_id}")
+                    continue
                 dashboard.update_task_status(task_id, TaskStatus.FAILED)
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
                     if agent.current_task == task_id:
                         agent.current_task = None
                     save_agent_to_file(app_ctx, agent)
+                applied += 1
         except Exception as e:
             logger.debug(f"タスク {task_id} の Dashboard 更新をスキップ: {e}")
+            skipped_reasons.append(f"update_error:{task_id}")
 
     # Markdown ダッシュボードも更新
     try:
@@ -96,7 +136,7 @@ def _auto_update_dashboard_from_messages(
     except Exception as e:
         logger.debug(f"Markdown ダッシュボード更新をスキップ: {e}")
 
-    return True
+    return True, applied, skipped_reasons
 
 
 def _resolve_session_name(agent: Any) -> str | None:
@@ -438,19 +478,36 @@ def register_tools(mcp: FastMCP) -> None:
 
         # Admin の場合: タスク関連メッセージから Dashboard を自動更新
         dashboard_updated = False
+        dashboard_updates_applied = 0
+        dashboard_updates_skipped_reason: list[str] = []
         sync_agents_from_file(app_ctx)
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
         if caller_role in (AgentRole.ADMIN.value, "admin"):
-            dashboard_updated = _auto_update_dashboard_from_messages(
+            (
+                dashboard_updated,
+                dashboard_updates_applied,
+                dashboard_updates_skipped_reason,
+            ) = _auto_update_dashboard_from_messages(
                 app_ctx, messages
             )
+            try:
+                healthcheck = ensure_healthcheck_manager(app_ctx)
+                monitor_result = await healthcheck.monitor_and_recover_workers()
+                if monitor_result["escalated"]:
+                    dashboard_updates_skipped_reason.append(
+                        f"healthcheck_escalated:{len(monitor_result['escalated'])}"
+                    )
+            except Exception as e:
+                logger.debug(f"healthcheck monitor をスキップ: {e}")
 
         return {
             "success": True,
             "messages": [m.model_dump(mode="json") for m in messages],
             "count": len(messages),
             "dashboard_updated": dashboard_updated,
+            "dashboard_updates_applied": dashboard_updates_applied,
+            "dashboard_updates_skipped_reason": dashboard_updates_skipped_reason,
         }
 
     @mcp.tool()

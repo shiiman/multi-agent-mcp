@@ -22,6 +22,18 @@ from src.tools.helpers import (
 logger = logging.getLogger(__name__)
 
 
+def _normalize_task_id(task_id: str | None) -> str:
+    """task_id の比較用正規化を行う。"""
+    if not task_id:
+        return ""
+    normalized = task_id.strip().lower()
+    for prefix in ("task:", "task_", "task-"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            break
+    return normalized
+
+
 def register_tools(mcp: FastMCP) -> None:
     """ダッシュボード/タスク管理ツールを登録する。"""
 
@@ -277,6 +289,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効な進捗率です: {progress}（有効: 0-100）",
             }
 
+        normalized_task_id = _normalize_task_id(task_id)
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
         actual_progress = progress or 0
 
@@ -295,6 +308,7 @@ def register_tools(mcp: FastMCP) -> None:
                     priority=MessagePriority.NORMAL,
                     metadata={
                         "task_id": task_id,
+                        "normalized_task_id": normalized_task_id,
                         "progress": actual_progress,
                         "checklist": checklist,
                         "message": message,
@@ -398,6 +412,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効なステータスです: {status}（有効: completed, failed）",
             }
 
+        normalized_task_id = _normalize_task_id(task_id)
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
 
         # IPC マネージャーを取得（自動初期化）
@@ -405,7 +420,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         # タスク完了報告を送信
         msg_type = MessageType.TASK_COMPLETE if status == "completed" else MessageType.ERROR
-        ipc.send_message(
+        completion_message = ipc.send_message(
             sender_id=caller_agent_id,
             receiver_id=admin_id,
             message_type=msg_type,
@@ -414,6 +429,7 @@ def register_tools(mcp: FastMCP) -> None:
             priority=MessagePriority.HIGH,
             metadata={
                 "task_id": task_id,
+                "normalized_task_id": normalized_task_id,
                 "status": status,
                 "reporter": caller_agent_id,
             },
@@ -479,6 +495,8 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "message": f"Admin ({admin_id}) に報告を送信しました",
             "task_id": task_id,
+            "normalized_task_id": normalized_task_id,
+            "message_id": completion_message.id,
             "reported_status": status,
             "memory_saved": memory_saved,
             "notification_sent": notification_sent,

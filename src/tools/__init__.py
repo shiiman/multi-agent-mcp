@@ -12,6 +12,7 @@ from src.tools import (
     ipc,
     memory,
     memory_global,
+    merge,
     model_profile,
     persona,
     scheduler,
@@ -39,6 +40,9 @@ def register_all_tools(mcp: FastMCP) -> None:
 
     # Git worktree管理
     worktree.register_tools(mcp)
+
+    # 完了タスクの統合
+    merge.register_tools(mcp)
 
     # IPC/メッセージング
     ipc.register_tools(mcp)
