@@ -6,7 +6,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.config.workflow_guides import get_role_guide
+from src.config.workflow_guides import get_role_guide, get_role_template_path
 from src.models.agent import AgentRole, AgentStatus
 from src.tools.helpers import (
     ensure_dashboard_manager,
@@ -299,6 +299,7 @@ def register_tools(mcp: FastMCP) -> None:
             project_root=str(project_root),  # MCP_PROJECT_ROOT 環境変数用
             model=agent_model,
             role=agent_role_name,
+            role_template_path=str(get_role_template_path(agent_role_name)),
             thinking_tokens=thinking_tokens,
         )
         # tmux ペインが設定されていない場合（Owner）はエラー

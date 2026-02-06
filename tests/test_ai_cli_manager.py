@@ -69,23 +69,30 @@ class TestBuildStdinCommand:
         )
         assert "claude" in cmd
         assert "--dangerously-skip-permissions" in cmd
+        assert "--prompt" in cmd
         # Claude CLI は --directory オプションがないため、cd で移動する
         assert "cd" in cmd
         assert "/path/to/worktree" in cmd
         assert "/tmp/task.md" in cmd
+        assert "< /tmp/task.md" not in cmd
 
     def test_build_stdin_command_codex(self, ai_cli_manager):
         """Codex のコマンドが正しく構築されることをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(
-            AICli.CODEX, "/tmp/task.md", "/path/to/worktree"
+            AICli.CODEX,
+            "/tmp/task.md",
+            "/path/to/worktree",
+            role_template_path="/repo/templates/roles/admin.md",
         )
         assert "codex " in cmd
         assert "codex exec" not in cmd
-        assert '"$(cat /tmp/task.md)"' in cmd
+        assert "--message" in cmd
         # 全 CLI で cd && command 形式
         assert "cd" in cmd
         assert "/path/to/worktree" in cmd
         assert "/tmp/task.md" in cmd
+        assert "/repo/templates/roles/admin.md" in cmd
+        assert "$(cat " not in cmd
 
     def test_build_stdin_command_gemini(self, ai_cli_manager):
         """Gemini のコマンドが正しく構築されることをテスト。"""
@@ -94,10 +101,12 @@ class TestBuildStdinCommand:
         )
         assert "gemini" in cmd
         assert "--yolo" in cmd
+        assert "--prompt" in cmd
         # 全 CLI で cd && command 形式
         assert "cd" in cmd
         assert "/path/to/worktree" in cmd
         assert "/tmp/task.md" in cmd
+        assert "< /tmp/task.md" not in cmd
 
     def test_build_stdin_command_claude_without_worktree(self, ai_cli_manager):
         """worktree なしで Claude Code コマンドが構築されることをテスト。"""
@@ -112,7 +121,7 @@ class TestBuildStdinCommand:
         cmd = ai_cli_manager.build_stdin_command(AICli.CODEX, "/tmp/task.md")
         assert "codex " in cmd
         assert "codex exec" not in cmd
-        assert '"$(cat /tmp/task.md)"' in cmd
+        assert "--message" in cmd
         # worktree なしの場合は cd も含まれない
         assert "cd" not in cmd
 
@@ -137,7 +146,7 @@ class TestBuildStdinCommandWithModel:
         assert "--model" in cmd
         assert "gpt-5.3-codex" in cmd
         assert "codex exec" not in cmd
-        assert '"$(cat /tmp/task.md)"' in cmd
+        assert "--message" in cmd
 
     def test_build_stdin_command_gemini_with_model(self, ai_cli_manager):
         """Gemini で --model フラグが含まれることをテスト。"""
@@ -183,17 +192,18 @@ class TestBuildStdinCommandWithModel:
         )
         assert "--model" not in cmd
 
-    def test_build_stdin_command_codex_fallback_to_exec_for_large_prompt(
+    def test_build_stdin_command_codex_no_exec_even_for_large_task_path(
         self, ai_cli_manager, tmp_path
     ):
-        """Codex の大きなタスクは exec にフォールバックすることをテスト。"""
+        """Codex は常に対話コマンドを使い、exec にフォールバックしないことをテスト。"""
         task_file = tmp_path / "large.md"
         task_file.write_text("A" * 20000, encoding="utf-8")
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CODEX, str(task_file), "/path/to/worktree"
         )
-        assert "codex exec" in cmd
-        assert f"< {task_file}" in cmd
+        assert "codex exec" not in cmd
+        assert "--message" in cmd
+        assert str(task_file) in cmd
 
 
 class TestResolveModelForCli:

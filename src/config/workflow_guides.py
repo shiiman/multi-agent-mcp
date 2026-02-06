@@ -51,6 +51,11 @@ def _load_template(role: str) -> str | None:
     return None
 
 
+def get_role_template_path(role: str) -> Path:
+    """ロールテンプレートファイルのパスを取得する。"""
+    return _get_templates_dir() / "roles" / f"{role}.md"
+
+
 # ロール説明
 ROLE_DESCRIPTIONS = {
     "owner": "マルチエージェントワークフローにおける Owner の役割と振る舞い",

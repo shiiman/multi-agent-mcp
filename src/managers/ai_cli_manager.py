@@ -5,7 +5,6 @@
 
 import asyncio
 import logging
-import os
 import shlex
 import shutil
 from pathlib import Path
@@ -113,6 +112,7 @@ class AiCliManager:
         project_root: str | None = None,
         model: str | None = None,
         role: str = "worker",
+        role_template_path: str | None = None,
         thinking_tokens: int | None = None,
     ) -> str:
         """AI CLIでstdinからタスクを読み込むコマンドを構築する。
@@ -124,6 +124,7 @@ class AiCliManager:
             project_root: プロジェクトルートパス（MCP_PROJECT_ROOT 環境変数用）
             model: 使用するモデル（オプション）
             role: エージェントのロール（"admin" or "worker"、モデル解決に使用）
+            role_template_path: ロールテンプレートファイルパス（オプション）
             thinking_tokens: Extended Thinking のトークン数（0 で無効、None で省略）
 
         Returns:
@@ -160,54 +161,47 @@ class AiCliManager:
 
         # 作業ディレクトリ: worktree_path > project_root > なし
         working_dir = worktree_path or project_root
+        role_label = role or "worker"
+        launch_prompt = (
+            f"あなたの役割は {role_label} です。"
+            f"役割テンプレートは {role_template_path or '(未指定)'}、"
+            f"タスクは {task_file_path} です。"
+            "両方を確認して、役割に従って作業を開始してください。"
+        )
+        quoted_prompt = shlex.quote(launch_prompt)
 
         if cli == AICli.CLAUDE:
             # export MCP_PROJECT_ROOT=... && cd <path> &&
-            # claude --model <model> --dangerously-skip-permissions < task.md
+            # claude --model <model> --dangerously-skip-permissions --prompt "<instruction>"
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
             parts.append("--dangerously-skip-permissions")
-            parts.append(f"< {shlex.quote(task_file_path)}")
+            parts.extend(["--prompt", quoted_prompt])
             command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
         elif cli == AICli.CODEX:
-            # export MCP_PROJECT_ROOT=... && cd <path> &&
-            # codex --model <model> "$(cat task.md)"
-            # 大きすぎるタスクは argv 制限回避のため exec にフォールバックする。
-            prompt_size = 0
-            try:
-                prompt_size = os.path.getsize(task_file_path)
-            except OSError:
-                prompt_size = 0
-
-            if prompt_size > 16_000:
-                parts = [cmd, "exec"]
-                if resolved_model:
-                    parts.extend(["--model", resolved_model])
-                parts.append("-")
-                parts.append(f"< {shlex.quote(task_file_path)}")
-                command = " ".join(parts)
-            else:
-                parts = [cmd]
-                if resolved_model:
-                    parts.extend(["--model", resolved_model])
-                parts.append(f'"$(cat {shlex.quote(task_file_path)})"')
-                command = " ".join(parts)
+            # codex exec は使用しない。常に対話コマンドを起動して指示文を渡す。
+            parts = [cmd]
+            if resolved_model:
+                parts.extend(["--model", resolved_model])
+            parts.extend(["--message", quoted_prompt])
+            command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
         else:  # AICli.GEMINI
-            # export MCP_PROJECT_ROOT=... && cd <path> && gemini --model <model> --yolo < task.md
+            # export MCP_PROJECT_ROOT=... && cd <path> &&
+            # gemini --model <model> --yolo --prompt "<instruction>"
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
             parts.append("--yolo")
-            parts.append(f"< {shlex.quote(task_file_path)}")
+            parts.extend(["--prompt", quoted_prompt])
             command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"

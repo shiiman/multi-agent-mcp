@@ -11,7 +11,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import AICli, Settings, TerminalApp
 from src.config.template_loader import get_template_loader
-from src.config.workflow_guides import get_role_guide
+from src.config.workflow_guides import get_role_guide, get_role_template_path
 from src.context import AppContext
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
@@ -381,6 +381,7 @@ async def _send_task_to_worker(
             project_root=str(project_root),
             model=agent_model,
             role="worker",
+            role_template_path=str(get_role_template_path("worker")),
             thinking_tokens=thinking_tokens,
         )
 
