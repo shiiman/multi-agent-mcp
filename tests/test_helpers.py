@@ -518,9 +518,9 @@ class TestCodexPromptDetection:
 
         output = "\n".join([
             "some logs...",
-            "› echo '[IPC] 新しいメッセージ: task_progress from worker-001'",
+            "› [IPC] 新しいメッセージ: task_progress from worker-001",
         ])
-        command = "echo '[IPC] 新しいメッセージ: task_progress from worker-001'"
+        command = "[IPC] 新しいメッセージ: task_progress from worker-001"
 
         assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is True
 
@@ -532,6 +532,6 @@ class TestCodexPromptDetection:
             "›",
             "tab to queue message",
         ])
-        command = "echo '[IPC] 新しいメッセージ: task_progress from worker-001'"
+        command = "[IPC] 新しいメッセージ: task_progress from worker-001"
 
         assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is False

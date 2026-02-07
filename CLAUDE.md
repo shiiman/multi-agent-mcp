@@ -200,7 +200,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 ### IPC Notification (EVENT-DRIVEN)
 
 - Admin↔Worker communication is EVENT-DRIVEN via tmux `send_keys_to_pane()`.
-- When a message is sent, `src/tools/ipc.py` automatically sends `[IPC] 新しいメッセージ` via tmux to the receiver's pane.
+- When a message is sent, `src/tools/ipc.py` automatically sends `[IPC] 新しいメッセージ` text via tmux to the receiver's pane.
 - Admin/Worker react to IPC notifications — NO polling loops (`while True: read_messages()` is FORBIDDEN).
 - Owner without tmux pane receives macOS native notification instead.
 - Healthcheck polling is the ONLY exception (checking agent liveness).

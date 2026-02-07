@@ -107,7 +107,7 @@ uv run multi-agent-mcp
 ### IPC は Event-Driven
 
 - Admin↔Worker 通信は tmux `send_keys_to_pane()` による通知駆動
-- 送信時、`src/tools/ipc.py` が `[IPC] 新しいメッセージ` を受信 pane に通知
+- 送信時、`src/tools/ipc.py` が `[IPC] 新しいメッセージ` 本文を受信 pane に通知
 - Admin/Worker は通知を契機に処理し、ポーリングループは禁止
 - 例外は healthcheck の生存確認ポーリングのみ
 

@@ -331,9 +331,7 @@ async def notify_agent_via_tmux(
         )
         return False
 
-    notification_text = (
-        f"echo '[IPC] 新しいメッセージ: {msg_type_value} from {sender_id}'"
-    )
+    notification_text = f"[IPC] 新しいメッセージ: {msg_type_value} from {sender_id}"
     default_cli = app_ctx.ai_cli.get_default_cli()
     resolved_cli = agent.ai_cli or default_cli
     agent_cli = (

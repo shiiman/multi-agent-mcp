@@ -30,7 +30,7 @@
    (ipc/{admin_id}/{timestamp}_{message_id}.md)
    ↓
 3. Admin の tmux ペインに通知を送信
-   echo '[IPC] 新しいメッセージ: task_complete from worker_xxx'
+   [IPC] 新しいメッセージ: task_complete from worker_xxx
    ↓
 4. Admin は read_messages() でメッセージ内容を取得
    ↓
@@ -112,7 +112,7 @@ await tmux.send_keys_to_pane(
     session_name,
     window_index,
     pane_index,
-    f"echo '[IPC] 新しいメッセージ: {msg_type} from {sender_id}'"
+    f"[IPC] 新しいメッセージ: {msg_type} from {sender_id}"
 )
 ```
 
