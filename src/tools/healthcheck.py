@@ -107,13 +107,14 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
             logger.warning(f"worktree 操作に失敗: {e}")
             new_worktree_path = old_worktree_path
 
-    import uuid
     from datetime import datetime
 
     from src.models.agent import Agent, AgentStatus
     from src.tools.helpers import save_agent_to_file
 
-    new_agent_id = f"worker-{uuid.uuid4().hex[:8]}"
+    # 復旧後にランダム ID を再生成すると、ダッシュボードの可読性が落ち
+    # 同一 worker が増殖したように見えるため ID は維持する。
+    new_agent_id = agent_id
     tmux_session = None
     if (
         old_session_name is not None

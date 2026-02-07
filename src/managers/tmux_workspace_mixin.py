@@ -379,25 +379,44 @@ class TmuxWorkspaceMixin:
         def _normalize(text: str) -> str:
             return re.sub(r"\s+", " ", text.strip().lower())
 
-        expected_norm = _normalize(expected)
-        lines = output.splitlines()[-80:]
-        for line in lines:
-            stripped = line.strip()
-            if not stripped.startswith("›"):
-                continue
-            pending = stripped[1:].strip()
-            if not pending:
-                continue
+        def _tokenize(text: str) -> set[str]:
+            return {
+                token
+                for token in re.findall(r"[a-zA-Z0-9_./:-]+", text.lower())
+                if len(token) >= 2
+            }
 
-            pending_norm = _normalize(pending)
-            if pending_norm == expected_norm:
+        # 直近の Codex 入力プロンプト（› ...）を優先して判定する。
+        pending_line = ""
+        for raw in reversed(output.splitlines()[-120:]):
+            stripped = raw.strip()
+            if stripped.startswith("›"):
+                pending_line = stripped[1:].strip()
+                break
+
+        if not pending_line:
+            return False
+
+        expected_norm = _normalize(expected)
+        pending_norm = _normalize(pending_line)
+        if pending_norm == expected_norm:
+            return True
+
+        # 折り返し・切り詰めに対する緩和判定
+        if expected_norm.startswith(pending_norm) or pending_norm.startswith(expected_norm):
+            return True
+
+        # 文言一致が崩れてもトークン重複率で未確定を判定する
+        expected_tokens = _tokenize(expected_norm)
+        pending_tokens = _tokenize(pending_norm)
+        if expected_tokens and pending_tokens:
+            overlap = len(expected_tokens & pending_tokens) / len(expected_tokens)
+            if overlap >= 0.4:
                 return True
-            # 折り返しや切り詰めで末尾が欠ける場合の緩和判定
-            if pending_norm and (
-                expected_norm.startswith(pending_norm)
-                or pending_norm.startswith(expected_norm)
-            ):
-                return True
+
+        # Codex 固有の入力ヒントが出ており、入力行が残っていれば未確定
+        if "tab to queue message" in output.lower():
+            return True
         return False
 
     async def send_and_confirm_to_pane(

@@ -550,9 +550,8 @@ def register_tools(mcp: FastMCP) -> None:
         caller_role = getattr(caller, "role", None)
         is_admin_caller = caller_role in (AgentRole.ADMIN.value, "admin")
         if is_admin_caller:
-            poll_state = _get_admin_poll_state(app_ctx, caller_agent_id or agent_id)
             unread_count = ipc.get_unread_count(agent_id)
-            if unread_count == 0 and bool(poll_state.get("waiting_for_ipc")):
+            if unread_only and unread_count == 0:
                 return {
                     "success": False,
                     "error": (

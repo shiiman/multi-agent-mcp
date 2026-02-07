@@ -537,7 +537,17 @@ class HealthcheckManager:
             and active_task.status == TaskStatus.IN_PROGRESS
             and await self._is_in_progress_without_ipc(agent_id, agent, active_task, now)
         ):
-            return "in_progress_no_ipc", True
+            pane_command = (health.pane_current_command or "").strip().lower()
+            # Codex/Claude/Gemini が実行中でセッション健全な場合は
+            # no-IPC だけで強制復旧しない（長時間推論で誤検知しやすいため）。
+            if pane_command in {"codex", "claude", "gemini"}:
+                logger.info(
+                    "in_progress_no_ipc をスキップ: agent=%s pane=%s",
+                    agent_id,
+                    pane_command,
+                )
+            else:
+                return "in_progress_no_ipc", True
 
         if await self._is_worker_stalled(agent_id, agent, now):
             return "task_stalled", True
