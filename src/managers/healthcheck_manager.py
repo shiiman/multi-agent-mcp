@@ -4,6 +4,7 @@
 """
 
 import hashlib
+import inspect
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -14,6 +15,8 @@ if TYPE_CHECKING:
     from src.models.agent import Agent
 
 logger = logging.getLogger(__name__)
+
+_SHELL_COMMANDS = {"zsh", "bash", "sh", "fish"}
 
 
 @dataclass
@@ -32,6 +35,9 @@ class HealthStatus:
     error_message: str | None = None
     """エラーメッセージ"""
 
+    pane_current_command: str | None = None
+    """pane で現在実行中のコマンド"""
+
     def to_dict(self) -> dict:
         """辞書に変換する。"""
         return {
@@ -39,6 +45,7 @@ class HealthStatus:
             "is_healthy": self.is_healthy,
             "tmux_session_alive": self.tmux_session_alive,
             "error_message": self.error_message,
+            "pane_current_command": self.pane_current_command,
         }
 
 
@@ -158,6 +165,8 @@ class HealthcheckManager:
 
     async def check_agent(self, agent_id: str) -> HealthStatus:
         """単一エージェントのヘルスチェックを行う。"""
+        from src.models.agent import AgentRole
+
         agent = self.agents.get(agent_id)
         if not agent:
             return HealthStatus(
@@ -177,11 +186,47 @@ class HealthcheckManager:
             )
 
         tmux_alive = await self.tmux_manager.session_exists(session_name)
+        if not tmux_alive:
+            return HealthStatus(
+                agent_id=agent_id,
+                is_healthy=False,
+                tmux_session_alive=False,
+                error_message="tmux セッションが見つかりません",
+            )
+
+        pane_command: str | None = None
+        if agent.window_index is not None and agent.pane_index is not None:
+            get_current = getattr(self.tmux_manager, "get_pane_current_command", None)
+            if callable(get_current):
+                pane_command_result = get_current(
+                    session_name,
+                    agent.window_index,
+                    agent.pane_index,
+                )
+                if inspect.isawaitable(pane_command_result):
+                    pane_command = await pane_command_result
+                else:
+                    pane_command = pane_command_result
+
+        # Worker がタスク中なのに shell に戻っている場合は異常
+        role = str(getattr(agent, "role", ""))
+        is_worker = role == AgentRole.WORKER.value
+        command_name = (pane_command or "").strip().lower()
+        if is_worker and agent.current_task and command_name in _SHELL_COMMANDS:
+            return HealthStatus(
+                agent_id=agent_id,
+                is_healthy=False,
+                tmux_session_alive=True,
+                error_message="ai_process_dead",
+                pane_current_command=pane_command,
+            )
+
         return HealthStatus(
             agent_id=agent_id,
             is_healthy=tmux_alive,
             tmux_session_alive=tmux_alive,
-            error_message=None if tmux_alive else "tmux セッションが見つかりません",
+            error_message=None,
+            pane_current_command=pane_command,
         )
 
     async def check_all_agents(self) -> list[HealthStatus]:
@@ -450,7 +495,11 @@ class HealthcheckManager:
             force_recovery = False
 
             if not health.is_healthy:
-                recovery_reason = "tmux_session_dead"
+                recovery_reason = (
+                    "ai_process_dead"
+                    if health.error_message == "ai_process_dead"
+                    else "tmux_session_dead"
+                )
             elif (
                 active_task is not None
                 and active_task.status == TaskStatus.PENDING

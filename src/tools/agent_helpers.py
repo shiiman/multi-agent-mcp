@@ -500,6 +500,7 @@ async def _send_task_to_worker(
         worker_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
         thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
         reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
+        confirm_codex_prompt = agent_cli_name == "codex"
 
         async def _dispatch_bootstrap() -> tuple[bool, str]:
             bootstrap_command = app_ctx.ai_cli.build_stdin_command(
@@ -513,12 +514,13 @@ async def _send_task_to_worker(
                 thinking_tokens=thinking_tokens,
                 reasoning_effort=reasoning_effort,
             )
-            success = await tmux.send_keys_to_pane(
+            success = await tmux.send_with_rate_limit_to_pane(
                 agent.session_name,
                 agent.window_index,
                 agent.pane_index,
                 bootstrap_command,
                 clear_input=False,
+                confirm_codex_prompt=confirm_codex_prompt,
             )
             return success, bootstrap_command
 
@@ -532,12 +534,13 @@ async def _send_task_to_worker(
             dispatch_mode = "followup"
             if enable_worktree:
                 change_dir = _build_change_directory_command(agent_cli_name, worktree_path)
-                changed = await tmux.send_keys_to_pane(
+                changed = await tmux.send_with_rate_limit_to_pane(
                     agent.session_name,
                     agent.window_index,
                     agent.pane_index,
                     change_dir,
                     clear_input=False,
+                    confirm_codex_prompt=confirm_codex_prompt,
                 )
                 if not changed:
                     current_command = await _reset_bootstrap_state_if_shell()
@@ -556,12 +559,13 @@ async def _send_task_to_worker(
 
             instruction = f"次のタスク指示ファイルを実行してください: {task_file}"
             command_sent = instruction
-            success = await tmux.send_keys_to_pane(
+            success = await tmux.send_with_rate_limit_to_pane(
                 agent.session_name,
                 agent.window_index,
                 agent.pane_index,
                 instruction,
                 clear_input=False,
+                confirm_codex_prompt=confirm_codex_prompt,
             )
 
         if success:

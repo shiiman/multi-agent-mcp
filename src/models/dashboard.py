@@ -111,6 +111,10 @@ class CostInfo(BaseModel):
         default=0.0, description="実測総コスト（USD, Claude statusLine）"
     )
     total_cost_usd: float = Field(default=0.0, description="合算コスト（実測優先 + 推定）")
+    actual_cost_by_agent: dict[str, float] = Field(
+        default_factory=dict,
+        description="Claude 実測コストの最新スナップショット（agent_id -> USD）",
+    )
     warning_threshold_usd: float = Field(default=10.0, description="コスト警告閾値（USD）")
     calls: list[ApiCallRecord] = Field(default_factory=list, description="呼び出し記録")
 

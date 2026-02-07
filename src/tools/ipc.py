@@ -401,13 +401,19 @@ def register_tools(mcp: FastMCP) -> None:
                         "echo '[IPC] 新しいメッセージ:"
                         f" {msg_type.value} from {sender_id}'"
                     )
+                    receiver_cli = (
+                        receiver_agent.ai_cli.value
+                        if hasattr(receiver_agent.ai_cli, "value")
+                        else str(receiver_agent.ai_cli or "")
+                    ).lower()
                     try:
-                        await tmux.send_keys_to_pane(
+                        await tmux.send_with_rate_limit_to_pane(
                             receiver_agent.session_name,
                             receiver_agent.window_index,
                             receiver_agent.pane_index,
                             notification_text,
                             clear_input=False,
+                            confirm_codex_prompt=receiver_cli == "codex",
                         )
                         notification_sent = True
                         notification_method = "tmux"

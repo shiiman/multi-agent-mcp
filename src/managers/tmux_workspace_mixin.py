@@ -1,6 +1,8 @@
 """TmuxManager のワークスペース構築ロジック mixin。"""
 
+import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from src.config.settings import TerminalApp
@@ -355,6 +357,105 @@ class TmuxWorkspaceMixin:
         if code != 0:
             logger.error(f"Enterキー送信エラー: {stderr}")
         return code == 0
+
+    @staticmethod
+    def _is_pending_codex_prompt(output: str, command: str) -> bool:
+        """Codex プロンプトに未確定入力が残っているか判定する。"""
+        expected = command.strip()
+        if not expected:
+            return False
+
+        lines = output.splitlines()[-12:]
+        for line in lines:
+            stripped = line.strip()
+            if not stripped.startswith("›"):
+                continue
+            pending = stripped[1:].strip()
+            if pending == expected:
+                return True
+            # 折り返しで末尾が欠ける場合の緩和判定
+            if pending and expected.startswith(pending):
+                return True
+        return False
+
+    async def send_and_confirm_to_pane(
+        self,
+        session: str,
+        window: int,
+        pane: int,
+        command: str,
+        *,
+        literal: bool = True,
+        clear_input: bool = True,
+        confirm_codex_prompt: bool = False,
+    ) -> bool:
+        """ペイン送信後に必要なら Enter 再送で確定を保証する。"""
+        sent = await self.send_keys_to_pane(
+            session=session,
+            window=window,
+            pane=pane,
+            command=command,
+            literal=literal,
+            clear_input=clear_input,
+        )
+        if not sent or not confirm_codex_prompt:
+            return sent
+
+        retries = max(0, int(getattr(self.settings, "codex_enter_retry_max", 3)))
+        interval_ms = max(0, int(getattr(self.settings, "codex_enter_retry_interval_ms", 250)))
+        target = self._pane_target(session, window, pane)
+
+        for _ in range(retries):
+            output = await self.capture_pane_by_index(session, window, pane, lines=30)
+            if not self._is_pending_codex_prompt(output, command):
+                return True
+            code, _, stderr = await self._run("send-keys", "-t", target, "Enter")
+            if code != 0:
+                logger.error(f"Codex Enter再送エラー: {stderr}")
+                return False
+            if interval_ms:
+                await asyncio.sleep(interval_ms / 1000)
+
+        output = await self.capture_pane_by_index(session, window, pane, lines=30)
+        return not self._is_pending_codex_prompt(output, command)
+
+    async def send_with_rate_limit_to_pane(
+        self,
+        session: str,
+        window: int,
+        pane: int,
+        command: str,
+        *,
+        literal: bool = True,
+        clear_input: bool = True,
+        confirm_codex_prompt: bool = False,
+    ) -> bool:
+        """共通レート制御付きでペインに送信する。"""
+        lock = getattr(self, "_send_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            setattr(self, "_send_lock", lock)
+
+        async with lock:
+            cooldown = float(getattr(self.settings, "send_cooldown_seconds", 2.0))
+            last_sent = getattr(self, "_last_send_at", None)
+            now = time.monotonic()
+            if isinstance(last_sent, (float, int)) and cooldown > 0:
+                wait_for = cooldown - (now - float(last_sent))
+                if wait_for > 0:
+                    await asyncio.sleep(wait_for)
+
+            success = await self.send_and_confirm_to_pane(
+                session=session,
+                window=window,
+                pane=pane,
+                command=command,
+                literal=literal,
+                clear_input=clear_input,
+                confirm_codex_prompt=confirm_codex_prompt,
+            )
+            setattr(self, "_last_send_at", time.monotonic())
+            return success
 
     async def capture_pane_by_index(
         self, session: str, window: int, pane: int, lines: int = 100

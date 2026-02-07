@@ -171,6 +171,9 @@ MCP_MODEL_COST_DEFAULT_PER_1K={v(s.model_cost_default_per_1k)}
 # ヘルスチェックの実行間隔（秒）
 MCP_HEALTHCHECK_INTERVAL_SECONDS={v(s.healthcheck_interval_seconds)}
 
+# tmux 連続送信時の最小待機秒数（全CLI共通）
+MCP_SEND_COOLDOWN_SECONDS={v(s.send_cooldown_seconds)}
+
 # 無応答判定の閾値（秒）
 MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS={v(s.healthcheck_stall_timeout_seconds)}
 

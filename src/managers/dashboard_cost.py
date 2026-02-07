@@ -76,6 +76,14 @@ class DashboardCostMixin:
         )
         dashboard.cost.calls.append(record)
 
+        if (
+            source == "actual"
+            and actual_cost_usd is not None
+            and agent_id
+            and normalized_cli == "claude"
+        ):
+            dashboard.cost.actual_cost_by_agent[agent_id] = actual_cost_usd
+
         # 統計を再計算
         self._recalculate_cost_stats(dashboard)
         self._write_dashboard(dashboard)
@@ -120,15 +128,29 @@ class DashboardCostMixin:
         Args:
             dashboard: Dashboardオブジェクト
         """
+        latest_actual_by_agent: dict[str, float] = {}
+        for call in dashboard.cost.calls:
+            if (
+                call.ai_cli.lower() == "claude"
+                and call.cost_source == "actual"
+                and call.actual_cost_usd is not None
+                and call.agent_id
+            ):
+                latest_actual_by_agent[call.agent_id] = call.actual_cost_usd
+
+        # 実測値は通知回数ではなく agent ごとの最新スナップショットを採用する
+        dashboard.cost.actual_cost_by_agent = latest_actual_by_agent
+
         dashboard.cost.total_api_calls = len(dashboard.cost.calls)
         dashboard.cost.estimated_tokens = sum(c.tokens for c in dashboard.cost.calls)
         dashboard.cost.estimated_cost_usd = sum(c.estimated_cost_usd for c in dashboard.cost.calls)
-        dashboard.cost.actual_cost_usd = sum(c.actual_cost_usd or 0.0 for c in dashboard.cost.calls)
-        dashboard.cost.total_cost_usd = sum(
-            c.actual_cost_usd if c.cost_source == "actual" and c.actual_cost_usd is not None
-            else c.estimated_cost_usd
+        dashboard.cost.actual_cost_usd = sum(latest_actual_by_agent.values())
+        estimated_non_actual = sum(
+            c.estimated_cost_usd
             for c in dashboard.cost.calls
+            if c.cost_source != "actual"
         )
+        dashboard.cost.total_cost_usd = dashboard.cost.actual_cost_usd + estimated_non_actual
 
     def get_cost_estimate(self) -> dict:
         """コスト推定を取得する。
@@ -227,12 +249,12 @@ class DashboardCostMixin:
             推定コスト（USD）
         """
         dashboard = self._read_dashboard()
-        return sum(
-            c.actual_cost_usd if c.cost_source == "actual" and c.actual_cost_usd is not None
-            else c.estimated_cost_usd
+        estimated_non_actual = sum(
+            c.estimated_cost_usd
             for c in dashboard.cost.calls
-            if c.agent_id == agent_id
+            if c.agent_id == agent_id and c.cost_source != "actual"
         )
+        return estimated_non_actual + dashboard.cost.actual_cost_by_agent.get(agent_id, 0.0)
 
     def get_cost_by_task(self, task_id: str) -> float:
         """タスク別のコストを取得する。
@@ -259,7 +281,7 @@ class DashboardCostMixin:
         """
         dashboard = self._read_dashboard()
 
-        by_agent: dict[str, float] = {}
+        by_agent_estimated_non_actual: dict[str, float] = {}
         by_task: dict[str, float] = {}
         by_cli: dict[str, dict] = {}
         by_model: dict[str, dict] = {}
@@ -271,9 +293,12 @@ class DashboardCostMixin:
                 else call.estimated_cost_usd
             )
 
-            # エージェント別
+            # エージェント別（estimated/non-actual のみ加算。actual は最新値を後で上書き）
             if call.agent_id:
-                by_agent[call.agent_id] = by_agent.get(call.agent_id, 0.0) + call_cost
+                if call.cost_source != "actual":
+                    by_agent_estimated_non_actual[call.agent_id] = (
+                        by_agent_estimated_non_actual.get(call.agent_id, 0.0) + call_cost
+                    )
 
             # タスク別
             if call.task_id:
@@ -293,6 +318,16 @@ class DashboardCostMixin:
             by_model[model_key]["calls"] += 1
             by_model[model_key]["tokens"] += call.tokens
             by_model[model_key]["cost"] += call_cost
+
+        by_agent: dict[str, float] = {}
+        agent_ids = set(by_agent_estimated_non_actual.keys()) | set(
+            dashboard.cost.actual_cost_by_agent.keys()
+        )
+        for agent_id in agent_ids:
+            by_agent[agent_id] = (
+                by_agent_estimated_non_actual.get(agent_id, 0.0)
+                + dashboard.cost.actual_cost_by_agent.get(agent_id, 0.0)
+            )
 
         return {
             "by_agent": by_agent,

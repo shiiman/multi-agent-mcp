@@ -256,6 +256,15 @@ class Settings(BaseSettings):
     healthcheck_idle_stop_consecutive: int = 3
     """実作業なし状態を連続検出した際に daemon を停止する閾値。"""
 
+    codex_enter_retry_max: int = 3
+    """Codex ペイン送信時に Enter 再送する最大回数。"""
+
+    codex_enter_retry_interval_ms: int = 250
+    """Codex ペイン送信時の Enter 再送間隔（ミリ秒）。"""
+
+    send_cooldown_seconds: float = 2.0
+    """tmux への連続送信時に挟む最小待機秒数（全CLI共通）。"""
+
     # ターミナル設定
     default_terminal: TerminalApp = Field(
         default=TerminalApp.AUTO, description="デフォルトのターミナルアプリ"

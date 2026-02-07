@@ -310,15 +310,25 @@ class DashboardMarkdownMixin:
             "error": "🔴",
         }
 
+        agent_labels = self._build_agent_label_map(dashboard)
         lines.extend(["## メッセージ履歴"])
         for msg in dashboard.messages:
             time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
             emoji = type_emoji.get(msg.message_type, "📨")
             content = msg.content.strip() if msg.content else "(本文なし)"
+            sender_id = msg.sender_id or "unknown"
+            receiver_id = msg.receiver_id
+            sender = agent_labels.get(sender_id, sender_id)
+            receiver = (
+                agent_labels.get(receiver_id, receiver_id)
+                if receiver_id
+                else "broadcast"
+            )
+            route = f"{sender} → {receiver}"
             lines.extend([
                 "",
                 "<details open>",
-                f"<summary>{time_str} {emoji} メッセージ履歴</summary>",
+                f"<summary>{time_str} {emoji} {route}</summary>",
                 "",
                 "```text",
                 content,

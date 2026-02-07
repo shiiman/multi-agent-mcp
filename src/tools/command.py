@@ -79,8 +79,17 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
             }
 
-        success = await tmux.send_keys_to_pane(
-            agent.session_name, agent.window_index, agent.pane_index, command
+        agent_cli_name = (
+            agent.ai_cli.value
+            if hasattr(agent.ai_cli, "value")
+            else str(agent.ai_cli or app_ctx.ai_cli.get_default_cli())
+        ).lower()
+        success = await tmux.send_with_rate_limit_to_pane(
+            agent.session_name,
+            agent.window_index,
+            agent.pane_index,
+            command,
+            confirm_codex_prompt=agent_cli_name == "codex",
         )
 
         if success:
@@ -449,8 +458,12 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
             }
 
-        success = await tmux.send_keys_to_pane(
-            agent.session_name, agent.window_index, agent.pane_index, read_command
+        success = await tmux.send_with_rate_limit_to_pane(
+            agent.session_name,
+            agent.window_index,
+            agent.pane_index,
+            read_command,
+            confirm_codex_prompt=str(agent_cli).lower() == "codex",
         )
         if success:
             agent.status = AgentStatus.BUSY
@@ -584,8 +597,17 @@ def register_tools(mcp: FastMCP) -> None:
             if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
                 continue
 
-            success = await tmux.send_keys_to_pane(
-                agent.session_name, agent.window_index, agent.pane_index, command
+            agent_cli_name = (
+                agent.ai_cli.value
+                if hasattr(agent.ai_cli, "value")
+                else str(agent.ai_cli or app_ctx.ai_cli.get_default_cli())
+            ).lower()
+            success = await tmux.send_with_rate_limit_to_pane(
+                agent.session_name,
+                agent.window_index,
+                agent.pane_index,
+                command,
+                confirm_codex_prompt=agent_cli_name == "codex",
             )
             results[aid] = success
 

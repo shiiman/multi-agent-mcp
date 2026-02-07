@@ -364,12 +364,18 @@ def register_tools(mcp: FastMCP) -> None:
                         "echo '[IPC] 新しいメッセージ:"
                         f" task_progress from {caller_agent_id}'"
                     )
-                    await tmux.send_keys_to_pane(
+                    admin_cli = (
+                        admin_agent.ai_cli.value
+                        if hasattr(admin_agent.ai_cli, "value")
+                        else str(admin_agent.ai_cli or "")
+                    ).lower()
+                    await tmux.send_with_rate_limit_to_pane(
                         admin_agent.session_name,
                         admin_agent.window_index or 0,
                         admin_agent.pane_index,
                         notification_text,
                         clear_input=False,
+                        confirm_codex_prompt=admin_cli == "codex",
                     )
                     logger.info(f"Admin への tmux 通知を送信: {admin_id_for_notify}")
             except Exception as e:
@@ -490,12 +496,18 @@ def register_tools(mcp: FastMCP) -> None:
                     "echo '[IPC] 新しいメッセージ:"
                     f" {msg_type.value} from {caller_agent_id}'"
                 )
-                await tmux.send_keys_to_pane(
+                admin_cli = (
+                    admin_agent.ai_cli.value
+                    if hasattr(admin_agent.ai_cli, "value")
+                    else str(admin_agent.ai_cli or "")
+                ).lower()
+                await tmux.send_with_rate_limit_to_pane(
                     admin_agent.session_name,
                     admin_agent.window_index or 0,
                     admin_agent.pane_index,
                     notification_text,
                     clear_input=False,
+                    confirm_codex_prompt=admin_cli == "codex",
                 )
                 notification_sent = True
                 logger.info(f"Admin への tmux 通知を送信: {admin_id}")
