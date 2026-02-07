@@ -18,6 +18,7 @@ from src.tools.helpers import (
     save_agent_to_file,
     sync_agents_from_file,
 )
+from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,9 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        # ファイルから最新のエージェント情報を同期
+        sync_agents_from_file(app_ctx)
+
         # progress の検証（checklist がある場合は自動計算されるためスキップ可）
         if progress is not None and not (0 <= progress <= 100):
             return {
@@ -296,6 +300,17 @@ def register_tools(mcp: FastMCP) -> None:
         normalized_task_id = _normalize_task_id(task_id)
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
         actual_progress = progress or 0
+        worker_cost_snapshot = None
+        worker_agent = app_ctx.agents.get(caller_agent_id) if caller_agent_id else None
+        if worker_agent:
+            try:
+                worker_cost_snapshot = await capture_claude_actual_cost_for_agent(
+                    app_ctx=app_ctx,
+                    agent=worker_agent,
+                    task_id=task_id,
+                )
+            except Exception as e:
+                logger.debug(f"進捗報告時のコスト取得をスキップ: {e}")
 
         # Admin にも進捗を通知（IPC メッセージ）
         admin_notified = False
@@ -317,6 +332,7 @@ def register_tools(mcp: FastMCP) -> None:
                         "checklist": checklist,
                         "message": message,
                         "reporter": caller_agent_id,
+                        "cost_snapshot": worker_cost_snapshot,
                     },
                 )
                 admin_notified = True
@@ -364,6 +380,7 @@ def register_tools(mcp: FastMCP) -> None:
             "task_id": task_id,
             "progress": actual_progress,
             "admin_notified": admin_notified,
+            "cost_snapshot": worker_cost_snapshot,
             "message": f"進捗 {actual_progress}% を報告しました",
         }
 
@@ -398,6 +415,9 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        # ファイルから最新のエージェント情報を同期
+        sync_agents_from_file(app_ctx)
+
         # Admin を検索
         admin_ids = find_agents_by_role(app_ctx, "admin")
         if not admin_ids:
@@ -418,6 +438,17 @@ def register_tools(mcp: FastMCP) -> None:
 
         normalized_task_id = _normalize_task_id(task_id)
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
+        worker_cost_snapshot = None
+        worker_agent = app_ctx.agents.get(caller_agent_id) if caller_agent_id else None
+        if worker_agent:
+            try:
+                worker_cost_snapshot = await capture_claude_actual_cost_for_agent(
+                    app_ctx=app_ctx,
+                    agent=worker_agent,
+                    task_id=task_id,
+                )
+            except Exception as e:
+                logger.debug(f"完了報告時のコスト取得をスキップ: {e}")
 
         # IPC マネージャーを取得（自動初期化）
         ipc = ensure_ipc_manager(app_ctx)
@@ -436,12 +467,14 @@ def register_tools(mcp: FastMCP) -> None:
                 "normalized_task_id": normalized_task_id,
                 "status": status,
                 "reporter": caller_agent_id,
+                "cost_snapshot": worker_cost_snapshot,
             },
         )
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
         # BUSY/IDLE に関係なく常に通知を送信
         notification_sent = False
+        agents = app_ctx.agents
         try:
             tmux = app_ctx.tmux
 
@@ -464,6 +497,7 @@ def register_tools(mcp: FastMCP) -> None:
                     notification_text,
                     clear_input=False,
                 )
+                notification_sent = True
                 logger.info(f"Admin への tmux 通知を送信: {admin_id}")
         except Exception as e:
             logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
@@ -504,6 +538,7 @@ def register_tools(mcp: FastMCP) -> None:
             "reported_status": status,
             "memory_saved": memory_saved,
             "notification_sent": notification_sent,
+            "cost_snapshot": worker_cost_snapshot,
         }
 
     @mcp.tool()
@@ -601,6 +636,19 @@ def register_tools(mcp: FastMCP) -> None:
             sync_agents_from_file(app_ctx)
             for agent in app_ctx.agents.values():
                 dashboard.update_agent_summary(agent)
+            admin_agents = [
+                a for a in app_ctx.agents.values()
+                if str(a.role) in (AgentRole.ADMIN.value, "admin")
+            ]
+            for admin_agent in admin_agents:
+                try:
+                    await capture_claude_actual_cost_for_agent(
+                        app_ctx=app_ctx,
+                        agent=admin_agent,
+                        task_id=admin_agent.current_task,
+                    )
+                except Exception as e:
+                    logger.debug(f"Dashboard 取得時の Admin コスト更新をスキップ: {e}")
             if app_ctx.session_id and app_ctx.project_root:
                 try:
                     dashboard.save_markdown_dashboard(
@@ -647,6 +695,19 @@ def register_tools(mcp: FastMCP) -> None:
             sync_agents_from_file(app_ctx)
             for agent in app_ctx.agents.values():
                 dashboard.update_agent_summary(agent)
+            admin_agents = [
+                a for a in app_ctx.agents.values()
+                if str(a.role) in (AgentRole.ADMIN.value, "admin")
+            ]
+            for admin_agent in admin_agents:
+                try:
+                    await capture_claude_actual_cost_for_agent(
+                        app_ctx=app_ctx,
+                        agent=admin_agent,
+                        task_id=admin_agent.current_task,
+                    )
+                except Exception as e:
+                    logger.debug(f"Dashboard summary 取得時の Admin コスト更新をスキップ: {e}")
             if app_ctx.session_id and app_ctx.project_root:
                 try:
                     dashboard.save_markdown_dashboard(

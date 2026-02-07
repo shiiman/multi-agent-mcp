@@ -2,7 +2,6 @@
 
 import logging
 import re
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -26,27 +25,31 @@ from src.tools.agent_helpers import (
     _send_task_to_worker,
     resolve_worker_number_from_slot,
 )
+from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 from src.tools.model_profile import get_current_profile_settings
 from src.tools.task_templates import generate_admin_task
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_claude_statusline_cost(output: str) -> tuple[float, str] | None:
-    """Claude の statusLine からコスト値を抽出する。"""
-    patterns = (
-        r"(?:cost|Cost|COST)[^$\n]*\$\s*([0-9]+(?:\.[0-9]+)?)",
-        r"\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:cost|Cost|COST)",
-    )
-    for line in reversed(output.splitlines()):
-        for pattern in patterns:
-            match = re.search(pattern, line)
-            if match:
-                try:
-                    return float(match.group(1)), line.strip()
-                except ValueError:
-                    continue
-    return None
+def _sanitize_branch_part(value: str) -> str:
+    """ブランチ名用に安全な文字へ正規化する。"""
+    cleaned = re.sub(r"[^0-9A-Za-z._-]+", "-", value or "").strip("-")
+    return cleaned or "main"
+
+
+def _short_task_id(task_id: str) -> str:
+    """task_id を 8 桁に短縮する。"""
+    alnum = re.sub(r"[^0-9A-Za-z]", "", task_id or "")
+    if not alnum:
+        return "task0000"
+    return alnum[:8].lower()
+
+
+def _build_worker_task_branch(base_branch: str, worker_no: int, task_id: str) -> str:
+    """task 単位 worktree 用のブランチ名を生成する。"""
+    base = _sanitize_branch_part(base_branch)
+    return f"feature/{base}-worker-{worker_no}-{_short_task_id(task_id)}"
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -161,35 +164,12 @@ def register_tools(mcp: FastMCP) -> None:
 
         # Claude の statusLine からのみ実測コストを取得
         try:
-            agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
-            cli_value = agent_cli.value if hasattr(agent_cli, "value") else str(agent_cli)
-            if cli_value == "claude":
-                parsed = _extract_claude_statusline_cost(output)
-                if parsed:
-                    actual_cost_usd, status_line = parsed
-                    profile_settings = get_current_profile_settings(app_ctx)
-                    model = (
-                        profile_settings.get("admin_model")
-                        if str(agent.role) == AgentRole.ADMIN.value
-                        else profile_settings.get("worker_model")
-                    )
-                    dashboard = ensure_dashboard_manager(app_ctx)
-                    latest_calls = dashboard.get_dashboard().cost.calls[-20:]
-                    already_recorded = any(
-                        c.agent_id == agent_id and c.status_line == status_line
-                        for c in latest_calls
-                    )
-                    if not already_recorded:
-                        dashboard.record_api_call(
-                            ai_cli="claude",
-                            model=model,
-                            estimated_tokens=app_ctx.settings.estimated_tokens_per_call,
-                            agent_id=agent_id,
-                            task_id=agent.current_task,
-                            actual_cost_usd=actual_cost_usd,
-                            status_line=status_line,
-                            cost_source="actual",
-                        )
+            await capture_claude_actual_cost_for_agent(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_id=agent.current_task,
+                capture_lines=max(lines, 80),
+            )
         except Exception:
             # 実測コスト取得は補助機能のため失敗しても処理継続
             pass
@@ -327,18 +307,14 @@ def register_tools(mcp: FastMCP) -> None:
             dispatch_branch = branch_name or ""
 
             if app_ctx.settings.enable_worktree:
-                safe_session_id = re.sub(r"[^0-9A-Za-z._-]+", "-", session_id).strip("-")
-                if not safe_session_id:
-                    safe_session_id = "task"
-                generated_branch = (
-                    branch_name
-                    or f"feature/{safe_session_id}-worker-{worker_no}-{uuid.uuid4().hex[:6]}"
-                )
-
                 worktree_manager = get_worktree_manager(app_ctx, str(project_root))
                 base_branch = await worktree_manager.get_current_branch(str(project_root))
                 if not base_branch:
                     base_branch = "main"
+                generated_branch = (
+                    branch_name
+                    or _build_worker_task_branch(base_branch, worker_no, session_id)
+                )
 
                 wt_path, wt_error = await _create_worktree_for_worker(
                     app_ctx=app_ctx,

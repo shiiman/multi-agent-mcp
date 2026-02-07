@@ -1,5 +1,6 @@
 """エージェント管理ツール。"""
 
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -518,6 +519,8 @@ async def _send_task_to_worker(
                         task_file=str(task_file),
                         command_sent=change_dir,
                     )
+                # 次の followup 指示が同一入力行に連結されないように待機する。
+                await asyncio.sleep(0.25)
 
             instruction = f"次のタスク指示ファイルを実行してください: {task_file}"
             command_sent = instruction

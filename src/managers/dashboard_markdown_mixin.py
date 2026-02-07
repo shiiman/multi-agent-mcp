@@ -196,26 +196,23 @@ class DashboardMarkdownMixin:
         }
 
         show_worktree = self._is_worktree_enabled(dashboard.workspace_path)
+        lines = [
+            "",
+            "---",
+            "",
+            "## タスク状態",
+            "",
+        ]
         if show_worktree:
-            lines = [
-                "",
-                "---",
-                "",
-                "## タスク状態",
-                "",
+            lines.extend([
                 "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |",
                 "|:---|:---|:---|:---|:---|:---|",
-            ]
+            ])
         else:
-            lines = [
-                "",
-                "---",
-                "",
-                "## タスク状態",
-                "",
+            lines.extend([
                 "| ID | タイトル | 状態 | 担当 | 進捗 |",
                 "|:---|:---|:---|:---|:---|",
-            ]
+            ])
         agent_labels = self._build_agent_label_map(dashboard)
 
         for task in dashboard.tasks:
@@ -229,9 +226,14 @@ class DashboardMarkdownMixin:
                 worktree = self._format_worktree_path(
                     task.worktree_path, dashboard.workspace_path
                 )
+                worktree_cell = (
+                    "<details><summary>表示</summary>"
+                    f"<code>{worktree}</code>"
+                    "</details>"
+                )
                 lines.append(
                     f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
-                    f"`{assigned}` | {task.progress}% | `{worktree}` |"
+                    f"`{assigned}` | {task.progress}% | {worktree_cell} |"
                 )
             else:
                 lines.append(

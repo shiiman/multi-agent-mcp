@@ -359,6 +359,7 @@ class HealthcheckManager:
     async def monitor_and_recover_workers(self, app_ctx: Any | None = None) -> dict:
         """Worker の健全性を監視し、必要なら段階復旧する。"""
         from src.models.agent import AgentRole, AgentStatus
+        from src.models.dashboard import TaskStatus
 
         now = datetime.now()
         self.last_monitor_at = now
@@ -368,12 +369,67 @@ class HealthcheckManager:
         escalated: list[dict[str, str]] = []
         failed_tasks: list[dict[str, str]] = []
         skipped: list[str] = []
+        dashboard = None
+
+        if app_ctx is not None:
+            try:
+                from src.tools.helpers_managers import ensure_dashboard_manager
+
+                dashboard = ensure_dashboard_manager(app_ctx)
+            except Exception:
+                dashboard = None
 
         for agent_id, agent in list(self.agents.items()):
             if agent.role != AgentRole.WORKER.value:
                 continue
 
-            current_key = self._recovery_key(agent_id, agent.current_task)
+            active_task = None
+            active_task_id = agent.current_task
+            if dashboard is not None:
+                try:
+                    assigned_tasks = dashboard.list_tasks(agent_id=agent_id)
+                    active_tasks = [
+                        task
+                        for task in assigned_tasks
+                        if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+                    ]
+                    if active_tasks:
+                        in_progress = [
+                            task for task in active_tasks if task.status == TaskStatus.IN_PROGRESS
+                        ]
+                        active_task = (in_progress or active_tasks)[0]
+                        active_task_id = active_task.id
+                        if agent.current_task != active_task_id:
+                            agent.current_task = active_task_id
+                            if agent.status != AgentStatus.BUSY.value:
+                                agent.status = AgentStatus.BUSY
+                            try:
+                                from src.tools.helpers import save_agent_to_file
+
+                                save_agent_to_file(app_ctx, agent)
+                            except Exception:
+                                pass
+                    elif agent.current_task:
+                        current_dashboard_task = dashboard.get_task(agent.current_task)
+                        if current_dashboard_task and current_dashboard_task.status in (
+                            TaskStatus.COMPLETED,
+                            TaskStatus.FAILED,
+                            TaskStatus.CANCELLED,
+                        ):
+                            agent.current_task = None
+                            if agent.status == AgentStatus.BUSY.value:
+                                agent.status = AgentStatus.IDLE
+                            try:
+                                from src.tools.helpers import save_agent_to_file
+
+                                save_agent_to_file(app_ctx, agent)
+                            except Exception:
+                                pass
+                            active_task_id = None
+                except Exception:
+                    active_task = None
+
+            current_key = self._recovery_key(agent_id, active_task_id)
             stale_keys = [
                 key
                 for key in self._recovery_failures
@@ -382,9 +438,13 @@ class HealthcheckManager:
             for stale_key in stale_keys:
                 self._recovery_failures.pop(stale_key, None)
 
-            if not agent.current_task and agent.status == AgentStatus.IDLE.value:
+            if not active_task_id and agent.status == AgentStatus.IDLE.value:
                 skipped.append(agent_id)
                 continue
+
+            # _is_worker_stalled の既存判定を使うため、補正済み task_id を反映する
+            if active_task_id is not None:
+                agent.current_task = active_task_id
 
             health = await self.check_agent(agent_id)
             recovery_reason: str | None = None
@@ -392,6 +452,16 @@ class HealthcheckManager:
 
             if not health.is_healthy:
                 recovery_reason = "tmux_session_dead"
+            elif (
+                active_task is not None
+                and active_task.status == TaskStatus.PENDING
+                and active_task.started_at is None
+                and agent.last_activity is not None
+                and (now - agent.last_activity)
+                >= timedelta(seconds=max(self.healthcheck_interval_seconds * 2, 30))
+            ):
+                recovery_reason = "task_not_started"
+                force_recovery = True
             elif await self._is_worker_stalled(agent_id, agent, now):
                 recovery_reason = "task_stalled"
                 force_recovery = True
