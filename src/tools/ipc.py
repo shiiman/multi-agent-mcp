@@ -246,6 +246,11 @@ def _validate_admin_completion_gate(
     if sender.role != AgentRole.ADMIN.value or receiver.role != AgentRole.OWNER.value:
         return True, {}
 
+    # 品質ゲート緩和モード: MCP_QUALITY_GATE_STRICT=false で品質チェックをスキップ
+    if not getattr(app_ctx.settings, "quality_gate_strict", True):
+        logger.info("品質ゲート緩和モード: 品質チェックをスキップします")
+        return True, {}
+
     dashboard = ensure_dashboard_manager(app_ctx)
     tasks = dashboard.list_tasks()
     summary = dashboard.get_summary()

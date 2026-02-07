@@ -88,21 +88,25 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
             await worktree_manager.remove_worktree(old_worktree_path, force=True)
             logger.info(f"古い worktree を削除: {old_worktree_path}")
 
-            result = await worktree_manager.create_worktree(
-                worktree_path=old_worktree_path,
+            success, _msg, actual_path = await worktree_manager.create_worktree(
+                path=old_worktree_path,
                 branch=old_branch,
                 base_branch="main",
             )
-            if not result:
+            if success and actual_path:
+                new_worktree_path = actual_path
+            if not success:
                 import uuid
 
                 new_worktree_path = f"{old_worktree_path}-{uuid.uuid4().hex[:8]}"
-                retry_result = await worktree_manager.create_worktree(
-                    worktree_path=new_worktree_path,
+                retry_ok, _retry_msg, retry_path = await worktree_manager.create_worktree(
+                    path=new_worktree_path,
                     branch=old_branch,
                     base_branch="main",
                 )
-                if not retry_result:
+                if retry_ok and retry_path:
+                    new_worktree_path = retry_path
+                if not retry_ok:
                     # worktree 作成が完全に失敗: メインリポジトリをフォールバック
                     new_worktree_path = str(app_ctx.project_root)
                     logger.warning(

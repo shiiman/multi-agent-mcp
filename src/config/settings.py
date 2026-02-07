@@ -451,6 +451,12 @@ class Settings(BaseSettings):
     )
     """同一問題の繰り返し上限（デフォルト: 3）"""
 
+    quality_gate_strict: bool = Field(
+        default=True,
+        description="品質ゲートを厳格に適用するか（false で緩和）",
+    )
+    """品質ゲートの厳格モード（デフォルト: true）"""
+
     # メモリ設定
     memory_max_entries: int = Field(
         default=1000,

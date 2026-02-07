@@ -553,7 +553,15 @@ class HealthcheckManager:
                 return "in_progress_no_ipc", True
 
         if await self._is_worker_stalled(agent_id, agent, now):
-            return "task_stalled", True
+            pane_command = (health.pane_current_command or "").strip().lower()
+            if pane_command in {"codex", "claude", "gemini"}:
+                logger.info(
+                    "task_stalled をスキップ: agent=%s pane=%s（AI CLI 実行中）",
+                    agent_id,
+                    pane_command,
+                )
+            else:
+                return "task_stalled", True
 
         return None, False
 
