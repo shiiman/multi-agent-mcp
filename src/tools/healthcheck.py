@@ -97,15 +97,24 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                 import uuid
 
                 new_worktree_path = f"{old_worktree_path}-{uuid.uuid4().hex[:8]}"
-                await worktree_manager.create_worktree(
+                retry_result = await worktree_manager.create_worktree(
                     worktree_path=new_worktree_path,
                     branch=old_branch,
                     base_branch="main",
                 )
-            logger.info(f"新しい worktree を作成: {new_worktree_path}")
+                if not retry_result:
+                    # worktree 作成が完全に失敗: メインリポジトリをフォールバック
+                    new_worktree_path = str(app_ctx.project_root)
+                    logger.warning(
+                        "worktree 作成が完全に失敗。project_root をフォールバックとして使用: %s",
+                        new_worktree_path,
+                    )
+            if new_worktree_path != str(app_ctx.project_root):
+                logger.info(f"新しい worktree を作成: {new_worktree_path}")
         except Exception as e:
             logger.warning(f"worktree 操作に失敗: {e}")
-            new_worktree_path = old_worktree_path
+            # 例外時もメインリポジトリにフォールバック
+            new_worktree_path = str(app_ctx.project_root) if app_ctx.project_root else old_worktree_path
 
     from datetime import datetime
 
@@ -169,6 +178,44 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                 logger.info(f"タスク {task_id} を {new_agent_id} に再割り当て")
             except Exception as e:
                 logger.warning(f"タスク再割り当てに失敗: {e}")
+
+    # Admin に復旧完了通知を送信（タスク再送信が必要であることを伝える）
+    if reassigned_tasks:
+        try:
+            from src.tools.helpers import ensure_ipc_manager, find_agents_by_role
+
+            ipc = ensure_ipc_manager(app_ctx)
+            from src.models.message import MessagePriority, MessageType
+
+            admin_ids = find_agents_by_role(app_ctx, "admin")
+            task_ids = [t.id for t in reassigned_tasks if t.id]
+            notification_content = (
+                f"Worker {agent_id} を復旧しました（新ID: {new_agent_id}）。\n"
+                f"以下のタスクの再送信が必要です: {', '.join(task_ids)}\n"
+                f"worktree_path: {new_worktree_path}"
+            )
+            for admin_id in admin_ids:
+                ipc.send_message(
+                    sender_id="system",
+                    receiver_id=admin_id,
+                    message_type=MessageType.REQUEST,
+                    content=notification_content,
+                    subject=f"Worker復旧完了: {new_agent_id}",
+                    priority=MessagePriority.HIGH,
+                    metadata={
+                        "recovery_type": "full_recovery",
+                        "old_agent_id": agent_id,
+                        "new_agent_id": new_agent_id,
+                        "reassigned_task_ids": task_ids,
+                        "worktree_path": new_worktree_path,
+                    },
+                )
+            logger.info(
+                "full_recovery 完了通知を Admin に送信: tasks=%s",
+                task_ids,
+            )
+        except Exception as e:
+            logger.warning("full_recovery 完了通知の送信に失敗: %s", e)
 
     return {
         "success": True,

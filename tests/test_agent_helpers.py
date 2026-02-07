@@ -214,10 +214,24 @@ class TestGetNextWorkerSlot:
 class TestPostCreateAgent:
     """_post_create_agent のテスト。"""
 
-    def test_skips_file_persist_without_session_id(self, app_ctx):
-        """session_id 未設定時は save_agent_to_file を呼ばない。"""
+    def test_owner_gets_provisional_session_id(self, app_ctx):
+        """Owner 作成時に session_id 未設定でも仮 session_id が設定される。"""
         app_ctx.session_id = None
         agent = _make_owner_agent()
+
+        with patch("src.tools.agent_helpers.save_agent_to_file", return_value=True) as mock_save:
+            result = _post_create_agent(app_ctx, agent, {agent.id: agent})
+
+        # Owner は仮 session_id が設定されるため保存される
+        assert result["file_persisted"] is True
+        mock_save.assert_called_once()
+        assert app_ctx.session_id is not None
+        assert app_ctx.session_id.startswith("provisional-")
+
+    def test_skips_file_persist_without_session_id_worker(self, app_ctx):
+        """Worker の session_id 未設定時は save_agent_to_file を呼ばない。"""
+        app_ctx.session_id = None
+        agent = _make_worker_agent()
 
         with patch("src.tools.agent_helpers.save_agent_to_file", return_value=True) as mock_save:
             result = _post_create_agent(app_ctx, agent, {agent.id: agent})
@@ -246,10 +260,10 @@ class TestPostCreateAgent:
 
         assert result["ipc_registered"] is True
 
-    def test_skips_ipc_without_session_id(self, app_ctx):
-        """session_id 未設定時は IPC 登録をスキップする。"""
+    def test_skips_ipc_without_session_id_worker(self, app_ctx):
+        """Worker の session_id 未設定時は IPC 登録をスキップする。"""
         app_ctx.session_id = None
-        agent = _make_owner_agent()
+        agent = _make_worker_agent()
 
         with patch("src.tools.agent_helpers.save_agent_to_file", return_value=True):
             result = _post_create_agent(app_ctx, agent, {agent.id: agent})

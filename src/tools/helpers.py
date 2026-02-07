@@ -4,8 +4,10 @@
 サブモジュールから全シンボルを re-export して後方互換性を維持する。
 """
 
+import asyncio
 import logging
 import os
+import subprocess
 from typing import Any
 
 from src.config.settings import load_settings_for_project, resolve_project_env_file
@@ -304,6 +306,43 @@ def require_permission(
 # ========== tmux 通知ヘルパー ==========
 
 
+async def _send_macos_notification(msg_type_value: str, sender_id: str) -> bool:
+    """macOS ネイティブ通知を送信する。
+
+    Args:
+        msg_type_value: メッセージタイプの値文字列
+        sender_id: 送信元エージェントID
+
+    Returns:
+        送信成功時は True、失敗時は False
+    """
+    from src.managers.tmux_shared import escape_applescript
+
+    try:
+        notification_title = escape_applescript("Multi-Agent MCP")
+        notification_body = escape_applescript(
+            f"[IPC] {msg_type_value} from {sender_id}"
+        )
+        subprocess.run(
+            [
+                "osascript",
+                "-e",
+                f'display notification "{notification_body}" with title "{notification_title}"',
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+        return True
+    except Exception as e:
+        logger.warning("macOS 通知の送信に失敗: %s", e)
+        return False
+
+
+# tmux 通知リトライ設定
+_TMUX_NOTIFY_MAX_RETRIES = 3
+_TMUX_NOTIFY_RETRY_INTERVAL = 0.5
+
+
 async def notify_agent_via_tmux(
     app_ctx: "AppContext",
     agent: Any,
@@ -311,6 +350,8 @@ async def notify_agent_via_tmux(
     sender_id: str,
 ) -> bool:
     """エージェントに tmux 経由で IPC 通知を送信する。
+
+    最大3回リトライし、全て失敗した場合は macOS 通知にフォールバックする。
 
     Args:
         app_ctx: アプリケーションコンテキスト
@@ -327,7 +368,8 @@ async def notify_agent_via_tmux(
         or agent.pane_index is None
     ):
         logger.warning(
-            f"エージェントの tmux 情報が見つかりません: {getattr(agent, 'id', 'unknown')}"
+            "エージェントの tmux 情報が見つかりません: %s",
+            getattr(agent, "id", "unknown"),
         )
         return False
 
@@ -339,28 +381,46 @@ async def notify_agent_via_tmux(
         if hasattr(resolved_cli, "value")
         else str(resolved_cli or "")
     ).lower()
-    try:
-        success = await app_ctx.tmux.send_with_rate_limit_to_pane(
-            agent.session_name,
-            agent.window_index or 0,
-            agent.pane_index,
-            notification_text,
-            clear_input=False,
-            confirm_codex_prompt=agent_cli == "codex",
-        )
-        if not success:
-            logger.warning(
-                "tmux 通知の送信に失敗（未確定の可能性）: %s",
-                getattr(agent, "id", "unknown"),
+
+    # リトライ付きで tmux 通知を送信
+    for attempt in range(_TMUX_NOTIFY_MAX_RETRIES):
+        try:
+            success = await app_ctx.tmux.send_with_rate_limit_to_pane(
+                agent.session_name,
+                agent.window_index or 0,
+                agent.pane_index,
+                notification_text,
+                clear_input=False,
+                confirm_codex_prompt=agent_cli == "codex",
             )
-            return False
+            if success:
+                logger.info(
+                    "tmux 通知を送信: %s (attempt=%d)",
+                    getattr(agent, "id", "unknown"),
+                    attempt + 1,
+                )
+                return True
+        except Exception as e:
+            logger.warning(
+                "tmux 通知の送信に失敗 (attempt=%d): %s", attempt + 1, e
+            )
+
+        if attempt < _TMUX_NOTIFY_MAX_RETRIES - 1:
+            await asyncio.sleep(_TMUX_NOTIFY_RETRY_INTERVAL)
+
+    # 全リトライ失敗: macOS 通知にフォールバック
+    logger.warning(
+        "tmux 通知が %d 回失敗。macOS 通知にフォールバック: %s",
+        _TMUX_NOTIFY_MAX_RETRIES,
+        getattr(agent, "id", "unknown"),
+    )
+    fallback_ok = await _send_macos_notification(msg_type_value, sender_id)
+    if fallback_ok:
         logger.info(
-            f"tmux 通知を送信: {getattr(agent, 'id', 'unknown')}"
+            "macOS フォールバック通知を送信: %s",
+            getattr(agent, "id", "unknown"),
         )
-        return True
-    except Exception as e:
-        logger.warning(f"tmux 通知の送信に失敗: {e}")
-        return False
+    return False
 
 
 # ========== サブモジュールからの re-export ==========

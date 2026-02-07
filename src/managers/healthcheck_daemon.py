@@ -7,6 +7,12 @@ from src.models.agent import AgentRole, AgentStatus
 
 logger = logging.getLogger(__name__)
 
+# 連続エラーの閾値
+_CONSECUTIVE_ERROR_REINIT_THRESHOLD = 3
+_CONSECUTIVE_ERROR_STOP_THRESHOLD = 5
+# 即座に停止すべき致命的例外
+_FATAL_EXCEPTIONS = (ImportError, AttributeError, TypeError)
+
 
 def is_healthcheck_daemon_running(app_ctx) -> bool:
     """health check daemon が稼働中かどうか。"""
@@ -24,7 +30,10 @@ def _list_workers(app_ctx) -> list:
 
 
 def _should_auto_stop(app_ctx) -> bool:
-    """daemon 自動停止条件を満たすか判定する。"""
+    """daemon 自動停止条件を満たすか判定する。
+
+    PENDINGタスクがある場合はauto-stopしない（まだ割り当てが必要なため）。
+    """
     workers = _list_workers(app_ctx)
     if not workers:
         return True
@@ -36,12 +45,14 @@ def _should_auto_stop(app_ctx) -> bool:
     )
 
     in_progress_tasks = 0
+    pending_tasks = 0
     try:
         from src.tools.helpers_managers import ensure_dashboard_manager
 
         dashboard = ensure_dashboard_manager(app_ctx)
         summary = dashboard.get_summary()
         in_progress_tasks = int(summary.get("in_progress_tasks", 0))
+        pending_tasks = int(summary.get("pending_tasks", 0))
     except Exception:
         in_progress_tasks = sum(
             1
@@ -51,11 +62,16 @@ def _should_auto_stop(app_ctx) -> bool:
             or worker.status == AgentStatus.BUSY.value
         )
 
+    # PENDINGタスクがある場合はauto-stopしない
+    if pending_tasks > 0:
+        return False
+
     return in_progress_tasks == 0 and all_idle
 
 
 async def _run_healthcheck_loop(app_ctx) -> None:
     """health check の常駐ループ本体。"""
+    consecutive_errors = 0
     try:
         while True:
             stop_event = app_ctx.healthcheck_daemon_stop_event
@@ -78,8 +94,34 @@ async def _run_healthcheck_loop(app_ctx) -> None:
                         len(escalated),
                         len(failed),
                     )
+                # 正常サイクル: エラーカウンターリセット
+                consecutive_errors = 0
+            except _FATAL_EXCEPTIONS as e:
+                # 致命的例外: 即座に daemon 停止
+                logger.error(
+                    "healthcheck daemon 致命的エラーにより停止: %s", e
+                )
+                break
             except Exception as e:
-                logger.warning("healthcheck daemon loop error: %s", e)
+                consecutive_errors += 1
+                logger.warning(
+                    "healthcheck daemon loop error (consecutive=%d): %s",
+                    consecutive_errors,
+                    e,
+                )
+                if consecutive_errors >= _CONSECUTIVE_ERROR_STOP_THRESHOLD:
+                    logger.error(
+                        "healthcheck daemon を停止: 連続 %d 回エラー",
+                        consecutive_errors,
+                    )
+                    break
+                if consecutive_errors >= _CONSECUTIVE_ERROR_REINIT_THRESHOLD:
+                    logger.warning(
+                        "healthcheck daemon を再初期化: 連続 %d 回エラー",
+                        consecutive_errors,
+                    )
+                    # healthcheck_manager をリセットして再初期化を促す
+                    app_ctx.healthcheck_manager = None
 
             if _should_auto_stop(app_ctx):
                 app_ctx.healthcheck_idle_cycles += 1
