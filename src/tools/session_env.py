@@ -177,6 +177,9 @@ MCP_SEND_COOLDOWN_SECONDS={v(s.send_cooldown_seconds)}
 # 無応答判定の閾値（秒）
 MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS={v(s.healthcheck_stall_timeout_seconds)}
 
+# in_progress タスクの無通信判定閾値（秒）
+MCP_HEALTHCHECK_IN_PROGRESS_NO_IPC_TIMEOUT_SECONDS={v(s.healthcheck_in_progress_no_ipc_timeout_seconds)}
+
 # 同一 worker/task の復旧試行上限
 MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS={v(s.healthcheck_max_recovery_attempts)}
 

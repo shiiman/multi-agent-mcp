@@ -162,6 +162,7 @@ class TestGenerateEnvTemplate:
         template = generate_env_template()
         assert "MCP_HEALTHCHECK_INTERVAL_SECONDS" in template
         assert "MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS" in template
+        assert "MCP_HEALTHCHECK_IN_PROGRESS_NO_IPC_TIMEOUT_SECONDS" in template
         assert "MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS" in template
         assert "MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE" in template
 

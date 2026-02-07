@@ -128,11 +128,14 @@ def ensure_healthcheck_manager(app_ctx: AppContext) -> HealthcheckManager:
     """HealthcheckManagerが初期化されていることを確認する。"""
     if app_ctx.healthcheck_manager is None:
         app_ctx.healthcheck_manager = HealthcheckManager(
-            app_ctx.tmux,
-            app_ctx.agents,
-            app_ctx.settings.healthcheck_interval_seconds,
-            app_ctx.settings.healthcheck_stall_timeout_seconds,
-            app_ctx.settings.healthcheck_max_recovery_attempts,
+            tmux_manager=app_ctx.tmux,
+            agents=app_ctx.agents,
+            healthcheck_interval_seconds=app_ctx.settings.healthcheck_interval_seconds,
+            stall_timeout_seconds=app_ctx.settings.healthcheck_stall_timeout_seconds,
+            in_progress_no_ipc_timeout_seconds=(
+                app_ctx.settings.healthcheck_in_progress_no_ipc_timeout_seconds
+            ),
+            max_recovery_attempts=app_ctx.settings.healthcheck_max_recovery_attempts,
         )
     return app_ctx.healthcheck_manager
 

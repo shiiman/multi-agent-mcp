@@ -58,6 +58,7 @@ class HealthcheckManager:
         agents: dict[str, "Agent"],
         healthcheck_interval_seconds: int = 60,
         stall_timeout_seconds: int = 600,
+        in_progress_no_ipc_timeout_seconds: int = 120,
         max_recovery_attempts: int = 3,
     ) -> None:
         """HealthcheckManagerを初期化する。"""
@@ -65,6 +66,7 @@ class HealthcheckManager:
         self.agents = agents
         self.healthcheck_interval_seconds = healthcheck_interval_seconds
         self.stall_timeout_seconds = stall_timeout_seconds
+        self.in_progress_no_ipc_timeout_seconds = in_progress_no_ipc_timeout_seconds
         self.max_recovery_attempts = max_recovery_attempts
         self.last_monitor_at: datetime | None = None
 
@@ -162,6 +164,67 @@ class HealthcheckManager:
 
         unchanged_for = now - self._pane_last_changed_at[agent_id]
         return unchanged_for >= timedelta(seconds=self.stall_timeout_seconds)
+
+    @staticmethod
+    def _task_activity_at(active_task: Any) -> datetime | None:
+        """Task の最終活動時刻を取得する。"""
+        metadata = getattr(active_task, "metadata", {}) or {}
+        raw_last_update = metadata.get("last_in_progress_update_at")
+        if isinstance(raw_last_update, datetime):
+            return raw_last_update
+        if isinstance(raw_last_update, str):
+            try:
+                return datetime.fromisoformat(raw_last_update)
+            except ValueError:
+                pass
+
+        logs = getattr(active_task, "logs", []) or []
+        if logs:
+            log_ts = getattr(logs[-1], "timestamp", None)
+            if isinstance(log_ts, datetime):
+                return log_ts
+
+        started_at = getattr(active_task, "started_at", None)
+        if isinstance(started_at, datetime):
+            return started_at
+        return None
+
+    async def _is_in_progress_without_ipc(
+        self,
+        agent_id: str,
+        agent: "Agent",
+        active_task: Any,
+        now: datetime,
+    ) -> bool:
+        """in_progress タスクの長時間無通信を判定する。"""
+        timeout_seconds = self.in_progress_no_ipc_timeout_seconds
+        if timeout_seconds <= 0:
+            return False
+
+        activity_at = self._task_activity_at(active_task)
+        if activity_at is None:
+            return False
+        if now - activity_at < timedelta(seconds=timeout_seconds):
+            return False
+
+        pane_hash = await self._capture_pane_hash(agent)
+        if pane_hash is None:
+            # pane 情報が取れない場合はタイムアウトのみで異常扱い
+            return True
+
+        previous_hash = self._pane_hash.get(agent_id)
+        self._pane_hash[agent_id] = pane_hash
+
+        if previous_hash != pane_hash:
+            self._pane_last_changed_at[agent_id] = now
+            return False
+
+        if agent_id not in self._pane_last_changed_at:
+            self._pane_last_changed_at[agent_id] = now
+            return False
+
+        unchanged_for = now - self._pane_last_changed_at[agent_id]
+        return unchanged_for >= timedelta(seconds=timeout_seconds)
 
     async def check_agent(self, agent_id: str) -> HealthStatus:
         """単一エージェントのヘルスチェックを行う。"""
@@ -396,6 +459,7 @@ class HealthcheckManager:
             "total_agents": len(self.agents),
             "healthcheck_interval_seconds": self.healthcheck_interval_seconds,
             "stall_timeout_seconds": self.stall_timeout_seconds,
+            "in_progress_no_ipc_timeout_seconds": self.in_progress_no_ipc_timeout_seconds,
             "max_recovery_attempts": self.max_recovery_attempts,
             "last_monitor_at": self.last_monitor_at.isoformat() if self.last_monitor_at else None,
         }
@@ -416,12 +480,15 @@ class HealthcheckManager:
         dashboard = None
 
         if app_ctx is not None:
-            try:
-                from src.tools.helpers_managers import ensure_dashboard_manager
+            if app_ctx.dashboard_manager is not None:
+                dashboard = app_ctx.dashboard_manager
+            else:
+                try:
+                    from src.tools.helpers_managers import ensure_dashboard_manager
 
-                dashboard = ensure_dashboard_manager(app_ctx)
-            except Exception:
-                dashboard = None
+                    dashboard = ensure_dashboard_manager(app_ctx)
+                except Exception:
+                    dashboard = None
 
         for agent_id, agent in list(self.agents.items()):
             if agent.role != AgentRole.WORKER.value:
@@ -510,6 +577,13 @@ class HealthcheckManager:
             ):
                 recovery_reason = "task_not_started"
                 force_recovery = True
+            elif (
+                active_task is not None
+                and active_task.status == TaskStatus.IN_PROGRESS
+                and await self._is_in_progress_without_ipc(agent_id, agent, active_task, now)
+            ):
+                recovery_reason = "in_progress_no_ipc"
+                force_recovery = True
             elif await self._is_worker_stalled(agent_id, agent, now):
                 recovery_reason = "task_stalled"
                 force_recovery = True
@@ -593,6 +667,7 @@ class HealthcheckManager:
             "skipped": skipped,
             "healthcheck_interval_seconds": self.healthcheck_interval_seconds,
             "stall_timeout_seconds": self.stall_timeout_seconds,
+            "in_progress_no_ipc_timeout_seconds": self.in_progress_no_ipc_timeout_seconds,
             "max_recovery_attempts": self.max_recovery_attempts,
             "last_monitor_at": self.last_monitor_at.isoformat(),
         }

@@ -170,6 +170,8 @@ class DashboardTasksMixin:
                         agent_summary.current_task_id = task.id
                         agent_summary.status = "busy"
                         break
+        if status == TaskStatus.IN_PROGRESS:
+            task.metadata["last_in_progress_update_at"] = now.isoformat()
         elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
             task.completed_at = now
             if status == TaskStatus.COMPLETED:

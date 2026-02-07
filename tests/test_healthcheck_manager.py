@@ -1,5 +1,6 @@
 """HealthcheckManagerのテスト。"""
 
+import hashlib
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -177,9 +178,10 @@ class TestHealthcheckMonitoring:
 
         ai_cli = AiCliManager(settings)
 
-        dashboard_dir = temp_dir / ".dashboard"
+        session_id = "test-session"
+        dashboard_dir = temp_dir / ".multi-agent-mcp" / session_id / "dashboard"
         dashboard = DashboardManager(
-            workspace_id="test-workspace",
+            workspace_id=session_id,
             workspace_path=str(temp_dir),
             dashboard_dir=str(dashboard_dir),
         )
@@ -251,3 +253,97 @@ class TestHealthcheckMonitoring:
         assert updated is not None
         assert updated.status == TaskStatus.FAILED
         assert worker.current_task is None
+
+    @pytest.mark.asyncio
+    async def test_monitor_recovers_in_progress_no_ipc_timeout(self, temp_dir, settings):
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=True)
+        tmux.get_pane_current_command = AsyncMock(return_value="claude")
+        tmux.capture_pane_by_index = AsyncMock(return_value="stable-pane-output")
+        tmux._run = AsyncMock(return_value=(0, "", ""))
+        tmux._get_window_name = MagicMock(return_value=settings.window_name_main)
+
+        ai_cli = AiCliManager(settings)
+
+        session_id = "test-session"
+        dashboard_dir = temp_dir / ".multi-agent-mcp" / session_id / "dashboard"
+        dashboard = DashboardManager(
+            workspace_id=session_id,
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        dashboard.initialize()
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task=None,
+            ai_bootstrapped=True,
+            created_at=now,
+            last_activity=now,
+        )
+        admin = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+
+        task = dashboard.create_task(
+            title="test in_progress no ipc",
+            description="healthcheck",
+            assigned_agent_id=worker.id,
+        )
+        dashboard.assign_task(task.id, worker.id)
+        dashboard.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=10)
+
+        dash = dashboard._read_dashboard()
+        task_for_update = dash.get_task(task.id)
+        assert task_for_update is not None
+        task_for_update.metadata["last_in_progress_update_at"] = (
+            datetime.now() - timedelta(seconds=180)
+        ).isoformat()
+        dashboard._write_dashboard(dash)
+
+        app_ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            agents={worker.id: worker, admin.id: admin},
+            dashboard_manager=dashboard,
+            workspace_id=session_id,
+            project_root=str(temp_dir),
+            session_id=session_id,
+        )
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=app_ctx.agents,
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=600,
+            in_progress_no_ipc_timeout_seconds=30,
+            max_recovery_attempts=1,
+        )
+        app_ctx.healthcheck_manager = healthcheck
+
+        pane_hash = hashlib.sha1("stable-pane-output".encode("utf-8")).hexdigest()
+        healthcheck._pane_hash[worker.id] = pane_hash
+        healthcheck._pane_last_changed_at[worker.id] = datetime.now() - timedelta(seconds=120)
+
+        result = await healthcheck.monitor_and_recover_workers(app_ctx)
+
+        assert len(result["recovered"]) == 1
+        assert result["recovered"][0]["reason"] == "in_progress_no_ipc"
+        assert worker.ai_bootstrapped is False

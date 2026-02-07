@@ -250,6 +250,10 @@ class Settings(BaseSettings):
     """無応答判定の閾値（秒）。
     last_activity 超過かつ tmux 出力が変化しない場合に異常と判定する。"""
 
+    healthcheck_in_progress_no_ipc_timeout_seconds: int = 120
+    """in_progress タスクの無通信判定閾値（秒）。
+    進捗更新（IPC）や task 更新が一定時間ない場合に異常候補として扱う。"""
+
     healthcheck_max_recovery_attempts: int = 3
     """同一 worker/task に対する復旧試行の上限回数。"""
 
