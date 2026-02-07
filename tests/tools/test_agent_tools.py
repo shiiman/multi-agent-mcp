@@ -715,7 +715,7 @@ class TestSendTaskToWorker:
             / ".multi-agent-mcp"
             / "issue-worker-role-separation"
             / "tasks"
-            / "worker-001.md"
+            / "worker1_task-001.md"
         )
         task_text = task_path.read_text(encoding="utf-8")
         assert "# Multi-Agent MCP - Worker Agent" not in task_text
@@ -823,7 +823,8 @@ class TestSendTaskToWorker:
         from src.tools.agent import _send_task_to_worker
 
         app_ctx = mock_ctx.request_context.lifespan_context
-        app_ctx.tmux.send_keys_to_pane = AsyncMock(return_value=False)
+        # followup も bootstrap リトライも失敗させる
+        app_ctx.tmux.send_with_rate_limit_to_pane = AsyncMock(return_value=False)
         app_ctx.tmux.get_pane_current_command = AsyncMock(return_value="zsh")
         now = datetime.now()
 
@@ -863,8 +864,9 @@ class TestSendTaskToWorker:
         )
 
         assert result["task_sent"] is False
+        # followup 失敗→shell 検出→bootstrap 再試行→再試行も失敗
         assert result["dispatch_mode"] == "followup"
-        assert "pane_current_command=zsh" in result["dispatch_error"]
+        assert "bootstrap_retry_failed" in result["dispatch_error"]
         assert worker.ai_bootstrapped is False
 
 
@@ -995,6 +997,7 @@ class TestCreateWorkersBatchBehavior:
             "src.tools.agent_batch_tools.get_current_profile_settings",
             lambda _ctx: {"max_workers": 20, "worker_thinking_tokens": 4000},
         )
+        app_ctx.settings.enable_worktree = False
 
         result = await create_workers_batch(
             worker_configs=[{"branch": "feature/reuse-only"}],

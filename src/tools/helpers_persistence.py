@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,6 +23,17 @@ if TYPE_CHECKING:
     from src.models.agent import Agent
 
 logger = logging.getLogger(__name__)
+
+# sync_agents_from_file のキャッシュ TTL（秒）
+_SYNC_CACHE_TTL_SECONDS = 2.0
+# 最終同期時刻を保持するグローバル変数
+_last_sync_time: float = 0.0
+
+
+def reset_sync_cache() -> None:
+    """sync_agents_from_file のキャッシュをリセットする（テスト用）。"""
+    global _last_sync_time
+    _last_sync_time = 0.0
 
 
 def _get_agents_file_path(
@@ -93,9 +107,21 @@ def save_agent_to_file(app_ctx: AppContext, agent: Agent) -> bool:
         # ディレクトリ作成
         agents_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # ファイルに保存
-        with open(agents_file, "w", encoding="utf-8") as f:
-            json.dump(agents_data, f, ensure_ascii=False, indent=2, default=str)
+        # アトミック書き込み（tmpfile + os.replace）
+        content = json.dumps(agents_data, ensure_ascii=False, indent=2, default=str)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(agents_file.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(agents_file))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         logger.debug(f"エージェント {agent.id} を {agents_file} に保存しました")
         return True
@@ -156,17 +182,26 @@ def load_agents_from_file(app_ctx: AppContext) -> dict[str, Agent]:
         return {}
 
 
-def sync_agents_from_file(app_ctx: AppContext) -> int:
+def sync_agents_from_file(app_ctx: AppContext, force: bool = False) -> int:
     """ファイルからエージェント情報をメモリに同期する。
 
-    既存のエージェント情報は保持し、ファイルにのみ存在するエージェントを追加する。
+    キャッシュTTL（2秒）以内の再呼び出しはスキップする。
+    force=True で強制同期。
 
     Args:
         app_ctx: アプリケーションコンテキスト
+        force: TTL を無視して強制同期するか
 
     Returns:
         追加されたエージェント数
     """
+    global _last_sync_time
+
+    if not force:
+        now = time.monotonic()
+        if (now - _last_sync_time) < _SYNC_CACHE_TTL_SECONDS:
+            return 0
+
     file_agents = load_agents_from_file(app_ctx)
     added = 0
 
@@ -174,6 +209,8 @@ def sync_agents_from_file(app_ctx: AppContext) -> int:
         if agent_id not in app_ctx.agents:
             app_ctx.agents[agent_id] = agent
             added += 1
+
+    _last_sync_time = time.monotonic()
 
     if added > 0:
         logger.info(f"ファイルから {added} 件のエージェント情報を同期しました")
@@ -216,8 +253,22 @@ def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
         if agent_id in agents_data:
             del agents_data[agent_id]
 
-            with open(agents_file, "w", encoding="utf-8") as f:
-                json.dump(agents_data, f, ensure_ascii=False, indent=2, default=str)
+            content = json.dumps(
+                agents_data, ensure_ascii=False, indent=2, default=str
+            )
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(agents_file.parent), suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                os.replace(tmp_path, str(agents_file))
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
             logger.debug(f"エージェント {agent_id} を {agents_file} から削除しました")
             return True

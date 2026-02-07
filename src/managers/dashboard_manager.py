@@ -5,6 +5,8 @@ YAML Front Matter 付き Markdown で統一管理。
 """
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -78,8 +80,20 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
                 sort_keys=False,
             )
             content = f"---\n{yaml_str}---\n\n{md_content}"
-            with open(dashboard_path, "w", encoding="utf-8") as f:
-                f.write(content)
+            dashboard_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(dashboard_path.parent), suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                os.replace(tmp_path, str(dashboard_path))
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except OSError as e:
             logger.error(f"ダッシュボード保存エラー: {e}")
 

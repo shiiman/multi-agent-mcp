@@ -226,6 +226,10 @@ class TestAgentFilePersistence:
     @pytest.fixture
     def persistence_ctx(self, settings, git_repo):
         """永続化テスト用の AppContext を作成する。"""
+        from src.tools.helpers_persistence import reset_sync_cache
+
+        # テスト間のキャッシュ副作用を防止
+        reset_sync_cache()
         tmux = TmuxManager(settings)
         ai_cli = AiCliManager(settings)
         ctx = AppContext(

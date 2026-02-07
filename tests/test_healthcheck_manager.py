@@ -258,10 +258,12 @@ class TestHealthcheckMonitoring:
     async def test_monitor_recovers_in_progress_no_ipc_timeout(self, temp_dir, settings):
         tmux = MagicMock()
         tmux.session_exists = AsyncMock(return_value=True)
-        tmux.get_pane_current_command = AsyncMock(return_value="claude")
+        tmux.get_pane_current_command = AsyncMock(return_value="node")
         tmux.capture_pane_by_index = AsyncMock(return_value="stable-pane-output")
         tmux._run = AsyncMock(return_value=(0, "", ""))
         tmux._get_window_name = MagicMock(return_value=settings.window_name_main)
+        tmux.create_session = AsyncMock(return_value=True)
+        tmux.send_keys_to_pane = AsyncMock(return_value=True)
 
         ai_cli = AiCliManager(settings)
 

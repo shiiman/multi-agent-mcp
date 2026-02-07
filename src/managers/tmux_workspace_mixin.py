@@ -415,9 +415,7 @@ class TmuxWorkspaceMixin:
                 return True
 
         # Codex 固有の入力ヒントが出ており、入力行が残っていれば未確定
-        if "tab to queue message" in output.lower():
-            return True
-        return False
+        return "tab to queue message" in output.lower()
 
     async def send_and_confirm_to_pane(
         self,

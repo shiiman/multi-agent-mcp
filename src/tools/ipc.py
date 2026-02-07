@@ -8,13 +8,13 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.managers.tmux_shared import escape_applescript
 from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus, normalize_task_id
 from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import (
     ensure_ipc_manager,
     find_agents_by_role,
+    get_admin_poll_state,
     notify_agent_via_tmux,
     require_permission,
     save_agent_to_file,
@@ -24,31 +24,17 @@ from src.tools.helpers_managers import ensure_dashboard_manager
 
 logger = logging.getLogger(__name__)
 _ADMIN_DASHBOARD_GRANT_SECONDS = 90
-
-
-def _get_admin_poll_state(app_ctx: Any, admin_id: str) -> dict[str, Any]:
-    """Admin ごとのポーリングガード状態を取得する。"""
-    state_map = getattr(app_ctx, "_admin_poll_state", None)
-    if not isinstance(state_map, dict):
-        state_map = {}
-        app_ctx._admin_poll_state = state_map
-    state = state_map.get(admin_id)
-    if not isinstance(state, dict):
-        state = {
-            "waiting_for_ipc": False,
-            "allow_dashboard_until": None,
-        }
-        state_map[admin_id] = state
-    return state
+# polling_blocked 後にブロックを解除するまでの猶予時間（秒）
+_POLLING_BLOCKED_GRACE_SECONDS = 30
 
 
 def _mark_admin_waiting_for_ipc(app_ctx: Any, admin_id: str) -> None:
-    state = _get_admin_poll_state(app_ctx, admin_id)
+    state = get_admin_poll_state(app_ctx, admin_id)
     state["waiting_for_ipc"] = True
 
 
 def _mark_admin_ipc_consumed(app_ctx: Any, admin_id: str) -> None:
-    state = _get_admin_poll_state(app_ctx, admin_id)
+    state = get_admin_poll_state(app_ctx, admin_id)
     state["waiting_for_ipc"] = False
     state["allow_dashboard_until"] = datetime.now() + timedelta(
         seconds=_ADMIN_DASHBOARD_GRANT_SECONDS
@@ -245,6 +231,11 @@ def _validate_admin_completion_gate(
     if sender.role != AgentRole.ADMIN.value or receiver.role != AgentRole.OWNER.value:
         return True, {}
 
+    # 品質ゲート緩和モード: MCP_QUALITY_GATE_STRICT=false で品質チェックをスキップ
+    if not getattr(app_ctx.settings, "quality_gate_strict", True):
+        logger.info("品質ゲート緩和モード: 品質チェックをスキップします")
+        return True, {}
+
     dashboard = ensure_dashboard_manager(app_ctx)
     tasks = dashboard.list_tasks()
     summary = dashboard.get_summary()
@@ -429,48 +420,41 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # イベント駆動通知: 受信者の状態に応じて通知方法を選択
+        # notify_agent_via_tmux はリトライ + macOS フォールバックを内包する
         notification_sent = False
         notification_method = None
         if receiver_id:
             sync_agents_from_file(app_ctx)
             receiver_agent = app_ctx.agents.get(receiver_id)
             if receiver_agent:
-                # tmux ペインがある場合は tmux 経由で通知
-                tmux_ok = await notify_agent_via_tmux(
-                    app_ctx, receiver_agent, msg_type.value, sender_id
-                )
-                if tmux_ok:
-                    notification_sent = True
-                    notification_method = "tmux"
-                elif not (
+                has_tmux_pane = (
                     receiver_agent.session_name
                     and receiver_agent.pane_index is not None
-                ):
-                    # tmux ペインがない場合（Owner など）は macOS 通知を送る
-                    try:
-                        notification_title = "Multi-Agent MCP"
-                        notification_body = escape_applescript(
-                            f"{msg_type.value}: {content[:100]}"
-                        )
-                        escaped_title = escape_applescript(notification_title)
-                        subprocess.run(
-                            [
-                                "osascript",
-                                "-e",
-                                "display notification"
-                                f' "{notification_body}"'
-                                f' with title "{escaped_title}"',
-                            ],
-                            capture_output=True,
-                            timeout=5,
-                        )
+                )
+                if has_tmux_pane:
+                    # tmux ペインがある場合: リトライ付き tmux 通知（失敗時は macOS フォールバック）
+                    tmux_ok = await notify_agent_via_tmux(
+                        app_ctx, receiver_agent, msg_type.value, sender_id
+                    )
+                    if tmux_ok:
+                        notification_sent = True
+                        notification_method = "tmux"
+                    else:
+                        # tmux リトライ全失敗後、macOS フォールバックは
+                        # notify_agent_via_tmux 内で実行済み
+                        notification_sent = True
+                        notification_method = "macos_fallback"
+                else:
+                    # tmux ペインがない場合（Owner など）は直接 macOS 通知
+                    from src.tools.helpers import _send_macos_notification
+
+                    macos_ok = await _send_macos_notification(
+                        msg_type.value, sender_id
+                    )
+                    if macos_ok:
                         notification_sent = True
                         notification_method = "macos"
-                        logger.info(
-                            f"IPC通知を送信(macOS): {receiver_id}"
-                        )
-                    except Exception as e:
-                        logger.warning(f"macOS通知の送信に失敗: {e}")
+                        logger.info("IPC通知を送信(macOS): %s", receiver_id)
 
         return {
             "success": True,
@@ -552,13 +536,28 @@ def register_tools(mcp: FastMCP) -> None:
         if is_admin_caller:
             unread_count = ipc.get_unread_count(agent_id)
             if unread_only and unread_count == 0:
-                return {
-                    "success": False,
-                    "error": (
-                        "polling_blocked: unread=0 の状態で read_messages を連続実行できません"
-                    ),
-                    "next_action": "wait_for_ipc_notification",
-                }
+                poll_state = get_admin_poll_state(app_ctx, caller_agent_id or agent_id)
+                last_blocked = poll_state.get("last_poll_blocked_at")
+                now = datetime.now()
+                if last_blocked is None:
+                    # 初回の空読み: 記録だけして通す（ブロックしない）
+                    poll_state["last_poll_blocked_at"] = now
+                elif (now - last_blocked).total_seconds() >= _POLLING_BLOCKED_GRACE_SECONDS:
+                    # 猶予時間を超過: ブロック解除してメッセージ確認を許可
+                    poll_state["last_poll_blocked_at"] = None
+                    logger.info(
+                        "polling_blocked 猶予時間超過: %s のブロックを一時解除",
+                        caller_agent_id or agent_id,
+                    )
+                else:
+                    # 猶予時間内の2回目以降: ブロック
+                    return {
+                        "success": False,
+                        "error": (
+                            "polling_blocked: unread=0 の状態で read_messages を連続実行できません"
+                        ),
+                        "next_action": "wait_for_ipc_notification",
+                    }
 
         if is_admin_caller:
             (

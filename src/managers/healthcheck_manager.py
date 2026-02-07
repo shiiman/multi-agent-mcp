@@ -262,6 +262,9 @@ class HealthcheckManager:
                     pane_command = await pane_command_result
                 else:
                     pane_command = pane_command_result
+                # 文字列以外が返った場合は安全に変換
+                if pane_command is not None and not isinstance(pane_command, str):
+                    pane_command = str(pane_command)
 
         # Worker がタスク中なのに shell に戻っている場合は異常
         role = str(getattr(agent, "role", ""))
@@ -550,7 +553,15 @@ class HealthcheckManager:
                 return "in_progress_no_ipc", True
 
         if await self._is_worker_stalled(agent_id, agent, now):
-            return "task_stalled", True
+            pane_command = (health.pane_current_command or "").strip().lower()
+            if pane_command in {"codex", "claude", "gemini"}:
+                logger.info(
+                    "task_stalled をスキップ: agent=%s pane=%s（AI CLI 実行中）",
+                    agent_id,
+                    pane_command,
+                )
+            else:
+                return "task_stalled", True
 
         return None, False
 

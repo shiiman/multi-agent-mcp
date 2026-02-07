@@ -7,7 +7,9 @@
 """
 
 import logging
+import os
 import re
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -103,57 +105,59 @@ class IPCManager:
             logger.warning(f"メッセージの読み込みに失敗 ({file_path}): {e}")
             return None
 
+    def _build_message_content(self, message: Message) -> str:
+        """メッセージの Markdown コンテンツを組み立てる。"""
+        front_matter = {
+            "id": message.id,
+            "sender_id": message.sender_id,
+            "receiver_id": message.receiver_id,
+            "message_type": message.message_type.value,
+            "priority": message.priority.value,
+            "subject": message.subject,
+            "created_at": message.created_at.isoformat(),
+            "read_at": message.read_at.isoformat() if message.read_at else None,
+        }
+        if message.metadata:
+            front_matter["metadata"] = message.metadata
+
+        yaml_str = yaml.dump(
+            front_matter, allow_unicode=True,
+            default_flow_style=False, sort_keys=False,
+        )
+        return f"---\n{yaml_str}---\n\n{message.content}\n"
+
+    def _atomic_write(self, file_path: Path, content: str) -> None:
+        """アトミック書き込み（tmpfile + os.replace）でファイルを安全に保存する。"""
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(file_path.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(file_path))
+        except BaseException:
+            # 書き込み失敗時に一時ファイルを削除
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
     def _write_message_file(self, agent_id: str, message: Message) -> Path:
-        """メッセージを Markdown ファイルとして保存する。"""
+        """メッセージを Markdown ファイルとしてアトミックに保存する。"""
         agent_dir = self._get_agent_dir(agent_id)
         agent_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = self._get_message_path(agent_id, message.id, message.created_at)
-
-        front_matter = {
-            "id": message.id,
-            "sender_id": message.sender_id,
-            "receiver_id": message.receiver_id,
-            "message_type": message.message_type.value,
-            "priority": message.priority.value,
-            "subject": message.subject,
-            "created_at": message.created_at.isoformat(),
-            "read_at": message.read_at.isoformat() if message.read_at else None,
-        }
-        if message.metadata:
-            front_matter["metadata"] = message.metadata
-
-        yaml_str = yaml.dump(
-            front_matter, allow_unicode=True,
-            default_flow_style=False, sort_keys=False,
-        )
-        content = f"---\n{yaml_str}---\n\n{message.content}\n"
-
-        file_path.write_text(content, encoding="utf-8")
+        content = self._build_message_content(message)
+        self._atomic_write(file_path, content)
         return file_path
 
     def _update_message_file(self, file_path: Path, message: Message) -> None:
-        """既存のメッセージファイルを更新する。"""
-        front_matter = {
-            "id": message.id,
-            "sender_id": message.sender_id,
-            "receiver_id": message.receiver_id,
-            "message_type": message.message_type.value,
-            "priority": message.priority.value,
-            "subject": message.subject,
-            "created_at": message.created_at.isoformat(),
-            "read_at": message.read_at.isoformat() if message.read_at else None,
-        }
-        if message.metadata:
-            front_matter["metadata"] = message.metadata
-
-        yaml_str = yaml.dump(
-            front_matter, allow_unicode=True,
-            default_flow_style=False, sort_keys=False,
-        )
-        content = f"---\n{yaml_str}---\n\n{message.content}\n"
-
-        file_path.write_text(content, encoding="utf-8")
+        """既存のメッセージファイルをアトミックに更新する。"""
+        content = self._build_message_content(message)
+        self._atomic_write(file_path, content)
 
     def register_agent(self, agent_id: str) -> None:
         """エージェントのメッセージディレクトリを登録する。

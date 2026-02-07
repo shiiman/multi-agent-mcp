@@ -29,6 +29,7 @@ def command_test_ctx(git_repo, settings):
         return_value="mock output line 1\nmock output line 2"
     )
     mock_tmux.session_exists = AsyncMock(return_value=True)
+    mock_tmux.send_with_rate_limit_to_pane = AsyncMock(return_value=True)
     mock_tmux.set_pane_title = AsyncMock(return_value=True)
     mock_tmux.add_extra_worker_window = AsyncMock(return_value=True)
     mock_tmux.open_session_in_terminal = AsyncMock(return_value=True)
@@ -815,6 +816,14 @@ class TestSendTask:
             ai_bootstrapped=True,
         )
 
+        # Dashboard にタスクを作成して worker に割り当て
+        dashboard = app_ctx.dashboard_manager
+        task_info = dashboard.create_task(
+            title="worker task",
+            assigned_agent_id="worker-001",
+        )
+        dashboard.assign_task(task_info.id, "worker-001")
+
         mock_worktree_manager = MagicMock()
         mock_worktree_manager.get_current_branch = AsyncMock(return_value="main")
 
@@ -895,6 +904,14 @@ class TestSendTask:
             created_at=now,
             last_activity=now,
         )
+
+        # Dashboard にタスクを作成して worker に割り当て
+        dashboard = app_ctx.dashboard_manager
+        task_info = dashboard.create_task(
+            title="worker task",
+            assigned_agent_id="worker-001",
+        )
+        dashboard.assign_task(task_info.id, "worker-001")
 
         with (
             patch(

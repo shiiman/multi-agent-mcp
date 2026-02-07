@@ -269,11 +269,23 @@ def _post_create_agent(
     agents: dict[str, Agent],
 ) -> dict[str, bool]:
     """エージェント作成後の共通処理（IPC登録、ファイル保存、レジストリ、ダッシュボード）。"""
+    import uuid as _uuid
+
     result = {
         "ipc_registered": False,
         "file_persisted": False,
         "dashboard_updated": False,
     }
+
+    # Owner 作成時に session_id が未設定の場合は仮 ID を設定
+    # （init_tmux_workspace で正式な session_id に上書きされる）
+    provisional_session = False
+    if not app_ctx.session_id and agent.role == AgentRole.OWNER:
+        app_ctx.session_id = f"provisional-{_uuid.uuid4().hex[:8]}"
+        provisional_session = True
+        logger.info(
+            "Owner 作成時に仮 session_id を設定: %s", app_ctx.session_id
+        )
 
     # IPC マネージャーに登録
     if app_ctx.session_id:
@@ -291,11 +303,14 @@ def _post_create_agent(
         )
 
     # エージェント情報をファイルに保存
-    # session_id 未確定時は古い config.json の session_id を拾うリスクがあるため保存しない。
     if app_ctx.session_id:
         result["file_persisted"] = save_agent_to_file(app_ctx, agent)
         if result["file_persisted"]:
-            logger.info(f"エージェント {agent.id} をファイルに保存しました")
+            logger.info(
+                "エージェント %s をファイルに保存しました%s",
+                agent.id,
+                "（仮session_id）" if provisional_session else "",
+            )
     else:
         logger.info(
             f"エージェント {agent.id} のファイル保存をスキップしました"

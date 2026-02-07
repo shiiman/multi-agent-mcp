@@ -25,6 +25,10 @@ def healthcheck_test_ctx(git_repo, settings):
     mock_tmux.settings = settings
     mock_tmux._run = AsyncMock(return_value="")
     mock_tmux._get_window_name = MagicMock(return_value="window-0")
+    mock_tmux.session_exists = AsyncMock(return_value=True)
+    mock_tmux.get_pane_current_command = AsyncMock(return_value="claude")
+    mock_tmux.send_keys_to_pane = AsyncMock(return_value=True)
+    mock_tmux.capture_pane_by_index = AsyncMock(return_value="")
 
     # AI CLI マネージャー
     ai_cli = AiCliManager(settings)
