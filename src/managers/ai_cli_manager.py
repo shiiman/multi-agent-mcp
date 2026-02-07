@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.config.settings import DEFAULT_AI_CLI_COMMANDS, AICli, TerminalApp, resolve_model_for_cli
+from src.managers.tmux_shared import escape_applescript
 
 if TYPE_CHECKING:
     from src.config.settings import Settings
@@ -245,15 +246,11 @@ class AiCliManager:
         args = [cmd]
 
         # CLI固有のオプション（worktree_path は呼び出し側で cwd として使用）
-        if cli == AICli.CLAUDE:
+        if cli == AICli.CLAUDE or cli == AICli.CODEX:
             if prompt:
                 args.append(prompt)
-        elif cli == AICli.CODEX:
-            if prompt:
-                args.append(prompt)
-        elif cli == AICli.GEMINI:
-            if prompt:
-                args.extend(["--prompt", prompt])
+        elif cli == AICli.GEMINI and prompt:
+            args.extend(["--prompt", prompt])
 
         return args
 
@@ -466,9 +463,8 @@ class AiCliManager:
         """
         try:
             # AppleScript で iTerm2 を制御
-            # shlex.quote でパスをエスケープしてからさらに AppleScript 用にエスケープ
-            escaped_path = worktree_path.replace("\\", "\\\\").replace('"', '\\"')
-            escaped_command = command.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_path = escape_applescript(worktree_path)
+            escaped_command = escape_applescript(command)
 
             applescript = f'''
             tell application "iTerm"
@@ -511,8 +507,8 @@ class AiCliManager:
         """
         try:
             # AppleScript で Terminal.app を制御
-            escaped_path = worktree_path.replace("\\", "\\\\").replace('"', '\\"')
-            escaped_command = command.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_path = escape_applescript(worktree_path)
+            escaped_command = escape_applescript(command)
 
             applescript = f'''
             tell application "Terminal"

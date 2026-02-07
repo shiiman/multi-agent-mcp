@@ -106,10 +106,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         memory = ensure_global_memory_manager()
 
-        if tags:
-            entries = memory.list_by_tags(tags)
-        else:
-            entries = memory.list_all()
+        entries = memory.list_by_tags(tags) if tags else memory.list_all()
 
         return {
             "success": True,

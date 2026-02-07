@@ -301,10 +301,74 @@ def require_permission(
     return app_ctx, error
 
 
+# ========== tmux 通知ヘルパー ==========
+
+
+async def notify_agent_via_tmux(
+    app_ctx: "AppContext",
+    agent: Any,
+    msg_type_value: str,
+    sender_id: str,
+) -> bool:
+    """エージェントに tmux 経由で IPC 通知を送信する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        agent: 通知対象のエージェント
+        msg_type_value: メッセージタイプの値文字列
+        sender_id: 送信元エージェントID
+
+    Returns:
+        送信成功時は True、失敗時は False
+    """
+    if (
+        not agent
+        or not agent.session_name
+        or agent.pane_index is None
+    ):
+        logger.warning(
+            f"エージェントの tmux 情報が見つかりません: {getattr(agent, 'id', 'unknown')}"
+        )
+        return False
+
+    notification_text = (
+        f"echo '[IPC] 新しいメッセージ: {msg_type_value} from {sender_id}'"
+    )
+    default_cli = app_ctx.ai_cli.get_default_cli()
+    resolved_cli = agent.ai_cli or default_cli
+    agent_cli = (
+        resolved_cli.value
+        if hasattr(resolved_cli, "value")
+        else str(resolved_cli or "")
+    ).lower()
+    try:
+        success = await app_ctx.tmux.send_with_rate_limit_to_pane(
+            agent.session_name,
+            agent.window_index or 0,
+            agent.pane_index,
+            notification_text,
+            clear_input=False,
+            confirm_codex_prompt=agent_cli == "codex",
+        )
+        if not success:
+            logger.warning(
+                "tmux 通知の送信に失敗（未確定の可能性）: %s",
+                getattr(agent, "id", "unknown"),
+            )
+            return False
+        logger.info(
+            f"tmux 通知を送信: {getattr(agent, 'id', 'unknown')}"
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"tmux 通知の送信に失敗: {e}")
+        return False
+
+
 # ========== サブモジュールからの re-export ==========
 # 全ての既存 import パスを維持するため
 
-from src.tools.helpers_git import resolve_main_repo_root  # noqa: E402, F401
+from src.tools.helpers_git import resolve_main_repo_root  # noqa: E402
 from src.tools.helpers_managers import (  # noqa: E402, F401
     _global_memory_manager,
     ensure_dashboard_manager,

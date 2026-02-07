@@ -1,6 +1,7 @@
 """セッションツール向け環境設定ヘルパー。"""
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,23 @@ def _format_env_value(value: object) -> str:
     if isinstance(value, list):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
+
+
+def _generate_per_worker_env_lines(
+    s: Settings, v: Callable[[object], str],
+) -> str:
+    """Worker 1〜16 の per-worker CLI/MODEL 行を生成する。"""
+    default_model = v(s.model_profile_performance_worker_model)
+    default_cli = v(s.worker_cli_uniform)
+    lines: list[str] = []
+    for i in range(1, 17):
+        cli_val = getattr(s, f"worker_cli_{i}", None)
+        model_val = getattr(s, f"worker_model_{i}", None)
+        cli_str = v(cli_val) if cli_val else default_cli
+        model_str = v(model_val) if model_val else default_model
+        lines.append(f"MCP_WORKER_CLI_{i}={cli_str}")
+        lines.append(f"MCP_WORKER_MODEL_{i}={model_str}")
+    return "\n".join(lines)
 
 
 def generate_env_template(settings: Settings | None = None) -> str:
@@ -109,38 +127,7 @@ MCP_MODEL_PROFILE_PERFORMANCE_WORKER_REASONING_EFFORT={perf_worker_effort}
 
 # ========== Worker CLI モード ==========
 # MCP_WORKER_CLI_MODEがper-workerの時のみ有効
-MCP_WORKER_CLI_1={v(s.worker_cli_1) if s.worker_cli_1 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_1={v(s.worker_model_1) if s.worker_model_1 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_2={v(s.worker_cli_2) if s.worker_cli_2 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_2={v(s.worker_model_2) if s.worker_model_2 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_3={v(s.worker_cli_3) if s.worker_cli_3 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_3={v(s.worker_model_3) if s.worker_model_3 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_4={v(s.worker_cli_4) if s.worker_cli_4 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_4={v(s.worker_model_4) if s.worker_model_4 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_5={v(s.worker_cli_5) if s.worker_cli_5 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_5={v(s.worker_model_5) if s.worker_model_5 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_6={v(s.worker_cli_6) if s.worker_cli_6 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_6={v(s.worker_model_6) if s.worker_model_6 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_7={v(s.worker_cli_7) if s.worker_cli_7 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_7={v(s.worker_model_7) if s.worker_model_7 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_8={v(s.worker_cli_8) if s.worker_cli_8 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_8={v(s.worker_model_8) if s.worker_model_8 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_9={v(s.worker_cli_9) if s.worker_cli_9 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_9={v(s.worker_model_9) if s.worker_model_9 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_10={v(s.worker_cli_10) if s.worker_cli_10 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_10={v(s.worker_model_10) if s.worker_model_10 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_11={v(s.worker_cli_11) if s.worker_cli_11 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_11={v(s.worker_model_11) if s.worker_model_11 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_12={v(s.worker_cli_12) if s.worker_cli_12 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_12={v(s.worker_model_12) if s.worker_model_12 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_13={v(s.worker_cli_13) if s.worker_cli_13 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_13={v(s.worker_model_13) if s.worker_model_13 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_14={v(s.worker_cli_14) if s.worker_cli_14 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_14={v(s.worker_model_14) if s.worker_model_14 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_15={v(s.worker_cli_15) if s.worker_cli_15 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_15={v(s.worker_model_15) if s.worker_model_15 else v(s.model_profile_performance_worker_model)}
-MCP_WORKER_CLI_16={v(s.worker_cli_16) if s.worker_cli_16 else v(s.worker_cli_uniform)}
-MCP_WORKER_MODEL_16={v(s.worker_model_16) if s.worker_model_16 else v(s.model_profile_performance_worker_model)}
+{_generate_per_worker_env_lines(s, v)}
 
 # ========== CLI 別デフォルトモデル ==========
 # CLIとMODELが誤った組み合わせになっていた場合、デフォルトモデルに置き換えられる

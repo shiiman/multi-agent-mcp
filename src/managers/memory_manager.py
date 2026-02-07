@@ -196,7 +196,7 @@ class MemoryManager:
                 ) if "updated_at" in front_matter else datetime.now(),
                 metadata=front_matter.get("metadata", {}),
             )
-        except Exception as e:
+        except (OSError, yaml.YAMLError, KeyError, ValueError) as e:
             logger.warning(f"エントリの読み込みに失敗 ({file_path}): {e}")
             return None
 
@@ -223,7 +223,7 @@ class MemoryManager:
             content = f"---\n{yaml_str}---\n\n{entry.content}\n"
 
             file_path.write_text(content, encoding="utf-8")
-        except Exception as e:
+        except (OSError, yaml.YAMLError) as e:
             logger.error(f"エントリの保存に失敗 ({file_path}): {e}")
             raise
 
@@ -245,7 +245,7 @@ class MemoryManager:
             # 読み込み時にもクリーンアップ
             if self.auto_prune:
                 self.prune()
-        except Exception as e:
+        except (OSError, yaml.YAMLError, KeyError, ValueError) as e:
             logger.warning(f"メモリの読み込みに失敗: {e}")
 
     def _save_entry(self, entry: MemoryEntry) -> None:
@@ -331,7 +331,7 @@ class MemoryManager:
                 self._write_markdown_entry(entry, file_path)
 
             logger.info(f"アーカイブに追加: {len(entries)} エントリ")
-        except Exception as e:
+        except (OSError, yaml.YAMLError) as e:
             logger.error(f"アーカイブへの追加に失敗: {e}")
 
     def _load_archive(self) -> dict[str, MemoryEntry]:
@@ -348,7 +348,7 @@ class MemoryManager:
                     archive_entries[entry.key] = entry
 
             logger.debug(f"アーカイブを読み込み: {len(archive_entries)} エントリ")
-        except Exception as e:
+        except (OSError, yaml.YAMLError, KeyError, ValueError) as e:
             logger.warning(f"アーカイブの読み込みに失敗: {e}")
 
         return archive_entries
@@ -444,7 +444,7 @@ class MemoryManager:
             logger.info(f"アーカイブから復元: {key}")
             return entry
 
-        except Exception as e:
+        except (OSError, yaml.YAMLError, KeyError, ValueError) as e:
             logger.error(f"アーカイブからの復元に失敗: {e}")
             return None
 

@@ -1,38 +1,135 @@
 """ダッシュボード/タスク管理ツール。"""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.models.agent import AgentRole, AgentStatus
-from src.models.dashboard import TaskStatus
+from src.models.dashboard import TaskStatus, normalize_task_id
 from src.models.message import MessagePriority, MessageType
+from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 from src.tools.helpers import (
     ensure_dashboard_manager,
     ensure_ipc_manager,
     ensure_memory_manager,
     find_agents_by_role,
+    notify_agent_via_tmux,
     require_permission,
     save_agent_to_file,
     sync_agents_from_file,
 )
-from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 
 logger = logging.getLogger(__name__)
+_ADMIN_DASHBOARD_GRANT_SECONDS = 90
 
 
-def _normalize_task_id(task_id: str | None) -> str:
-    """task_id の比較用正規化を行う。"""
-    if not task_id:
-        return ""
-    normalized = task_id.strip().lower()
-    for prefix in ("task:", "task_", "task-"):
-        if normalized.startswith(prefix):
-            normalized = normalized[len(prefix):]
-            break
-    return normalized
+def _get_admin_poll_state(app_ctx: Any, admin_id: str) -> dict[str, Any]:
+    """Admin ごとのポーリングガード状態を取得する。"""
+    state_map = getattr(app_ctx, "_admin_poll_state", None)
+    if not isinstance(state_map, dict):
+        state_map = {}
+        app_ctx._admin_poll_state = state_map
+    state = state_map.get(admin_id)
+    if not isinstance(state, dict):
+        state = {
+            "waiting_for_ipc": False,
+            "allow_dashboard_until": None,
+        }
+        state_map[admin_id] = state
+    return state
+
+
+def _has_recent_healthcheck_event(app_ctx: Any, admin_id: str) -> bool:
+    events = getattr(app_ctx, "_admin_last_healthcheck_at", None)
+    if not isinstance(events, dict):
+        return False
+    at = events.get(admin_id)
+    if not isinstance(at, datetime):
+        return False
+    window = max(
+        _ADMIN_DASHBOARD_GRANT_SECONDS,
+        int(getattr(app_ctx.settings, "healthcheck_interval_seconds", 60)),
+    )
+    return datetime.now() - at <= timedelta(seconds=window)
+
+
+def _should_block_admin_dashboard_polling(app_ctx: Any, admin_id: str) -> bool:
+    state = _get_admin_poll_state(app_ctx, admin_id)
+    if not bool(state.get("waiting_for_ipc")):
+        return False
+
+    allow_until = state.get("allow_dashboard_until")
+    if isinstance(allow_until, datetime) and datetime.now() <= allow_until:
+        return False
+
+    try:
+        ipc = ensure_ipc_manager(app_ctx)
+        if ipc.get_unread_count(admin_id) > 0:
+            return False
+    except Exception:
+        pass
+
+    if _has_recent_healthcheck_event(app_ctx, admin_id):
+        state["allow_dashboard_until"] = datetime.now() + timedelta(
+            seconds=_ADMIN_DASHBOARD_GRANT_SECONDS
+        )
+        return False
+
+    return True
+
+
+def _polling_blocked_response() -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": (
+            "polling_blocked: IPC 通知待機中のため連続ダッシュボード参照はできません"
+        ),
+        "next_action": "wait_for_ipc_notification",
+    }
+
+
+async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
+    """Admin/Owner 向けに Dashboard のエージェント情報・コスト・Markdownを同期する。"""
+    sync_agents_from_file(app_ctx)
+    for agent in app_ctx.agents.values():
+        dashboard.update_agent_summary(agent)
+    # Claude エージェントの実測コストを取得
+    claude_agents = []
+    for candidate in app_ctx.agents.values():
+        role_value = str(candidate.role)
+        if role_value not in (
+            AgentRole.ADMIN.value,
+            AgentRole.WORKER.value,
+            "admin",
+            "worker",
+        ):
+            continue
+        cli_value = (
+            candidate.ai_cli.value
+            if hasattr(candidate.ai_cli, "value")
+            else str(candidate.ai_cli or "")
+        )
+        if cli_value == "claude":
+            claude_agents.append(candidate)
+    for target_agent in claude_agents:
+        try:
+            await capture_claude_actual_cost_for_agent(
+                app_ctx=app_ctx,
+                agent=target_agent,
+                task_id=target_agent.current_task,
+            )
+        except Exception as e:
+            logger.debug(f"Dashboard 同期時の Claude 実測コスト更新をスキップ: {e}")
+    # Markdown ダッシュボードを保存
+    if app_ctx.session_id and app_ctx.project_root:
+        try:
+            dashboard.save_markdown_dashboard(
+                app_ctx.project_root, app_ctx.session_id
+            )
+        except Exception as e:
+            logger.warning(f"Dashboard ファイル更新に失敗: {e}")
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -233,6 +330,14 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        caller = app_ctx.agents.get(caller_agent_id)
+        caller_role = getattr(caller, "role", None)
+        is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
+        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
+            app_ctx, caller_agent_id
+        ):
+            return _polling_blocked_response()
+
         dashboard = ensure_dashboard_manager(app_ctx)
 
         # ステータスの検証
@@ -297,7 +402,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効な進捗率です: {progress}（有効: 0-100）",
             }
 
-        normalized_task_id = _normalize_task_id(task_id)
+        normalized_task_id = normalize_task_id(task_id)
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
         actual_progress = progress or 0
         worker_cost_snapshot = None
@@ -340,46 +445,12 @@ def register_tools(mcp: FastMCP) -> None:
             logger.warning(f"Admin への進捗通知に失敗: {e}")
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
-        # BUSY/IDLE に関係なく常に通知を送信
         if admin_notified and admin_ids:
-            try:
-                tmux = app_ctx.tmux
-                admin_id_for_notify = admin_ids[0]
-
-                # ファイルから最新の状態を取得
-                sync_agents_from_file(app_ctx)
-                agents = app_ctx.agents
-
-                admin_agent = agents.get(admin_id_for_notify)
-                if (
-                    not admin_agent
-                    or not admin_agent.session_name
-                    or admin_agent.pane_index is None
-                ):
-                    logger.warning(
-                        f"Admin エージェントの tmux 情報が見つかりません: {admin_id_for_notify}"
-                    )
-                else:
-                    notification_text = (
-                        "echo '[IPC] 新しいメッセージ:"
-                        f" task_progress from {caller_agent_id}'"
-                    )
-                    admin_cli = (
-                        admin_agent.ai_cli.value
-                        if hasattr(admin_agent.ai_cli, "value")
-                        else str(admin_agent.ai_cli or "")
-                    ).lower()
-                    await tmux.send_with_rate_limit_to_pane(
-                        admin_agent.session_name,
-                        admin_agent.window_index or 0,
-                        admin_agent.pane_index,
-                        notification_text,
-                        clear_input=False,
-                        confirm_codex_prompt=admin_cli == "codex",
-                    )
-                    logger.info(f"Admin への tmux 通知を送信: {admin_id_for_notify}")
-            except Exception as e:
-                logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
+            sync_agents_from_file(app_ctx)
+            admin_agent = app_ctx.agents.get(admin_ids[0])
+            await notify_agent_via_tmux(
+                app_ctx, admin_agent, "task_progress", caller_agent_id
+            )
 
         return {
             "success": True,
@@ -442,7 +513,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効なステータスです: {status}（有効: completed, failed）",
             }
 
-        normalized_task_id = _normalize_task_id(task_id)
+        normalized_task_id = normalize_task_id(task_id)
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
         worker_cost_snapshot = None
         worker_agent = app_ctx.agents.get(caller_agent_id) if caller_agent_id else None
@@ -478,46 +549,16 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
-        # BUSY/IDLE に関係なく常に通知を送信
-        notification_sent = False
-        agents = app_ctx.agents
-        try:
-            tmux = app_ctx.tmux
-
-            # ファイルから最新の状態を取得
-            sync_agents_from_file(app_ctx)
-            agents = app_ctx.agents
-
-            admin_agent = agents.get(admin_id)
-            if not admin_agent or not admin_agent.session_name or admin_agent.pane_index is None:
-                logger.warning(f"Admin エージェントの tmux 情報が見つかりません: {admin_id}")
-            else:
-                notification_text = (
-                    "echo '[IPC] 新しいメッセージ:"
-                    f" {msg_type.value} from {caller_agent_id}'"
-                )
-                admin_cli = (
-                    admin_agent.ai_cli.value
-                    if hasattr(admin_agent.ai_cli, "value")
-                    else str(admin_agent.ai_cli or "")
-                ).lower()
-                await tmux.send_with_rate_limit_to_pane(
-                    admin_agent.session_name,
-                    admin_agent.window_index or 0,
-                    admin_agent.pane_index,
-                    notification_text,
-                    clear_input=False,
-                    confirm_codex_prompt=admin_cli == "codex",
-                )
-                notification_sent = True
-                logger.info(f"Admin への tmux 通知を送信: {admin_id}")
-        except Exception as e:
-            logger.warning(f"Admin への tmux 通知の送信に失敗: {e}")
+        sync_agents_from_file(app_ctx)
+        admin_agent = app_ctx.agents.get(admin_id)
+        notification_sent = await notify_agent_via_tmux(
+            app_ctx, admin_agent, msg_type.value, caller_agent_id
+        )
 
         # 🔴 Worker 自身を IDLE にリセット
         if caller_agent_id:
             try:
-                worker_agent = agents.get(caller_agent_id)
+                worker_agent = app_ctx.agents.get(caller_agent_id)
                 if worker_agent and worker_agent.role == AgentRole.WORKER.value:
                     worker_agent.status = AgentStatus.IDLE
                     worker_agent.current_task = None
@@ -639,48 +680,18 @@ def register_tools(mcp: FastMCP) -> None:
         # Worker の場合は Dashboard を読み取り専用で返す（上書き防止）
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
+        is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
         is_admin_or_owner = caller_role in (
             AgentRole.ADMIN.value, AgentRole.OWNER.value, "admin", "owner",
         )
 
+        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
+            app_ctx, caller_agent_id
+        ):
+            return _polling_blocked_response()
+
         if is_admin_or_owner:
-            # Admin/Owner: エージェント情報を同期して Dashboard を更新
-            sync_agents_from_file(app_ctx)
-            for agent in app_ctx.agents.values():
-                dashboard.update_agent_summary(agent)
-            claude_agents = []
-            for candidate in app_ctx.agents.values():
-                role_value = str(candidate.role)
-                if role_value not in (
-                    AgentRole.ADMIN.value,
-                    AgentRole.WORKER.value,
-                    "admin",
-                    "worker",
-                ):
-                    continue
-                cli_value = (
-                    candidate.ai_cli.value
-                    if hasattr(candidate.ai_cli, "value")
-                    else str(candidate.ai_cli or "")
-                )
-                if cli_value == "claude":
-                    claude_agents.append(candidate)
-            for target_agent in claude_agents:
-                try:
-                    await capture_claude_actual_cost_for_agent(
-                        app_ctx=app_ctx,
-                        agent=target_agent,
-                        task_id=target_agent.current_task,
-                    )
-                except Exception as e:
-                    logger.debug(f"Dashboard 取得時の Claude 実測コスト更新をスキップ: {e}")
-            if app_ctx.session_id and app_ctx.project_root:
-                try:
-                    dashboard.save_markdown_dashboard(
-                        app_ctx.project_root, app_ctx.session_id
-                    )
-                except Exception as e:
-                    logger.warning(f"Dashboard ファイル更新に失敗: {e}")
+            await _sync_dashboard_for_admin(app_ctx, dashboard)
 
         dashboard_data = dashboard.get_dashboard()
 
@@ -711,50 +722,18 @@ def register_tools(mcp: FastMCP) -> None:
         # Worker の場合は Dashboard を読み取り専用で返す（上書き防止）
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
+        is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
         is_admin_or_owner = caller_role in (
             AgentRole.ADMIN.value, AgentRole.OWNER.value, "admin", "owner",
         )
 
+        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
+            app_ctx, caller_agent_id
+        ):
+            return _polling_blocked_response()
+
         if is_admin_or_owner:
-            # Admin/Owner: エージェント情報を同期して Dashboard を更新
-            sync_agents_from_file(app_ctx)
-            for agent in app_ctx.agents.values():
-                dashboard.update_agent_summary(agent)
-            claude_agents = []
-            for candidate in app_ctx.agents.values():
-                role_value = str(candidate.role)
-                if role_value not in (
-                    AgentRole.ADMIN.value,
-                    AgentRole.WORKER.value,
-                    "admin",
-                    "worker",
-                ):
-                    continue
-                cli_value = (
-                    candidate.ai_cli.value
-                    if hasattr(candidate.ai_cli, "value")
-                    else str(candidate.ai_cli or "")
-                )
-                if cli_value == "claude":
-                    claude_agents.append(candidate)
-            for target_agent in claude_agents:
-                try:
-                    await capture_claude_actual_cost_for_agent(
-                        app_ctx=app_ctx,
-                        agent=target_agent,
-                        task_id=target_agent.current_task,
-                    )
-                except Exception as e:
-                    logger.debug(
-                        f"Dashboard summary 取得時の Claude 実測コスト更新をスキップ: {e}"
-                    )
-            if app_ctx.session_id and app_ctx.project_root:
-                try:
-                    dashboard.save_markdown_dashboard(
-                        app_ctx.project_root, app_ctx.session_id
-                    )
-                except Exception as e:
-                    logger.warning(f"Dashboard ファイル更新に失敗: {e}")
+            await _sync_dashboard_for_admin(app_ctx, dashboard)
 
         summary = dashboard.get_summary()
 

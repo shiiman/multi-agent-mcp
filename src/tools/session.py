@@ -13,11 +13,11 @@ from src.tools.session_state import (
 from src.tools.session_tools import register_tools
 
 __all__ = [
-    "register_tools",
-    "generate_env_template",
-    "_format_env_value",
-    "_setup_mcp_directories",
     "_check_completion_status",
-    "_reset_app_context",
     "_collect_session_names",
+    "_format_env_value",
+    "_reset_app_context",
+    "_setup_mcp_directories",
+    "generate_env_template",
+    "register_tools",
 ]

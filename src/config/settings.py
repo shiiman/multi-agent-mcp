@@ -4,6 +4,7 @@ import json
 import os
 from enum import Enum
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
@@ -128,14 +129,14 @@ class ModelDefaults:
     """Gemini 軽量モデル"""
 
     # CLI 別デフォルトモデルマッピング
-    CLI_DEFAULTS: dict[str, dict[str, str]] = {
+    CLI_DEFAULTS: ClassVar[dict[str, dict[str, str]]] = {
         "claude": {"admin": OPUS, "worker": SONNET},
         "codex": {"admin": CODEX_DEFAULT, "worker": CODEX_DEFAULT},
         "gemini": {"admin": GEMINI_DEFAULT, "worker": GEMINI_LIGHT},
     }
 
     # Claude 固有のモデル名（非 Claude CLI で使用された場合、CLI デフォルトに置換）
-    CLAUDE_ALIASES: set[str] = {"opus", "sonnet", "haiku", "default"}
+    CLAUDE_ALIASES: ClassVar[set[str]] = {"opus", "sonnet", "haiku", "default"}
 
 
 def resolve_model_for_cli(

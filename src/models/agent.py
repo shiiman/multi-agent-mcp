@@ -67,3 +67,18 @@ class Agent(BaseModel):
         default=False,
         description="Worker が AI 起動済みかどうか（初回タスク送信後に True）",
     )
+
+    @property
+    def resolved_session_name(self) -> str | None:
+        """tmux のセッション名を解決する。
+
+        session_name フィールドを優先し、なければ tmux_session から抽出する。
+
+        Returns:
+            セッション名、または解決できない場合は None
+        """
+        if self.session_name:
+            return self.session_name
+        if self.tmux_session:
+            return str(self.tmux_session).split(":", 1)[0]
+        return None

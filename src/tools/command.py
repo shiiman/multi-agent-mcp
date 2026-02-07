@@ -10,23 +10,23 @@ from mcp.server.fastmcp import Context, FastMCP
 from src.config.workflow_guides import get_role_template_path
 from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus
+from src.tools.agent_helpers import (
+    _create_worktree_for_worker,
+    _send_task_to_worker,
+    build_worker_task_branch,
+    resolve_worker_number_from_slot,
+)
+from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 from src.tools.helpers import (
     ensure_dashboard_manager,
-    get_worktree_manager,
     get_mcp_tool_prefix_from_config,
+    get_worktree_manager,
     require_permission,
     resolve_main_repo_root,
     save_agent_to_file,
     search_memory_context,
     sync_agents_from_file,
 )
-from src.tools.agent_helpers import (
-    build_worker_task_branch,
-    _create_worktree_for_worker,
-    _send_task_to_worker,
-    resolve_worker_number_from_slot,
-)
-from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 from src.tools.model_profile import get_current_profile_settings
 from src.tools.task_templates import generate_admin_task
 
@@ -160,9 +160,9 @@ def register_tools(mcp: FastMCP) -> None:
                 task_id=agent.current_task,
                 capture_lines=max(lines, 80),
             )
-        except Exception:
+        except Exception as e:
             # 実測コスト取得は補助機能のため失敗しても処理継続
-            pass
+            logger.debug("実測コスト取得に失敗: %s", e)
 
         return {
             "success": True,
@@ -171,263 +171,157 @@ def register_tools(mcp: FastMCP) -> None:
             "output": output,
         }
 
-    @mcp.tool()
-    async def send_task(
-        agent_id: str,
-        task_content: str,
-        session_id: str,
-        auto_enhance: bool = True,
-        branch_name: str | None = None,
-        caller_agent_id: str | None = None,
-        ctx: Context = None,
-    ) -> dict[str, Any]:
-        """タスク指示をファイル経由でエージェントに送信する。
+    async def _resolve_worker_task_id(app_ctx, agent, agent_id, dashboard):
+        """Worker 用の task_id を解決する。"""
+        effective_task_id = agent.current_task
+        selected_task = None
+        if not effective_task_id:
+            assigned_tasks = dashboard.list_tasks(agent_id=agent_id)
+            active_tasks = [
+                task
+                for task in assigned_tasks
+                if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+            ]
+            if len(active_tasks) == 1:
+                selected_task = active_tasks[0]
+                effective_task_id = selected_task.id
+        return effective_task_id, selected_task
 
-        長いマルチライン指示に対応。エージェントはファイル経由でタスクを実行。
-        auto_enhance=True の場合:
-        - Admin: 計画書 + Worker管理手順を自動生成（Worker 数はプロファイル設定から自動決定）
-        - Worker: 7セクション構造・ペルソナ・メモリを自動統合
-
-        ※ Owner と Admin のみ使用可能。
-
-        Args:
-            agent_id: エージェントID
-            task_content: タスク内容（Markdown形式）
-            session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
-            auto_enhance: 自動拡張を行うか（デフォルト: True）
-            branch_name: 作業ブランチ名（Admin 用、省略時は feature/{session_id}）
-            caller_agent_id: 呼び出し元エージェントID（必須）
-
-        Returns:
-            送信結果（success, task_file, command_sent, message または error）
-        """
-        app_ctx, role_error = require_permission(ctx, "send_task", caller_agent_id)
-        if role_error:
-            return role_error
-
-        tmux = app_ctx.tmux
-        agents = app_ctx.agents
-
-        # session_id を AppContext に設定（ディレクトリパス決定に使用）
-        app_ctx.session_id = session_id
-
-        # ファイルからエージェント情報を同期（他の MCP インスタンスで作成されたエージェントを取得）
-        sync_agents_from_file(app_ctx)
-
-        # プロファイル設定から Worker 数を取得（MCP 側で一元管理）
-        profile_settings = get_current_profile_settings(app_ctx)
-        effective_worker_count = profile_settings["max_workers"]
-
-        agent = agents.get(agent_id)
-        if not agent:
-            return {
-                "success": False,
-                "error": f"エージェント {agent_id} が見つかりません",
-            }
-
-        # プロジェクトルートを取得
-        # worktree の場合はメインリポジトリのルートを使用
-        if agent.worktree_path:
-            project_root = Path(resolve_main_repo_root(agent.worktree_path))
-        elif agent.working_dir:
-            project_root = Path(resolve_main_repo_root(agent.working_dir))
-        else:
-            return {
-                "success": False,
-                "error": "エージェントに working_dir または worktree_path が設定されていません",
-            }
-
-        # タスク内容の処理
-        final_task_content = task_content
-        is_admin = agent.role == AgentRole.ADMIN.value
-
-        if auto_enhance and is_admin:
-            # メモリから関連情報を検索（プロジェクト + グローバル）
-            memory_context = search_memory_context(app_ctx, task_content)
-
-            # プロジェクト名を取得
-            project_name = project_root.name
-
-            # config.json から MCP ツールプレフィックスを取得（Admin/Worker 共通）
-            mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
-
-            # Admin 用: 計画書 + Worker管理手順
-            actual_branch = branch_name or f"feature/{session_id}"
-            final_task_content = generate_admin_task(
-                session_id=session_id,
-                agent_id=agent_id,
-                plan_content=task_content,
-                branch_name=actual_branch,
-                worker_count=effective_worker_count,
-                memory_context=memory_context,
-                project_name=project_name,
-                working_dir=str(project_root),
-                mcp_tool_prefix=mcp_prefix,
-                settings=app_ctx.settings,
-            )
-
-            # Keep role/task separation: role guidance is passed via CLI bootstrap command.
-
-        dashboard = ensure_dashboard_manager(app_ctx)
-
-        # Worker は _send_task_to_worker に統一し、
-        # ai_bootstrapped / followup 分岐を共通化する。
-        if not is_admin:
-            if (
-                agent.session_name is None
-                or agent.window_index is None
-                or agent.pane_index is None
-            ):
-                return {
-                    "success": False,
-                    "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
-                }
-
-            try:
-                worker_no = resolve_worker_number_from_slot(
-                    app_ctx.settings,
-                    agent.window_index,
-                    agent.pane_index,
-                )
-            except Exception:
-                worker_no = 1
-
-            # Worker への送信は Dashboard に存在する task_id が必須
-            effective_task_id = agent.current_task
-            selected_task = None
-            if not effective_task_id:
-                assigned_tasks = dashboard.list_tasks(agent_id=agent_id)
-                active_tasks = [
-                    task
-                    for task in assigned_tasks
-                    if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
-                ]
-                if len(active_tasks) == 1:
-                    selected_task = active_tasks[0]
-                    effective_task_id = selected_task.id
-
-            if not effective_task_id:
-                return {
-                    "success": False,
-                    "error": (
-                        "worker へ送信する task_id を特定できません。"
-                        "先に create_task + assign_task_to_agent を実行してください。"
-                    ),
-                    "assignment_error": "task_id_unresolved",
-                }
-
-            # 2回目以降も含め、タスク割当直前に worktree 準備を実施する
-            # （MCP_ENABLE_WORKTREE=false の場合は作成・切替を行わない）
-            dispatch_worktree_path = agent.worktree_path or agent.working_dir or str(project_root)
-            dispatch_branch = branch_name or (selected_task.branch if selected_task else "")
-            assignment_error: str | None = None
-
-            if app_ctx.settings.enable_worktree:
-                worktree_manager = get_worktree_manager(app_ctx, str(project_root))
-                base_branch = await worktree_manager.get_current_branch(str(project_root))
-                if not base_branch:
-                    base_branch = "main"
-                generated_branch = (
-                    branch_name
-                    or build_worker_task_branch(base_branch, worker_no, effective_task_id)
-                )
-
-                wt_path, wt_error = await _create_worktree_for_worker(
-                    app_ctx=app_ctx,
-                    repo_path=str(project_root),
-                    branch=generated_branch,
-                    base_branch=base_branch,
-                    worker_index=max(worker_no - 1, 0),
-                )
-                if wt_error or not wt_path:
-                    return {
-                        "success": False,
-                        "error": wt_error or "worktree 作成に失敗しました",
-                    }
-
-                dispatch_worktree_path = wt_path
-                dispatch_branch = generated_branch
-                agent.worktree_path = wt_path
-                agent.working_dir = wt_path
-
-            try:
-                assigned, _ = dashboard.assign_task(
-                    task_id=effective_task_id,
-                    agent_id=agent_id,
-                    branch=dispatch_branch or None,
-                    worktree_path=dispatch_worktree_path if app_ctx.settings.enable_worktree else None,
-                )
-                if not assigned:
-                    assignment_error = f"task_not_found:{effective_task_id}"
-                    return {
-                        "success": False,
-                        "error": (
-                            f"task {effective_task_id} を dashboard に割り当てできませんでした。"
-                            "task を登録してから送信してください。"
-                        ),
-                        "assignment_error": assignment_error,
-                    }
-            except Exception as assign_error:
-                assignment_error = str(assign_error)
-                return {
-                    "success": False,
-                    "error": f"task 割当更新に失敗しました: {assign_error}",
-                    "assignment_error": assignment_error,
-                }
-
-            agent.current_task = effective_task_id
-            agent.status = AgentStatus.BUSY
-            agent.last_activity = datetime.now()
-            save_agent_to_file(app_ctx, agent)
-            dashboard.update_agent_summary(agent)
-
-            send_result = await _send_task_to_worker(
-                app_ctx=app_ctx,
-                agent=agent,
-                task_content=task_content,
-                task_id=effective_task_id,
-                branch=dispatch_branch,
-                worktree_path=dispatch_worktree_path,
-                session_id=session_id,
-                worker_index=max(worker_no - 1, 0),
-                enable_worktree=app_ctx.settings.enable_worktree,
-                profile_settings=profile_settings,
-                caller_agent_id=caller_agent_id,
-            )
-
-            success = bool(send_result.get("task_sent"))
-            result = {
-                "success": success,
-                "agent_id": agent_id,
-                "agent_role": agent.role,
-                "session_id": session_id,
-                "task_file": send_result.get("task_file"),
-                "command_sent": send_result.get("command_sent"),
-                "auto_enhanced": auto_enhance,
-                "dispatch_mode": send_result.get("dispatch_mode", "none"),
-                "dispatch_error": send_result.get("dispatch_error"),
-                "assignment_error": assignment_error,
-                "branch_name": dispatch_branch or None,
-                "worktree_path": (
-                    dispatch_worktree_path if app_ctx.settings.enable_worktree else None
-                ),
-                "message": "タスクを送信しました" if success else "タスク送信に失敗しました",
-            }
-            return result
-
-        # Admin への送信は従来どおり bootstrap コマンドを使用
-        admin_task_id = session_id
-        agent_label = (
-            dashboard.get_agent_label(agent)
-            if hasattr(dashboard, "get_agent_label")
-            else agent.id
+    async def _prepare_worker_worktree(
+        app_ctx, agent, project_root, branch_name, worker_no, effective_task_id,
+    ):
+        """Worker 用の worktree を準備する。"""
+        worktree_manager = get_worktree_manager(app_ctx, str(project_root))
+        base_branch = await worktree_manager.get_current_branch(str(project_root))
+        if not base_branch:
+            base_branch = "main"
+        generated_branch = (
+            branch_name
+            or build_worker_task_branch(base_branch, worker_no, effective_task_id)
         )
+        wt_path, wt_error = await _create_worktree_for_worker(
+            app_ctx=app_ctx,
+            repo_path=str(project_root),
+            branch=generated_branch,
+            base_branch=base_branch,
+            worker_index=max(worker_no - 1, 0),
+        )
+        return wt_path, wt_error, generated_branch
+
+    def _assign_task_to_dashboard(
+        dashboard, effective_task_id, agent_id, dispatch_branch, dispatch_worktree_path, enable_wt,
+    ) -> dict | None:
+        """dashboard にタスクを割り当てる。失敗時はエラー dict を返す。"""
+        try:
+            assigned, _ = dashboard.assign_task(
+                task_id=effective_task_id, agent_id=agent_id,
+                branch=dispatch_branch or None,
+                worktree_path=dispatch_worktree_path if enable_wt else None,
+            )
+            if not assigned:
+                return {
+                    "success": False,
+                    "error": f"task {effective_task_id} を dashboard に割り当てできませんでした。",
+                    "assignment_error": f"task_not_found:{effective_task_id}",
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"task 割当更新に失敗: {e}",
+                "assignment_error": str(e),
+            }
+        return None
+
+    async def _send_task_to_worker_via_command(
+        app_ctx, agent, agent_id, task_content, session_id,
+        auto_enhance, branch_name, project_root, profile_settings, caller_agent_id,
+    ) -> dict[str, Any]:
+        """Worker へのタスク送信処理。"""
+        dashboard = ensure_dashboard_manager(app_ctx)
+        if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
+            return {
+                "success": False,
+                "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
+            }
+
+        try:
+            worker_no = resolve_worker_number_from_slot(
+                app_ctx.settings, agent.window_index, agent.pane_index,
+            )
+        except Exception as e:
+            logger.debug("Worker 番号の解決に失敗: %s", e)
+            worker_no = 1
+
+        effective_task_id, selected_task = await _resolve_worker_task_id(
+            app_ctx, agent, agent_id, dashboard,
+        )
+        if not effective_task_id:
+            return {
+                "success": False,
+                "error": "worker へ送信する task_id を特定できません。",
+                "assignment_error": "task_id_unresolved",
+            }
+
+        dispatch_wt = agent.worktree_path or agent.working_dir or str(project_root)
+        dispatch_branch = branch_name or (selected_task.branch if selected_task else "")
+        enable_wt = app_ctx.settings.enable_worktree
+
+        if enable_wt:
+            wt_path, wt_error, generated_branch = await _prepare_worker_worktree(
+                app_ctx, agent, project_root, branch_name, worker_no, effective_task_id,
+            )
+            if wt_error or not wt_path:
+                return {"success": False, "error": wt_error or "worktree 作成に失敗しました"}
+            dispatch_wt, dispatch_branch = wt_path, generated_branch
+            agent.worktree_path = wt_path
+            agent.working_dir = wt_path
+
+        assign_err = _assign_task_to_dashboard(
+            dashboard, effective_task_id, agent_id,
+            dispatch_branch, dispatch_wt, enable_wt,
+        )
+        if assign_err:
+            return assign_err
+
+        agent.current_task = effective_task_id
+        agent.status = AgentStatus.BUSY
+        agent.last_activity = datetime.now()
+        save_agent_to_file(app_ctx, agent)
+        dashboard.update_agent_summary(agent)
+
+        send_result = await _send_task_to_worker(
+            app_ctx=app_ctx, agent=agent, task_content=task_content,
+            task_id=effective_task_id, branch=dispatch_branch,
+            worktree_path=dispatch_wt, session_id=session_id,
+            worker_index=max(worker_no - 1, 0),
+            enable_worktree=enable_wt, profile_settings=profile_settings,
+            caller_agent_id=caller_agent_id,
+        )
+        ok = bool(send_result.get("task_sent"))
+        return {
+            "success": ok, "agent_id": agent_id, "agent_role": agent.role,
+            "session_id": session_id, "task_file": send_result.get("task_file"),
+            "command_sent": send_result.get("command_sent"), "auto_enhanced": auto_enhance,
+            "dispatch_mode": send_result.get("dispatch_mode", "none"),
+            "dispatch_error": send_result.get("dispatch_error"), "assignment_error": None,
+            "branch_name": dispatch_branch or None,
+            "worktree_path": dispatch_wt if enable_wt else None,
+            "message": "タスクを送信しました" if ok else "タスク送信に失敗しました",
+        }
+
+    async def _send_task_to_admin_via_command(
+        app_ctx, agent, agent_id, final_task_content, session_id,
+        auto_enhance, branch_name, project_root, profile_settings,
+    ) -> dict[str, Any]:
+        """Admin へのタスク送信処理。"""
+        tmux = app_ctx.tmux
+        dashboard = ensure_dashboard_manager(app_ctx)
+        if hasattr(dashboard, "get_agent_label"):
+            agent_label = dashboard.get_agent_label(agent)
+        else:
+            agent_label = agent.id
         task_file = dashboard.write_task_file(
-            project_root,
-            session_id,
-            admin_task_id,
-            agent_label,
-            final_task_content,
+            project_root, session_id, session_id, agent_label, final_task_content,
         )
 
         agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
@@ -448,10 +342,7 @@ def register_tools(mcp: FastMCP) -> None:
                 reasoning_effort=reasoning_effort,
             )
         except ValueError as e:
-            return {
-                "success": False,
-                "error": f"CLIコマンド生成に失敗しました: {e}",
-            }
+            return {"success": False, "error": f"CLIコマンド生成に失敗しました: {e}"}
 
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
             return {
@@ -460,30 +351,25 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         success = await tmux.send_with_rate_limit_to_pane(
-            agent.session_name,
-            agent.window_index,
-            agent.pane_index,
-            read_command,
-            confirm_codex_prompt=str(agent_cli).lower() == "codex",
+            agent.session_name, agent.window_index, agent.pane_index,
+            read_command, confirm_codex_prompt=str(agent_cli).lower() == "codex",
         )
         if success:
             agent.status = AgentStatus.BUSY
             agent.last_activity = datetime.now()
             save_agent_to_file(app_ctx, agent)
             dashboard.save_markdown_dashboard(project_root, session_id)
-
             try:
                 dashboard.record_api_call(
-                    ai_cli=agent_cli,
-                    model=agent_model,
+                    ai_cli=agent_cli, model=agent_model,
                     estimated_tokens=thinking_tokens,
-                    agent_id=agent_id,
-                    task_id=session_id,
+                    agent_id=agent_id, task_id=session_id,
                 )
             except Exception as e:
                 logger.debug(f"コスト記録をスキップ: {e}")
 
-        result = {
+        msg = "タスクを送信しました" if success else "タスク送信に失敗しました"
+        return {
             "success": success,
             "agent_id": agent_id,
             "agent_role": agent.role,
@@ -491,12 +377,89 @@ def register_tools(mcp: FastMCP) -> None:
             "task_file": str(task_file),
             "command_sent": read_command,
             "auto_enhanced": auto_enhance,
-            "message": "タスクを送信しました" if success else "タスク送信に失敗しました",
+            "message": msg,
             "branch_name": branch_name or f"feature/{session_id}",
             "model_profile": profile_settings["profile"],
         }
 
-        return result
+    def _enhance_admin_task(
+        app_ctx, agent_id, task_content, branch_name,
+        session_id, project_root, effective_worker_count,
+    ):
+        """Admin 用タスク内容を自動拡張する。"""
+        memory_context = search_memory_context(app_ctx, task_content)
+        mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
+        actual_branch = branch_name or f"feature/{session_id}"
+        return generate_admin_task(
+            session_id=session_id, agent_id=agent_id,
+            plan_content=task_content,
+            branch_name=actual_branch,
+            worker_count=effective_worker_count,
+            memory_context=memory_context,
+            project_name=project_root.name,
+            working_dir=str(project_root),
+            mcp_tool_prefix=mcp_prefix,
+            settings=app_ctx.settings,
+        )
+
+    @mcp.tool()
+    async def send_task(
+        agent_id: str, task_content: str, session_id: str,
+        auto_enhance: bool = True, branch_name: str | None = None,
+        caller_agent_id: str | None = None, ctx: Context = None,
+    ) -> dict[str, Any]:
+        """タスク指示をファイル経由でエージェントに送信する。※ Owner と Admin のみ使用可能。
+
+        Args:
+            agent_id: エージェントID
+            task_content: タスク内容（Markdown形式）
+            session_id: Issue番号または一意なタスクID
+            auto_enhance: 自動拡張を行うか（デフォルト: True）
+            branch_name: 作業ブランチ名（Admin 用、省略時は feature/{session_id}）
+            caller_agent_id: 呼び出し元エージェントID（必須）
+        """
+        app_ctx, role_error = require_permission(ctx, "send_task", caller_agent_id)
+        if role_error:
+            return role_error
+
+        agents = app_ctx.agents
+        app_ctx.session_id = session_id
+        sync_agents_from_file(app_ctx)
+
+        profile_settings = get_current_profile_settings(app_ctx)
+        agent = agents.get(agent_id)
+        if not agent:
+            return {"success": False, "error": f"エージェント {agent_id} が見つかりません"}
+
+        if agent.worktree_path:
+            project_root = Path(resolve_main_repo_root(agent.worktree_path))
+        elif agent.working_dir:
+            project_root = Path(resolve_main_repo_root(agent.working_dir))
+        else:
+            return {
+                "success": False,
+                "error": "エージェントに working_dir または worktree_path が設定されていません",
+            }
+
+        is_admin = agent.role == AgentRole.ADMIN.value
+
+        if not is_admin:
+            return await _send_task_to_worker_via_command(
+                app_ctx, agent, agent_id, task_content, session_id,
+                auto_enhance, branch_name, project_root, profile_settings, caller_agent_id,
+            )
+
+        final_task_content = task_content
+        if auto_enhance:
+            final_task_content = _enhance_admin_task(
+                app_ctx, agent_id, task_content, branch_name, session_id,
+                project_root, profile_settings["max_workers"],
+            )
+
+        return await _send_task_to_admin_via_command(
+            app_ctx, agent, agent_id, final_task_content, session_id,
+            auto_enhance, branch_name, project_root, profile_settings,
+        )
 
     @mcp.tool()
     async def open_session(

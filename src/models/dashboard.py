@@ -6,6 +6,27 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 
+def normalize_task_id(task_id: str | None) -> str:
+    """task_id を比較用に正規化する。
+
+    プレフィックス（task:, task_, task-）を除去し、小文字に統一する。
+
+    Args:
+        task_id: 正規化対象のタスクID
+
+    Returns:
+        正規化されたタスクID文字列（None/空の場合は空文字列）
+    """
+    if not task_id:
+        return ""
+    normalized = task_id.strip().lower()
+    for prefix in ("task:", "task_", "task-"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            break
+    return normalized
+
+
 class TaskStatus(str, Enum):
     """タスクのステータス。"""
 

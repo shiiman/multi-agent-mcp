@@ -1,6 +1,6 @@
 """ダッシュボード/タスク管理ツールのテスト。"""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -603,6 +603,54 @@ class TestGetDashboard:
 
         assert result["success"] is True
         assert "dashboard" in result
+
+    @pytest.mark.asyncio
+    async def test_get_dashboard_blocks_admin_polling_while_waiting(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """Admin が IPC 待機中に dashboard を連続参照するとブロックされることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_dashboard = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_dashboard":
+                get_dashboard = tool.fn
+                break
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.ipc_manager.register_agent("admin-001")
+        app_ctx._admin_poll_state = {
+            "admin-001": {
+                "waiting_for_ipc": True,
+                "allow_dashboard_until": now - timedelta(seconds=1),
+            }
+        }
+
+        result = await get_dashboard(
+            caller_agent_id="admin-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "polling_blocked" in result["error"]
 
 
 class TestCostTools:

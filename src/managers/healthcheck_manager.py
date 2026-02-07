@@ -5,7 +5,9 @@
 
 import hashlib
 import inspect
+import json
 import logging
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -78,17 +80,6 @@ class HealthcheckManager:
         self._recovery_failures: dict[str, int] = {}
 
     @staticmethod
-    def _resolve_session_name(agent: "Agent") -> str | None:
-        """Agent から tmux のセッション名を解決する。"""
-        if getattr(agent, "session_name", None):
-            return agent.session_name
-
-        tmux_session = getattr(agent, "tmux_session", None)
-        if tmux_session:
-            return str(tmux_session).split(":", 1)[0]
-        return None
-
-    @staticmethod
     def _recovery_key(agent_id: str, task_id: str | None) -> str:
         normalized_task = task_id or "-"
         return f"{agent_id}:{normalized_task}"
@@ -111,7 +102,7 @@ class HealthcheckManager:
 
     async def _capture_pane_hash(self, agent: "Agent") -> str | None:
         """Worker pane の出力ハッシュを取得する。"""
-        session_name = self._resolve_session_name(agent)
+        session_name = agent.resolved_session_name
         if (
             not session_name
             or agent.window_index is None
@@ -126,7 +117,8 @@ class HealthcheckManager:
                 agent.pane_index,
                 lines=120,
             )
-        except Exception:
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.debug("ペインキャプチャに失敗: %s", e)
             return None
 
         compact = "\n".join(output.strip().splitlines()[-40:])
@@ -239,7 +231,7 @@ class HealthcheckManager:
                 error_message="エージェントが見つかりません",
             )
 
-        session_name = self._resolve_session_name(agent)
+        session_name = agent.resolved_session_name
         if not session_name:
             return HealthStatus(
                 agent_id=agent_id,
@@ -320,7 +312,7 @@ class HealthcheckManager:
         if not agent:
             return False, f"エージェント {agent_id} が見つかりません"
 
-        session_name = self._resolve_session_name(agent)
+        session_name = agent.resolved_session_name
         if not session_name:
             return False, f"エージェント {agent_id} の tmux セッション情報がありません"
 
@@ -334,7 +326,7 @@ class HealthcheckManager:
                 if code != 0:
                     return False, f"強制復旧に失敗しました: {stderr}"
                 return True, f"エージェント {agent_id} に割り込みを送信しました"
-            except Exception as e:
+            except (OSError, subprocess.SubprocessError) as e:
                 return False, f"強制復旧に失敗しました: {e}"
 
         logger.info(f"エージェント {agent_id} の tmux セッションを再作成します")
@@ -362,95 +354,70 @@ class HealthcheckManager:
             if result.get("success"):
                 return True, result.get("message", "full_recovery succeeded")
             return False, result.get("error", result.get("message", "full_recovery failed"))
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, ImportError, ValueError) as e:
             return False, str(e)
 
+    def _notify_admins_task_failed(
+        self, app_ctx: Any, agent_id: str, task_id: str, reason: str,
+    ) -> str | None:
+        """タスク失敗を dashboard 更新 + Admin IPC 通知する。エラー時は文字列を返す。"""
+        try:
+            from pathlib import Path
+
+            from src.models.dashboard import TaskStatus
+            from src.models.message import MessagePriority, MessageType
+            from src.tools.helpers_managers import ensure_dashboard_manager, ensure_ipc_manager
+
+            dashboard = app_ctx.dashboard_manager or ensure_dashboard_manager(app_ctx)
+            dashboard.update_task_status(
+                task_id=task_id, status=TaskStatus.FAILED,
+                error_message=f"healthcheck_recovery_failed: {reason}",
+            )
+            if app_ctx.project_root and app_ctx.session_id:
+                dashboard.save_markdown_dashboard(Path(app_ctx.project_root), app_ctx.session_id)
+
+            ipc = ensure_ipc_manager(app_ctx)
+            admin_ids = [wid for wid, w in self.agents.items() if w.role == "admin"]
+            for aid in admin_ids:
+                if aid not in ipc.get_all_agent_ids():
+                    ipc.register_agent(aid)
+                ipc.send_message(
+                    sender_id="healthcheck-daemon", receiver_id=aid,
+                    message_type=MessageType.ERROR,
+                    subject=f"task failed by healthcheck: {task_id}",
+                    content=f"Worker {agent_id} の復旧上限超過により task {task_id} を failed 化。",
+                    priority=MessagePriority.HIGH,
+                    metadata={"agent_id": agent_id, "task_id": task_id, "reason": reason},
+                )
+        except (OSError, KeyError, ValueError) as e:
+            return str(e)
+        return None
+
     async def _finalize_failed_task(
-        self,
-        app_ctx: Any,
-        agent_id: str,
-        agent: "Agent",
-        reason: str,
+        self, app_ctx: Any, agent_id: str, agent: "Agent", reason: str,
     ) -> dict[str, str]:
         """復旧失敗上限を超えたタスクを failed 化し、Admin に通知する。"""
         from src.models.agent import AgentStatus
 
         task_id = agent.current_task
-        detail = {
-            "agent_id": agent_id,
-            "task_id": task_id or "",
-            "reason": reason,
-        }
+        detail = {"agent_id": agent_id, "task_id": task_id or "", "reason": reason}
 
         if app_ctx is not None and task_id:
-            try:
-                from pathlib import Path
-
-                from src.models.dashboard import TaskStatus
-                from src.models.message import MessagePriority, MessageType
-                from src.tools.helpers_managers import (
-                    ensure_dashboard_manager,
-                    ensure_ipc_manager,
-                )
-
-                dashboard = app_ctx.dashboard_manager
-                if dashboard is None:
-                    dashboard = ensure_dashboard_manager(app_ctx)
-                dashboard.update_task_status(
-                    task_id=task_id,
-                    status=TaskStatus.FAILED,
-                    error_message=f"healthcheck_recovery_failed: {reason}",
-                )
-                if app_ctx.project_root and app_ctx.session_id:
-                    dashboard.save_markdown_dashboard(
-                        Path(app_ctx.project_root),
-                        app_ctx.session_id,
-                    )
-
-                ipc = ensure_ipc_manager(app_ctx)
-                admin_ids = [
-                    worker_id
-                    for worker_id, worker in self.agents.items()
-                    if worker.role == "admin"
-                ]
-                for admin_id in admin_ids:
-                    if admin_id not in ipc.get_all_agent_ids():
-                        ipc.register_agent(admin_id)
-                    ipc.send_message(
-                        sender_id="healthcheck-daemon",
-                        receiver_id=admin_id,
-                        message_type=MessageType.ERROR,
-                        subject=f"task failed by healthcheck: {task_id}",
-                        content=(
-                            f"Worker {agent_id} の復旧が上限回数を超えたため、"
-                            f"task {task_id} を failed にしました。"
-                        ),
-                        priority=MessagePriority.HIGH,
-                        metadata={
-                            "agent_id": agent_id,
-                            "task_id": task_id,
-                            "reason": reason,
-                        },
-                    )
-            except Exception as e:
-                detail["notify_error"] = str(e)
-
-            # ダッシュボード更新成否に関わらず Worker 状態は必ず解放する
+            err = self._notify_admins_task_failed(app_ctx, agent_id, task_id, reason)
+            if err:
+                detail["notify_error"] = err
             agent.current_task = None
             agent.status = AgentStatus.IDLE
             agent.last_activity = datetime.now()
             try:
                 from src.tools.helpers import save_agent_to_file
-
                 save_agent_to_file(app_ctx, agent)
-            except Exception:
-                pass
+            except (OSError, json.JSONDecodeError, ValueError) as e:
+                logger.debug("復旧後のエージェント保存に失敗: %s", e)
         elif task_id:
-            # app_ctx がない場合でも in-memory だけは解放する
             agent.current_task = None
             agent.status = AgentStatus.IDLE
             agent.last_activity = datetime.now()
-
         return detail
 
     def get_summary(self) -> dict:
@@ -464,10 +431,183 @@ class HealthcheckManager:
             "last_monitor_at": self.last_monitor_at.isoformat() if self.last_monitor_at else None,
         }
 
+    def _sync_worker_active_task(
+        self,
+        agent_id: str,
+        agent: "Agent",
+        dashboard: Any | None,
+        app_ctx: Any | None,
+    ) -> tuple[Any, str | None]:
+        """Dashboard からアクティブタスクを同期し、エージェント状態を補正する。
+
+        Returns:
+            (active_task, active_task_id)
+        """
+        from src.models.agent import AgentStatus
+        from src.models.dashboard import TaskStatus
+
+        active_task = None
+        active_task_id = agent.current_task
+
+        if dashboard is None:
+            return active_task, active_task_id
+
+        try:
+            assigned_tasks = dashboard.list_tasks(agent_id=agent_id)
+            active_tasks = [
+                task
+                for task in assigned_tasks
+                if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+            ]
+            if active_tasks:
+                in_progress = [
+                    task for task in active_tasks if task.status == TaskStatus.IN_PROGRESS
+                ]
+                active_task = (in_progress or active_tasks)[0]
+                active_task_id = active_task.id
+                if agent.current_task != active_task_id:
+                    agent.current_task = active_task_id
+                    if agent.status != AgentStatus.BUSY.value:
+                        agent.status = AgentStatus.BUSY
+                    try:
+                        from src.tools.helpers import save_agent_to_file
+
+                        save_agent_to_file(app_ctx, agent)
+                    except (OSError, json.JSONDecodeError, ValueError) as e:
+                        logger.debug("BUSY ステータス保存に失敗: %s", e)
+            elif agent.current_task:
+                current_dashboard_task = dashboard.get_task(agent.current_task)
+                if current_dashboard_task and current_dashboard_task.status in (
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                    TaskStatus.CANCELLED,
+                ):
+                    agent.current_task = None
+                    if agent.status == AgentStatus.BUSY.value:
+                        agent.status = AgentStatus.IDLE
+                    try:
+                        from src.tools.helpers import save_agent_to_file
+
+                        save_agent_to_file(app_ctx, agent)
+                    except (OSError, json.JSONDecodeError, ValueError) as e:
+                        logger.debug("IDLE ステータス保存に失敗: %s", e)
+                    active_task_id = None
+        except (KeyError, ValueError, AttributeError) as e:
+            logger.debug("アクティブタスクの取得に失敗: %s", e)
+            active_task = None
+
+        return active_task, active_task_id
+
+    async def _diagnose_worker_issue(
+        self,
+        agent_id: str,
+        agent: "Agent",
+        active_task: Any,
+        now: datetime,
+    ) -> tuple[str | None, bool]:
+        """Worker の異常原因を診断する。
+
+        Returns:
+            (recovery_reason, force_recovery)
+        """
+        from src.models.dashboard import TaskStatus
+
+        health = await self.check_agent(agent_id)
+
+        if not health.is_healthy:
+            reason = (
+                "ai_process_dead"
+                if health.error_message == "ai_process_dead"
+                else "tmux_session_dead"
+            )
+            return reason, False
+
+        if (
+            active_task is not None
+            and active_task.status == TaskStatus.PENDING
+            and active_task.started_at is None
+            and agent.last_activity is not None
+            and (now - agent.last_activity)
+            >= timedelta(seconds=max(self.healthcheck_interval_seconds * 2, 30))
+        ):
+            return "task_not_started", True
+
+        if (
+            active_task is not None
+            and active_task.status == TaskStatus.IN_PROGRESS
+            and await self._is_in_progress_without_ipc(agent_id, agent, active_task, now)
+        ):
+            return "in_progress_no_ipc", True
+
+        if await self._is_worker_stalled(agent_id, agent, now):
+            return "task_stalled", True
+
+        return None, False
+
+    def _save_agent_after_recovery(
+        self, app_ctx: Any | None, agent: "Agent", label: str,
+    ) -> None:
+        """復旧後のエージェント保存。"""
+        if app_ctx is None:
+            return
+        try:
+            from src.tools.helpers import save_agent_to_file
+            agent.ai_bootstrapped = False
+            save_agent_to_file(app_ctx, agent)
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            logger.debug("%s 後のエージェント保存に失敗: %s", label, e)
+
+    async def _attempt_staged_recovery(
+        self,
+        app_ctx: Any | None,
+        agent_id: str,
+        agent: "Agent",
+        recovery_reason: str,
+        force_recovery: bool,
+        task_key: str,
+    ) -> dict[str, Any]:
+        """段階復旧（attempt_recovery → full_recovery → escalate）を実行する。"""
+        success, message = await self.attempt_recovery(agent_id, force=force_recovery)
+        if success:
+            self._save_agent_after_recovery(app_ctx, agent, "attempt_recovery")
+            self._recovery_failures.pop(task_key, None)
+            return {
+                "status": "recovered",
+                "detail": {"agent_id": agent_id, "reason": recovery_reason,
+                           "method": "attempt_recovery", "message": message},
+            }
+
+        full_success, full_message = False, ""
+        if app_ctx is not None:
+            full_success, full_message = await self._run_full_recovery(app_ctx, agent_id)
+
+        if full_success:
+            target = (app_ctx.agents.get(agent_id) if app_ctx else None) or agent
+            self._save_agent_after_recovery(app_ctx, target, "full_recovery")
+            self._recovery_failures.pop(task_key, None)
+            return {
+                "status": "recovered",
+                "detail": {"agent_id": agent_id, "reason": recovery_reason,
+                           "method": "full_recovery", "message": full_message},
+            }
+
+        attempts = self._recovery_failures.get(task_key, 0) + 1
+        self._recovery_failures[task_key] = attempts
+        escalation = {
+            "agent_id": agent_id, "reason": recovery_reason,
+            "attempts": str(attempts),
+            "message": (f"attempt_recovery failed: {message}; "
+                        f"full_recovery failed: {full_message or 'not_executed'}"),
+        }
+        if attempts >= self.max_recovery_attempts:
+            failed = await self._finalize_failed_task(app_ctx, agent_id, agent, message)
+            self._recovery_failures.pop(task_key, None)
+            return {"status": "failed", "detail": escalation, "failed_task": failed}
+        return {"status": "escalated", "detail": escalation}
+
     async def monitor_and_recover_workers(self, app_ctx: Any | None = None) -> dict:
         """Worker の健全性を監視し、必要なら段階復旧する。"""
         from src.models.agent import AgentRole, AgentStatus
-        from src.models.dashboard import TaskStatus
 
         now = datetime.now()
         self.last_monitor_at = now
@@ -487,58 +627,17 @@ class HealthcheckManager:
                     from src.tools.helpers_managers import ensure_dashboard_manager
 
                     dashboard = ensure_dashboard_manager(app_ctx)
-                except Exception:
+                except (ImportError, OSError, AttributeError, ValueError) as e:
+                    logger.debug("Dashboard マネージャー取得に失敗: %s", e)
                     dashboard = None
 
         for agent_id, agent in list(self.agents.items()):
             if agent.role != AgentRole.WORKER.value:
                 continue
 
-            active_task = None
-            active_task_id = agent.current_task
-            if dashboard is not None:
-                try:
-                    assigned_tasks = dashboard.list_tasks(agent_id=agent_id)
-                    active_tasks = [
-                        task
-                        for task in assigned_tasks
-                        if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
-                    ]
-                    if active_tasks:
-                        in_progress = [
-                            task for task in active_tasks if task.status == TaskStatus.IN_PROGRESS
-                        ]
-                        active_task = (in_progress or active_tasks)[0]
-                        active_task_id = active_task.id
-                        if agent.current_task != active_task_id:
-                            agent.current_task = active_task_id
-                            if agent.status != AgentStatus.BUSY.value:
-                                agent.status = AgentStatus.BUSY
-                            try:
-                                from src.tools.helpers import save_agent_to_file
-
-                                save_agent_to_file(app_ctx, agent)
-                            except Exception:
-                                pass
-                    elif agent.current_task:
-                        current_dashboard_task = dashboard.get_task(agent.current_task)
-                        if current_dashboard_task and current_dashboard_task.status in (
-                            TaskStatus.COMPLETED,
-                            TaskStatus.FAILED,
-                            TaskStatus.CANCELLED,
-                        ):
-                            agent.current_task = None
-                            if agent.status == AgentStatus.BUSY.value:
-                                agent.status = AgentStatus.IDLE
-                            try:
-                                from src.tools.helpers import save_agent_to_file
-
-                                save_agent_to_file(app_ctx, agent)
-                            except Exception:
-                                pass
-                            active_task_id = None
-                except Exception:
-                    active_task = None
+            active_task, active_task_id = self._sync_worker_active_task(
+                agent_id, agent, dashboard, app_ctx,
+            )
 
             current_key = self._recovery_key(agent_id, active_task_id)
             stale_keys = [
@@ -553,112 +652,27 @@ class HealthcheckManager:
                 skipped.append(agent_id)
                 continue
 
-            # _is_worker_stalled の既存判定を使うため、補正済み task_id を反映する
             if active_task_id is not None:
                 agent.current_task = active_task_id
 
-            health = await self.check_agent(agent_id)
-            recovery_reason: str | None = None
-            force_recovery = False
-
-            if not health.is_healthy:
-                recovery_reason = (
-                    "ai_process_dead"
-                    if health.error_message == "ai_process_dead"
-                    else "tmux_session_dead"
-                )
-            elif (
-                active_task is not None
-                and active_task.status == TaskStatus.PENDING
-                and active_task.started_at is None
-                and agent.last_activity is not None
-                and (now - agent.last_activity)
-                >= timedelta(seconds=max(self.healthcheck_interval_seconds * 2, 30))
-            ):
-                recovery_reason = "task_not_started"
-                force_recovery = True
-            elif (
-                active_task is not None
-                and active_task.status == TaskStatus.IN_PROGRESS
-                and await self._is_in_progress_without_ipc(agent_id, agent, active_task, now)
-            ):
-                recovery_reason = "in_progress_no_ipc"
-                force_recovery = True
-            elif await self._is_worker_stalled(agent_id, agent, now):
-                recovery_reason = "task_stalled"
-                force_recovery = True
+            recovery_reason, force_recovery = await self._diagnose_worker_issue(
+                agent_id, agent, active_task, now,
+            )
 
             if recovery_reason is None:
                 continue
 
-            task_key = current_key
-            success, message = await self.attempt_recovery(agent_id, force=force_recovery)
-            if success:
-                agent.ai_bootstrapped = False
-                if app_ctx is not None:
-                    try:
-                        from src.tools.helpers import save_agent_to_file
-
-                        save_agent_to_file(app_ctx, agent)
-                    except Exception:
-                        pass
-                self._recovery_failures.pop(task_key, None)
-                recovered.append(
-                    {
-                        "agent_id": agent_id,
-                        "reason": recovery_reason,
-                        "method": "attempt_recovery",
-                        "message": message,
-                    }
-                )
-                continue
-
-            full_success = False
-            full_message = ""
-            if app_ctx is not None:
-                full_success, full_message = await self._run_full_recovery(app_ctx, agent_id)
-
-            if full_success:
-                if app_ctx is not None:
-                    try:
-                        from src.tools.helpers import save_agent_to_file
-
-                        current_agent = app_ctx.agents.get(agent_id)
-                        if current_agent is not None:
-                            current_agent.ai_bootstrapped = False
-                            save_agent_to_file(app_ctx, current_agent)
-                    except Exception:
-                        pass
-                self._recovery_failures.pop(task_key, None)
-                recovered.append(
-                    {
-                        "agent_id": agent_id,
-                        "reason": recovery_reason,
-                        "method": "full_recovery",
-                        "message": full_message,
-                    }
-                )
-                continue
-
-            attempts = self._recovery_failures.get(task_key, 0) + 1
-            self._recovery_failures[task_key] = attempts
-
-            escalated.append(
-                {
-                    "agent_id": agent_id,
-                    "reason": recovery_reason,
-                    "attempts": str(attempts),
-                    "message": (
-                        f"attempt_recovery failed: {message}; "
-                        f"full_recovery failed: {full_message or 'not_executed'}"
-                    ),
-                }
+            result = await self._attempt_staged_recovery(
+                app_ctx, agent_id, agent, recovery_reason, force_recovery, current_key,
             )
 
-            if attempts >= self.max_recovery_attempts:
-                failed = await self._finalize_failed_task(app_ctx, agent_id, agent, message)
-                failed_tasks.append(failed)
-                self._recovery_failures.pop(task_key, None)
+            if result["status"] == "recovered":
+                recovered.append(result["detail"])
+            elif result["status"] == "escalated":
+                escalated.append(result["detail"])
+            elif result["status"] == "failed":
+                escalated.append(result["detail"])
+                failed_tasks.append(result["failed_task"])
 
         return {
             "recovered": recovered,

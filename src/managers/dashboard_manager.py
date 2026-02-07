@@ -96,13 +96,11 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
                         description = task.get("description") or ""
                         task_file_path = task.get("task_file_path")
                         if description and not task_file_path:
-                            raise ValueError(
-                                "invalid_legacy_dashboard_format: description body is no longer supported"
-                            )
+                            msg = "invalid_legacy_dashboard_format: "
+                            raise ValueError(msg + "description body unsupported")
                         if description and task_file_path and description != task_file_path:
-                            raise ValueError(
-                                "invalid_legacy_dashboard_format: description and task_file_path mismatch"
-                            )
+                            msg = "invalid_legacy_dashboard_format: "
+                            raise ValueError(msg + "description/task_file_path mismatch")
                     return Dashboard(**data)
             except ValueError as e:
                 if "invalid_legacy_dashboard_format" in str(e):

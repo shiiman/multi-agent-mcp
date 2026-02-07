@@ -45,42 +45,44 @@ def settings(temp_dir):
 
 @pytest.fixture
 async def tmux_manager(settings):
-    """TmuxManagerインスタンスを作成する。テスト後にセッションをクリーンアップ。"""
-    manager = TmuxManager(settings)
-    try:
-        yield manager
-    finally:
-        # テスト後にテスト用セッションを確実にクリーンアップ
-        await manager.cleanup_all_sessions()
+    """tmux 非依存テスト用のモック TmuxManager を作成する。"""
+    manager = MagicMock(spec=TmuxManager)
+    manager.settings = settings
+    manager.create_session = AsyncMock(return_value=True)
+    manager.kill_session = AsyncMock(return_value=True)
+    manager.cleanup_sessions = AsyncMock(return_value=0)
+    manager.cleanup_all_sessions = AsyncMock(return_value=0)
+    manager.create_main_session = AsyncMock(return_value=True)
+    manager.session_exists = AsyncMock(return_value=False)
+    manager.send_keys = AsyncMock(return_value=True)
+    manager.send_keys_to_pane = AsyncMock(return_value=True)
 
+    async def _send_with_rate_limit_to_pane(
+        session_name,
+        window_index,
+        pane_index,
+        command,
+        **_kwargs,
+    ):
+        return await manager.send_keys_to_pane(
+            session_name,
+            window_index,
+            pane_index,
+            command,
+        )
 
-@pytest.fixture(scope="session", autouse=True)
-def cleanup_tmux_sessions_at_end():
-    """テストセッション終了時に残ったtmuxセッションをクリーンアップ。"""
-
-    # テスト開始前に既存のテスト用セッションをクリーンアップ
-    _cleanup_test_tmux_sessions()
-
-    yield
-
-    # テスト終了後にもクリーンアップ
-    _cleanup_test_tmux_sessions()
-
-
-def _cleanup_test_tmux_sessions():
-    """テスト用 tmux セッションをクリーンアップする。"""
-    import subprocess
-
-    result = subprocess.run(
-        ["tmux", "list-sessions", "-F", "#{session_name}"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        for session in result.stdout.strip().split("\n"):
-            # テスト用プレフィックスのセッションのみ削除
-            if session.startswith("test-mcp-agent"):
-                subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)
+    manager.send_with_rate_limit_to_pane = AsyncMock(side_effect=_send_with_rate_limit_to_pane)
+    manager.capture_pane = AsyncMock(return_value="mock output")
+    manager.capture_pane_by_index = AsyncMock(return_value="mock output")
+    manager.capture_pane_by_position = AsyncMock(return_value="mock output")
+    manager.get_pane_current_command = AsyncMock(return_value=None)
+    manager.set_pane_title = AsyncMock(return_value=True)
+    manager.add_extra_worker_window = AsyncMock(return_value=True)
+    manager.open_session_in_terminal = AsyncMock(return_value=True)
+    manager._run = AsyncMock(return_value=(0, "", ""))
+    manager._run_exec = AsyncMock(return_value=(0, "", ""))
+    manager._get_window_name = MagicMock(return_value=settings.window_name_main)
+    yield manager
 
 
 @pytest.fixture
@@ -112,7 +114,14 @@ def git_repo(temp_dir):
     """テスト用のgitリポジトリを作成する。"""
     repo_path = temp_dir / "repo"
     repo_path.mkdir()
-    os.system(f"cd {repo_path} && git init && git commit --allow-empty -m 'init'")
+    import subprocess
+    subprocess.run(
+        ["git", "init"], cwd=str(repo_path), capture_output=True, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=str(repo_path), capture_output=True, check=True,
+    )
     return repo_path
 
 
@@ -276,6 +285,22 @@ def mock_tmux_manager():
     mock.create_main_session = AsyncMock(return_value=True)
     mock.send_keys = AsyncMock(return_value=True)
     mock.send_keys_to_pane = AsyncMock(return_value=True)
+
+    async def _send_with_rate_limit_to_pane(
+        session_name,
+        window_index,
+        pane_index,
+        command,
+        **_kwargs,
+    ):
+        return await mock.send_keys_to_pane(
+            session_name,
+            window_index,
+            pane_index,
+            command,
+        )
+
+    mock.send_with_rate_limit_to_pane = AsyncMock(side_effect=_send_with_rate_limit_to_pane)
     mock.capture_pane = AsyncMock(return_value="mock output")
     mock.capture_pane_by_position = AsyncMock(return_value="mock output")
     mock.session_exists = AsyncMock(return_value=True)

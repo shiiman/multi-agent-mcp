@@ -235,7 +235,7 @@ def get_session_id_from_config(working_dir: str | None = None) -> str | None:
     return _get_from_config("session_id", working_dir)
 
 
-def ensure_session_id(app_ctx: "AppContext") -> str | None:
+def ensure_session_id(app_ctx: AppContext) -> str | None:
     """セッションID を確保する。
 
     app_ctx.session_id が設定されていなければ config.json から読み取る。

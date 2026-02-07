@@ -8,6 +8,31 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.tools.helpers import require_permission
 
+# スクリーンショット MIME マップ
+_SCREENSHOT_MIME_MAP: dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _read_image_as_base64(file_path: Path) -> tuple[str, str, int]:
+    """画像ファイルを Base64 エンコードし MIME タイプとサイズを返す。
+
+    Args:
+        file_path: 画像ファイルのパス
+
+    Returns:
+        (base64_data, mime_type, size_bytes) のタプル
+    """
+    ext = file_path.suffix.lower()
+    mime_type = _SCREENSHOT_MIME_MAP.get(ext, "application/octet-stream")
+    with open(file_path, "rb") as f:
+        data = base64.b64encode(f.read()).decode("utf-8")
+    return data, mime_type, file_path.stat().st_size
+
 
 def register_tools(mcp: FastMCP) -> None:
     """スクリーンショット管理ツールを登録する。"""
@@ -138,20 +163,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"ファイルが見つかりません: {filename}",
             }
 
-        # 拡張子から MIME タイプを推定
-        ext = file_path.suffix.lower()
-        mime_map = {
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".gif": "image/gif",
-            ".webp": "image/webp",
-        }
-        mime_type = mime_map.get(ext, "application/octet-stream")
-
-        # Base64 エンコード
-        with open(file_path, "rb") as f:
-            data = base64.b64encode(f.read()).decode("utf-8")
+        data, mime_type, size_bytes = _read_image_as_base64(file_path)
 
         return {
             "success": True,
@@ -159,7 +171,7 @@ def register_tools(mcp: FastMCP) -> None:
             "path": str(file_path),
             "base64_data": data,
             "mime_type": mime_type,
-            "size_bytes": file_path.stat().st_size,
+            "size_bytes": size_bytes,
         }
 
     @mcp.tool()
@@ -208,20 +220,7 @@ def register_tools(mcp: FastMCP) -> None:
         # 最新ファイルを取得
         latest = max(files, key=lambda f: f.stat().st_mtime)
 
-        # 拡張子から MIME タイプを推定
-        ext = latest.suffix.lower()
-        mime_map = {
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".gif": "image/gif",
-            ".webp": "image/webp",
-        }
-        mime_type = mime_map.get(ext, "application/octet-stream")
-
-        # Base64 エンコード
-        with open(latest, "rb") as f:
-            data = base64.b64encode(f.read()).decode("utf-8")
+        data, mime_type, size_bytes = _read_image_as_base64(latest)
 
         return {
             "success": True,
@@ -229,5 +228,5 @@ def register_tools(mcp: FastMCP) -> None:
             "path": str(latest),
             "base64_data": data,
             "mime_type": mime_type,
-            "size_bytes": latest.stat().st_size,
+            "size_bytes": size_bytes,
         }
