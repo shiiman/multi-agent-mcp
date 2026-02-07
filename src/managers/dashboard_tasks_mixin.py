@@ -12,6 +12,7 @@ from src.models.dashboard import (
     AgentSummary,
     ChecklistItem,
     Dashboard,
+    MessageSummary,
     TaskInfo,
     TaskLog,
     TaskStatus,
@@ -422,7 +423,34 @@ class DashboardTasksMixin:
             if hasattr(agent.ai_cli, "value")
             else str(agent.ai_cli or "worker")
         )
-        return self._build_worker_name(agent.id, cli)
+        return self._build_worker_name(
+            agent.id,
+            cli,
+            window_index=agent.window_index,
+            pane_index=agent.pane_index,
+        )
+
+    def add_message(
+        self,
+        sender_id: str,
+        receiver_id: str | None,
+        message_type: str,
+        subject: str,
+        content: str,
+    ) -> None:
+        """Dashboard 表示用メッセージを messages.md に追記保存する。"""
+        dashboard = self._read_dashboard()
+        dashboard.messages.append(
+            MessageSummary(
+                sender_id=sender_id,
+                receiver_id=receiver_id,
+                message_type=message_type,
+                subject=subject,
+                content=content,
+                created_at=datetime.now(),
+            )
+        )
+        self._write_messages_markdown(dashboard)
 
     # タスクファイル管理メソッド（ファイルベースのタスク配布）
 

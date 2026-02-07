@@ -60,8 +60,6 @@ tags:
   - decision
 created_at: 2024-01-15T10:30:00
 updated_at: 2024-01-15T10:30:00
-access_count: 5
-last_accessed_at: 2024-01-20T14:00:00
 ---
 
 ## API設計の決定事項
@@ -80,25 +78,23 @@ REST API は以下の方針で設計する:
 └─────────┘                   │ (active)   │
                               └─────┬──────┘
                                     │
-                 ┌──────────────────┼──────────────────┐
-                 │                  │                  │
-                 ▼                  ▼                  ▼
-           TTL 期限切れ        エントリ数超過        手動削除
-           (90日)             (1000件)
-                 │                  │                  │
-                 └──────────────────┼──────────────────┘
-                                    │
-                                    ▼
-                              ┌────────────┐
-                              │ Archive    │
-                              │ (archive/) │
-                              └─────┬──────┘
-                                    │
-                                    ▼ restore_from_archive
-                              ┌────────────┐
-                              │ Memory     │
-                              │ (active)   │
-                              └────────────┘
+              ┌─────────────────────┴─────────────────────┐
+              │                                           │
+              ▼                                           ▼
+        自動クリーンアップ                           手動削除（delete_*）
+   (TTL 超過 / エントリ数超過)                      -> archive 移動なし
+              │
+              ▼
+       ┌────────────┐
+       │ Archive    │
+       │ (archive/) │
+       └─────┬──────┘
+             │
+             ▼ restore_from_memory_archive
+       ┌────────────┐
+       │ Memory     │
+       │ (active)   │
+       └────────────┘
 ```
 
 ### 自動クリーンアップ
@@ -120,7 +116,7 @@ REST API は以下の方針で設計する:
 | `retrieve_from_memory` | キーワード検索 | Owner, Admin, Worker |
 | `get_memory_entry` | キーで取得 | Owner, Admin, Worker |
 | `list_memory_entries` | 一覧取得 | Owner, Admin, Worker |
-| `delete_memory_entry` | 削除（アーカイブへ移動） | Owner, Admin |
+| `delete_memory_entry` | 削除（アーカイブ移動なし） | Owner, Admin |
 | `get_memory_summary` | サマリー取得 | Owner, Admin, Worker |
 
 ### プロジェクトメモリ・アーカイブ操作
@@ -140,7 +136,7 @@ REST API は以下の方針で設計する:
 | `retrieve_from_global_memory` | グローバル検索 | Owner, Admin, Worker |
 | `list_global_memory_entries` | グローバル一覧 | Owner, Admin, Worker |
 | `get_global_memory_summary` | グローバルサマリー | Owner, Admin, Worker |
-| `delete_global_memory_entry` | グローバル削除 | Owner, Admin |
+| `delete_global_memory_entry` | グローバル削除（アーカイブ移動なし） | Owner, Admin |
 
 ### グローバルアーカイブ
 

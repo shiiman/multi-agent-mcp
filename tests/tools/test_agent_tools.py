@@ -968,3 +968,74 @@ class TestCreateWorkersBatchBehavior:
         assert result["success"] is False
         assert result["failed_count"] == 1
         assert "利用可能なスロットがありません" in result["errors"][0]
+
+    @pytest.mark.asyncio
+    async def test_create_workers_batch_reuse_updates_agent_current_task(
+        self, mock_ctx, git_repo, monkeypatch
+    ):
+        """再利用 worker へタスク割り当て時に current_task/status が同期されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_workers_batch = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_workers_batch":
+                create_workers_batch = tool.fn
+                break
+        assert create_workers_batch is not None
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        app_ctx.project_root = str(git_repo)
+        app_ctx.session_id = "test-session"
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-idle"] = Agent(
+            id="worker-idle",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="repo:0.1",
+            session_name="repo",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        monkeypatch.setattr(
+            "src.tools.agent_batch_tools.get_current_profile_settings",
+            lambda _ctx: {"max_workers": 20, "worker_thinking_tokens": 4000},
+        )
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.assign_task.return_value = (True, "ok")
+        monkeypatch.setattr(
+            "src.tools.agent_batch_tools.ensure_dashboard_manager",
+            lambda _ctx: mock_dashboard,
+        )
+
+        result = await create_workers_batch(
+            worker_configs=[{"branch": "feature/reuse-only", "task_id": "task-123"}],
+            repo_path=str(git_repo),
+            base_branch="main",
+            reuse_idle_workers=True,
+            caller_agent_id="owner-001",
+            ctx=mock_ctx,
+        )
+
+        assert result["success"] is True
+        worker = app_ctx.agents["worker-idle"]
+        assert worker.current_task == "task-123"
+        assert worker.status == AgentStatus.BUSY

@@ -14,12 +14,12 @@ Worker エージェントに分離された作業環境を提供するシステ�
 │  ├── src/                                                       │
 │  └── ...                                                        │
 │                                                                 │
-│  Worktree 1（/project-worktrees/feature-a）                     │
+│  Worktree 1（/parent/.worktrees/feature-a）                     │
 │  ├── .git → /project/.git     # メインを参照                    │
 │  ├── src/                     # 独立した作業コピー               │
 │  └── ...                      # Worker 1 が編集                 │
 │                                                                 │
-│  Worktree 2（/project-worktrees/feature-b）                     │
+│  Worktree 2（/parent/.worktrees/feature-b）                     │
 │  ├── .git → /project/.git     # メインを参照                    │
 │  ├── src/                     # 独立した作業コピー               │
 │  └── ...                      # Worker 2 が編集                 │
@@ -126,7 +126,7 @@ cargo install git-worktree-runner
 ├── .git/
 └── src/
 
-/project-worktrees/                # Worktree 格納ディレクトリ
+/parent/.worktrees/                # Worktree 格納ディレクトリ（例）
 ├── feature-a/                     # Worktree 1
 └── feature-b/                     # Worktree 2
 ```
@@ -155,7 +155,7 @@ gtr_available = check_gtr_available()
 # 2. Worktree を作成
 result = create_worktree(
     repo_path="/project",
-    worktree_path="/project-worktrees/feature-auth",
+    worktree_path="/parent/.worktrees/feature-auth",
     branch="feature-auth",
     base_branch="main"
 )
@@ -168,12 +168,12 @@ assign_worktree(
 )
 ```
 
-### ブランチ命名規則
+### ブランチ命名（推奨）
 
 ```
 {base_branch}-worker-{N}
 
-例:
+例（推奨）:
 - main-worker-1
 - main-worker-2
 - feature/auth-worker-1
@@ -268,6 +268,6 @@ git worktree list
 # 不要な worktree を削除
 remove_worktree(
     repo_path="/project",
-    worktree_path="/project-worktrees/feature-a"
+    worktree_path="/parent/.worktrees/feature-a"
 )
 ```

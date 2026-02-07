@@ -68,23 +68,48 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
     Raises:
         ValueError: project_root または session_id が設定されていない場合
     """
-    if app_ctx.dashboard_manager is None:
-        from src.tools.helpers import resolve_project_root
+    from src.tools.helpers import resolve_project_root
 
-        base_dir = resolve_project_root(app_ctx)
-        # session_id を確保（必須）
-        session_id = ensure_session_id(app_ctx)
-        if not session_id:
-            raise ValueError(
-                "session_id が設定されていません。"
-                "init_tmux_workspace で session_id を指定してください。"
-            )
+    base_dir = resolve_project_root(app_ctx)
+    # session_id を確保（必須）
+    session_id = ensure_session_id(app_ctx)
+    if not session_id:
+        raise ValueError(
+            "session_id が設定されていません。"
+            "init_tmux_workspace で session_id を指定してください。"
+        )
+
+    dashboard_dir = os.path.join(base_dir, get_mcp_dir(), session_id, "dashboard")
+    dashboard_dir_abs = os.path.realpath(os.path.abspath(dashboard_dir))
+
+    # セッション切替後に古い DashboardManager を使い回さない
+    reuse_current = False
+    if app_ctx.dashboard_manager is not None:
+        current = app_ctx.dashboard_manager
+        current_dir_abs = os.path.realpath(os.path.abspath(str(current.dashboard_dir)))
+        same_dashboard_dir = current_dir_abs == dashboard_dir_abs
+        same_workspace = os.path.realpath(os.path.abspath(str(current.workspace_path))) == (
+            os.path.realpath(os.path.abspath(base_dir))
+        )
+        is_session_scoped_dashboard = (
+            f"{os.sep}{get_mcp_dir()}{os.sep}" in current_dir_abs
+            and current_dir_abs.endswith(f"{os.sep}dashboard")
+        )
+        same_workspace_id = current.workspace_id == session_id
+        if (
+            not same_workspace_id
+            and not is_session_scoped_dashboard
+            and app_ctx.workspace_id is not None
+            and current.workspace_id == app_ctx.workspace_id
+        ):
+            same_workspace_id = True
+        reuse_current = same_dashboard_dir or (same_workspace and same_workspace_id)
+
+    if not reuse_current:
         # workspace_id は session_id を使用（同一タスク = 同一ダッシュボード）
-        if app_ctx.workspace_id is None:
-            app_ctx.workspace_id = session_id
-        dashboard_dir = os.path.join(base_dir, get_mcp_dir(), session_id, "dashboard")
+        app_ctx.workspace_id = session_id
         app_ctx.dashboard_manager = DashboardManager(
-            workspace_id=app_ctx.workspace_id,
+            workspace_id=session_id,
             workspace_path=base_dir,
             dashboard_dir=dashboard_dir,
         )

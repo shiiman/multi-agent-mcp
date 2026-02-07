@@ -74,11 +74,33 @@ class DashboardMarkdownMixin:
             return value or "0"
         return agent_id[:4]
 
-    def _build_worker_name(self, agent_id: str, fallback: str = "worker") -> str:
+    def _resolve_worker_index(
+        self, window_index: int | None = None, pane_index: int | None = None
+    ) -> int | None:
+        """tmux slot から Worker 番号（1始まり）を解決する。"""
+        if window_index is None or pane_index is None:
+            return None
+        if window_index == 0 and pane_index >= 1:
+            return pane_index
+        if window_index >= 1 and pane_index >= 0:
+            # 追加ウィンドウは 2x5 固定（10 workers / window）
+            return 6 + ((window_index - 1) * 10) + pane_index + 1
+        return None
+
+    def _build_worker_name(
+        self,
+        agent_id: str,
+        fallback: str = "worker",
+        window_index: int | None = None,
+        pane_index: int | None = None,
+    ) -> str:
         """Worker の表示名を作成する（cli + index）。"""
         cli_prefix = fallback.lower()
         if cli_prefix not in ("claude", "codex", "gemini"):
             cli_prefix = "worker"
+        worker_index = self._resolve_worker_index(window_index, pane_index)
+        if worker_index is not None:
+            return f"{cli_prefix}{worker_index}"
         return f"{cli_prefix}{self._extract_agent_index(agent_id)}"
 
     def _build_agent_label_map(self, dashboard: Dashboard) -> dict[str, str]:

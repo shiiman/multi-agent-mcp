@@ -59,8 +59,7 @@ Multi-Agent MCP が保存・編集するファイルの一覧と、そのディ�
 │       └── memory/                    # セッション別メモリ
 │           ├── {key}.md
 │           └── archive/
-├── .gtrconfig                         # Git worktree 設定
-└── .gtrconfig.example                 # 設定テンプレート
+└── .gtrconfig                         # Git worktree 設定
 ```
 
 ## ファイル詳細
@@ -112,26 +111,13 @@ MCP_COST_WARNING_THRESHOLD_USD=10.0
 | 管理 | `GtrconfigManager` |
 
 ```toml
-[project]
-name = "my-project"
-package_manager = "npm"
+[copy]
+include = ["*.md", "CLAUDE.md"]
+exclude = ["**/.git/**", "**/__pycache__/**", "**/.venv/**"]
 
-[worktree]
-exclude = ["node_modules", ".git", "dist"]
-
-[env]
-files = [".env.example"]
+[hooks]
+postCreate = ["uv sync"]
 ```
-
-#### `.gtrconfig.example`
-
-| 項目 | 内容 |
-| ---- | ---- |
-| パス | `{project}/.gtrconfig.example` |
-| フォーマット | TOML |
-| 用途 | `.gtrconfig` のテンプレート |
-| 読み込み | なし |
-| 書き込み | `generate_gtrconfig` で自動生成 |
 
 ### 2. メモリファイル
 
@@ -156,7 +142,6 @@ tags:
   - api
 created_at: 2024-01-15T10:30:00
 updated_at: 2024-01-15T10:30:00
-access_count: 5
 ---
 
 ## API設計の決定事項
@@ -179,34 +164,35 @@ REST API は以下の方針で設計する...
 | パス | `{project}/.multi-agent-mcp/{session_id}/dashboard/dashboard.md` |
 | フォーマット | YAML Front Matter + Markdown |
 | 用途 | タスク状態・エージェント状態・コスト情報の管理 |
-| 読み込み | `get_dashboard`, `list_tasks`, `get_task` |
-| 書き込み | `create_task`, `update_task_status`, `report_task_progress` |
+| 読み込み | `get_dashboard`, `get_dashboard_summary`, `list_tasks`, `get_task` |
+| 書き込み | `create_task`, `update_task_status`, `assign_task_to_agent`, `read_messages`（Admin の自動反映）, `get_dashboard`/`get_dashboard_summary`（Admin/Owner 同期時） |
 | 管理 | `DashboardManager` |
 
 ```markdown
 ---
-session_id: issue-123
-created_at: 2024-01-15T10:00:00
+workspace_id: issue-123
+workspace_path: /path/to/project
+updated_at: 2024-01-15T10:00:00
 tasks:
   - id: task-001
     title: ユーザー認証機能
     status: in_progress
     progress: 50
-    assigned_to: worker_xxx
+    assigned_agent_id: worker_xxx
 agents:
-  - id: worker_xxx
+  - agent_id: worker_xxx
     role: worker
     status: busy
+    current_task_id: task-001
 ---
 
-# Dashboard: issue-123
+# Multi-Agent Dashboard
 
-## サマリー
+## エージェント状態
 
-| 項目 | 値 |
-| ---- | -- |
-| 総タスク数 | 5 |
-| 完了 | 2 |
+| ID | 名前 | 役割 | 状態 | 現在のタスク | worktree |
+|:---|:---|:---|:---|:---|:---|
+| `worker_xxx` | `codex1` | worker | 🔵 busy | task-001 | `.worktrees/feature-task-001` |
 ```
 
 ### 4. タスクファイル
@@ -251,7 +237,7 @@ read_at: null
 
 **命名規則**:
 
-- `{YYYYMMDD}_{HHMMSS}_{FFFFFFFF}_{message_id}.md`
+- `{YYYYMMDD}_{HHMMSS}_{ffffff}_{message_id_prefix8}.md`
 - タイムスタンプ順にソート可能
 
 ### 6. エージェントファイル
@@ -322,7 +308,6 @@ read_at: null
 | 設定 | `.env` | ENV | ✓ | ✓ | `init_tmux_workspace` |
 | 設定 | `config.json` | JSON | ✓ | ✓ | `init_tmux_workspace` |
 | 設定 | `.gtrconfig` | TOML | ✓ | ✓ | `generate_gtrconfig` |
-| 設定 | `.gtrconfig.example` | TOML | - | ✓ | `generate_gtrconfig` |
 | メモリ | `{key}.md` | YAML FM + MD | ✓ | ✓ | `save_to_memory` |
 | ダッシュボード | `dashboard.md` | YAML FM + MD | ✓ | ✓ | `create_task` |
 | タスク | `{agent_id}.md` | Markdown | - | ✓ | `send_task` |
@@ -362,7 +347,7 @@ read_at: null
 
 ### IPC メッセージファイル
 
-- `{YYYYMMDD}_{HHMMSS}_{FFFFFFFF}_{message_id}.md`
+- `{YYYYMMDD}_{HHMMSS}_{ffffff}_{message_id_prefix8}.md`
 - タイムスタンプ順にソート可能
 - `agent_id` はサニタイズされてディレクトリ名に使用
 

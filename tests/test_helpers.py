@@ -463,3 +463,32 @@ class TestRequirePermission:
         assert result_ctx is app_ctx
         assert error is not None
         assert error["success"] is False
+
+
+class TestEnsureDashboardManager:
+    """ensure_dashboard_manager のセッション切替挙動テスト。"""
+
+    def test_recreate_dashboard_manager_on_session_switch(self, app_ctx, git_repo):
+        from src.managers.dashboard_manager import DashboardManager
+        from src.tools.helpers_managers import ensure_dashboard_manager
+
+        # 旧セッションの manager をセット
+        app_ctx.project_root = str(git_repo)
+        app_ctx.session_id = "old-session"
+        old_dir = git_repo / ".multi-agent-mcp" / "old-session" / "dashboard"
+        app_ctx.workspace_id = "old-session"
+        app_ctx.dashboard_manager = DashboardManager(
+            workspace_id="old-session",
+            workspace_path=str(git_repo),
+            dashboard_dir=str(old_dir),
+        )
+
+        # 新セッションへ切替
+        app_ctx.session_id = "new-session"
+        manager = ensure_dashboard_manager(app_ctx)
+
+        assert manager.workspace_id == "new-session"
+        assert str(manager.dashboard_dir).endswith(
+            ".multi-agent-mcp/new-session/dashboard"
+        )
+        assert app_ctx.workspace_id == "new-session"

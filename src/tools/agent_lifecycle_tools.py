@@ -349,8 +349,10 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 "error": f"エージェント {agent_id} が見つかりません",
             }
 
+        role_value = agent.role.value if hasattr(agent.role, "value") else str(agent.role)
+
         # Owner は tmux ペインを持たないため初期化不可
-        if agent.role == AgentRole.OWNER:
+        if role_value == AgentRole.OWNER.value:
             return {
                 "success": False,
                 "error": (
@@ -375,8 +377,8 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             # roles/ テンプレートを自動読み込み
             try:
                 loader = get_template_loader()
-                prompt = loader.load("roles", agent.role.value)
-                prompt_source = f"roles/{agent.role.value}.md"
+                prompt = loader.load("roles", role_value)
+                prompt_source = f"roles/{role_value}.md"
             except FileNotFoundError as e:
                 return {
                     "success": False,
@@ -463,14 +465,14 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         file_saved = save_agent_to_file(app_ctx, agent)
 
         logger.info(
-            f"エージェント {agent_id}（{agent.role.value}）を初期化しました: "
+            f"エージェント {agent_id}（{role_value}）を初期化しました: "
             f"CLI={cli.value}, prompt_source={prompt_source}, file_saved={file_saved}"
         )
 
         return {
             "success": True,
             "agent_id": agent_id,
-            "role": agent.role.value,
+            "role": role_value,
             "cli": cli.value,
             "prompt_source": prompt_source,
             "terminal": terminal_app.value,

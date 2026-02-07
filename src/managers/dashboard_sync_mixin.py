@@ -47,8 +47,28 @@ class DashboardSyncMixin:
                         except ValueError:
                             last_activity = None
 
+                    role = agent_dict.get("role")
+                    name = None
+                    if role == "owner":
+                        name = "owner"
+                    elif role == "admin":
+                        name = "admin"
+                    elif role == "worker":
+                        ai_cli = agent_dict.get("ai_cli")
+                        if isinstance(ai_cli, dict):
+                            cli_name = str(ai_cli.get("value", "worker"))
+                        else:
+                            cli_name = str(ai_cli or "worker")
+                        name = self._build_worker_name(
+                            agent_dict.get("id", agent_id),
+                            cli_name,
+                            window_index=agent_dict.get("window_index"),
+                            pane_index=agent_dict.get("pane_index"),
+                        )
+
                     summary = AgentSummary(
                         agent_id=agent_dict.get("id", agent_id),
+                        name=name,
                         role=agent_dict.get("role"),
                         status=agent_dict.get("status"),
                         current_task_id=agent_dict.get("current_task"),

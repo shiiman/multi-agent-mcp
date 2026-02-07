@@ -176,10 +176,11 @@ class AiCliManager:
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
-            if effort == "xhigh":
-                raise ValueError("Claude では reasoning_effort=xhigh は使用できません")
-            if effort in {"low", "medium", "high"}:
-                parts.extend(["--effort", effort])
+            if effort != "none":
+                logger.debug(
+                    "Claude CLI では reasoning_effort=%s は未対応のため無視します",
+                    effort,
+                )
             parts.append("--dangerously-skip-permissions")
             # Claude CLI はプロンプトを位置引数で受け取る（--prompt は未対応）。
             parts.append(quoted_prompt)

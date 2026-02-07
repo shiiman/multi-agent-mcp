@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 class TmuxWorkspaceMixin:
     """tmux ワークスペース構築・ペイン操作機能を提供する mixin。"""
 
+    @staticmethod
+    def _pane_target(session: str, window: int, pane: int) -> str:
+        """tmux target 文字列を構築する。"""
+        return f"{session}:{window}.{pane}"
+
     async def create_main_session(self, working_dir: str) -> bool:
         """メインセッション（左40:右60分離レイアウト）を作成する。
 
@@ -45,9 +50,11 @@ class TmuxWorkspaceMixin:
         project_name = self._get_project_name(working_dir)
         session_name = project_name
 
-        # セッションが既に存在する場合はスキップ
+        # セッションが既に存在する場合も、インデックスを正規化して続行する
         if await self.session_exists(project_name):
-            logger.info(f"メインセッション {session_name} は既に存在します")
+            await self._configure_session_options(session_name)
+            await self._normalize_window_indices(session_name)
+            logger.info(f"メインセッション {session_name} は既に存在します（インデックス正規化済み）")
             return True
 
         if not await self._create_main_session_window(session_name, working_dir):
@@ -84,6 +91,21 @@ class TmuxWorkspaceMixin:
         """base-index 系オプションを session に設定する。"""
         await self._run("set-option", "-t", session_name, "base-index", "0")
         await self._run("set-option", "-t", session_name, "pane-base-index", "0")
+        # main ウィンドウにも pane-base-index を明示設定しておく
+        await self._run(
+            "set-window-option",
+            "-t",
+            f"{session_name}:{self.settings.window_name_main}",
+            "pane-base-index",
+            "0",
+        )
+        return True
+
+    async def _normalize_window_indices(self, session_name: str) -> bool:
+        """既存セッションのウィンドウ番号を base-index に合わせて再採番する。"""
+        code, _, stderr = await self._run("move-window", "-r", "-t", session_name)
+        if code != 0:
+            logger.warning(f"ウィンドウ再採番に失敗: {stderr}")
         return True
 
     async def _split_main_window_layout(self, session_name: str) -> bool:

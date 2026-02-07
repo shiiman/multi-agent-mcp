@@ -341,7 +341,7 @@ def register_tools(mcp: FastMCP) -> None:
             return role_error
 
         healthcheck = ensure_healthcheck_manager(app_ctx)
-        result = await healthcheck.monitor_and_recover_workers()
+        result = await healthcheck.monitor_and_recover_workers(app_ctx)
 
         return {
             "success": True,

@@ -286,7 +286,9 @@ class HealthcheckManager:
                     ensure_ipc_manager,
                 )
 
-                dashboard = ensure_dashboard_manager(app_ctx)
+                dashboard = app_ctx.dashboard_manager
+                if dashboard is None:
+                    dashboard = ensure_dashboard_manager(app_ctx)
                 dashboard.update_task_status(
                     task_id=task_id,
                     status=TaskStatus.FAILED,

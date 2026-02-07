@@ -266,9 +266,16 @@ def _post_create_agent(
         )
 
     # エージェント情報をファイルに保存
-    result["file_persisted"] = save_agent_to_file(app_ctx, agent)
-    if result["file_persisted"]:
-        logger.info(f"エージェント {agent.id} をファイルに保存しました")
+    # session_id 未確定時は古い config.json の session_id を拾うリスクがあるため保存しない。
+    if app_ctx.session_id:
+        result["file_persisted"] = save_agent_to_file(app_ctx, agent)
+        if result["file_persisted"]:
+            logger.info(f"エージェント {agent.id} をファイルに保存しました")
+    else:
+        logger.info(
+            f"エージェント {agent.id} のファイル保存をスキップしました"
+            "（session_id 未設定、init_tmux_workspace 後に保存）"
+        )
 
     # グローバルレジストリに登録
     from src.tools.helpers import save_agent_to_registry

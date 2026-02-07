@@ -121,15 +121,34 @@ def ensure_project_root_from_caller(
         caller_agent_id: 呼び出し元エージェントID
     """
     if caller_agent_id:
+        def _apply_project_root(candidate: str | None) -> bool:
+            """有効な project_root 候補を AppContext に適用する。"""
+            if not candidate:
+                return False
+            if not os.path.isdir(candidate):
+                logger.warning(f"無効な project_root 候補を無視します: {candidate}")
+                return False
+
+            app_ctx.project_root = candidate
+            try:
+                refresh_app_settings(app_ctx, candidate)
+            except (ValueError, OSError) as e:
+                logger.warning(f"project settings の再読み込みをスキップ: {e}")
+            logger.debug(
+                f"caller_agent_id {caller_agent_id} から project_root を設定: {candidate}"
+            )
+            return True
+
         # project_root が未設定の場合、レジストリから取得
         if not app_ctx.project_root:
             project_root = get_project_root_from_registry(caller_agent_id)
-            if project_root:
-                app_ctx.project_root = project_root
-                refresh_app_settings(app_ctx, project_root)
-                logger.debug(
-                    f"caller_agent_id {caller_agent_id} から project_root を設定: {project_root}"
-                )
+            if not _apply_project_root(project_root):
+                # レジストリに有効な値がない場合、呼び出し元エージェントから補完
+                agent = app_ctx.agents.get(caller_agent_id)
+                if agent:
+                    for candidate in (agent.working_dir, agent.worktree_path):
+                        if _apply_project_root(candidate):
+                            break
 
         # session_id が未設定の場合、レジストリから取得
         if not app_ctx.session_id:

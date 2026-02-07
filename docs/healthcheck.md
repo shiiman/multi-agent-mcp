@@ -40,6 +40,8 @@ Healthcheck は以下を担当します。
 ## 段階復旧
 
 `monitor_and_recover_workers` は段階的に復旧します。
+ツール実行・daemon 実行のいずれも `app_ctx` つきで実行されるため、
+`full_recovery` と `task failed` 確定処理まで到達します。
 
 1. `attempt_recovery`
 2. 失敗時に `full_recovery`（`app_ctx` がある場合）
@@ -114,4 +116,3 @@ get_unhealthy_agents(caller_agent_id="admin_xxx")
 # 3. 監視 + 復旧をまとめて実行
 monitor_and_recover_workers(caller_agent_id="admin_xxx")
 ```
-

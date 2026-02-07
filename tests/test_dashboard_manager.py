@@ -389,6 +389,37 @@ class TestMarkdownDashboard:
         assert "# Multi-Agent Dashboard" in content
         assert "Dashboard Test Task" in content
 
+    def test_save_markdown_dashboard_uses_cli_worker_name(self, dashboard_manager):
+        """agents.json 同期時に worker 名が CLI + 番号になることをテスト。"""
+        session_dir = dashboard_manager.dashboard_dir.parent
+        agents_file = session_dir / "agents.json"
+        agents_file.write_text(
+            json.dumps(
+                {
+                    "worker-a": {
+                        "id": "worker-a",
+                        "role": "worker",
+                        "status": "idle",
+                        "current_task": None,
+                        "worktree_path": None,
+                        "window_index": 0,
+                        "pane_index": 1,
+                        "ai_cli": "claude",
+                        "last_activity": datetime.now().isoformat(),
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        project_root = session_dir / "project"
+        project_root.mkdir(exist_ok=True)
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "`claude1`" in md_content
+
     def test_markdown_dashboard_with_completed_task(self, dashboard_manager, temp_dir):
         """完了タスクを含むMarkdownダッシュボードをテスト。"""
         project_root = temp_dir / "project"

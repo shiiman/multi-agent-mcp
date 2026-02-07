@@ -272,6 +272,13 @@ def register_batch_tools(mcp: FastMCP) -> None:
                             logger.warning(
                                 f"Worker {worker_index + 1}: タスク割り当て失敗 - {message}"
                             )
+                        else:
+                            agent.current_task = task_id
+                            if str(agent.role) == AgentRole.WORKER.value:
+                                agent.status = AgentStatus.BUSY
+                            agent.last_activity = datetime.now()
+                            save_agent_to_file(app_ctx, agent)
+                            dashboard.update_agent_summary(agent)
                     except Exception as e:
                         logger.warning(f"Worker {worker_index + 1}: タスク割り当てエラー - {e}")
 
@@ -362,6 +369,13 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     task_assigned = success
                     if not success:
                         logger.warning(f"再利用Workerへのタスク割り当て失敗: {message}")
+                    else:
+                        worker.current_task = task_id
+                        if str(worker.role) == AgentRole.WORKER.value:
+                            worker.status = AgentStatus.BUSY
+                        worker.last_activity = datetime.now()
+                        save_agent_to_file(app_ctx, worker)
+                        dashboard.update_agent_summary(worker)
                 except Exception as e:
                     logger.warning(f"再利用Workerへのタスク割り当てエラー: {e}")
 

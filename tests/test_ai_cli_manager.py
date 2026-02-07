@@ -136,6 +136,28 @@ class TestBuildStdinCommand:
         # worktree なしの場合は cd も含まれない
         assert "cd" not in cmd
 
+    def test_build_stdin_command_claude_ignores_reasoning_effort(self, ai_cli_manager):
+        """Claude では reasoning_effort を渡しても CLI オプションに含めない。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE,
+            "/tmp/task.md",
+            "/path/to/worktree",
+            reasoning_effort="high",
+        )
+        assert "--effort" not in cmd
+        assert "--reasoning-effort" not in cmd
+
+    def test_build_stdin_command_codex_uses_reasoning_effort(self, ai_cli_manager):
+        """Codex では reasoning_effort を --reasoning-effort として付与する。"""
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CODEX,
+            "/tmp/task.md",
+            "/path/to/worktree",
+            reasoning_effort="xhigh",
+        )
+        assert "--reasoning-effort" in cmd
+        assert "xhigh" in cmd
+
 
 class TestBuildStdinCommandWithModel:
     """build_stdin_command のモデル指定テスト。"""
@@ -336,19 +358,21 @@ class TestBuildStdinCommandWithThinkingTokens:
 class TestBuildStdinCommandWithReasoningEffort:
     """build_stdin_command の reasoning effort テスト。"""
 
-    def test_claude_with_high_effort(self, ai_cli_manager):
+    def test_claude_ignores_high_effort(self, ai_cli_manager):
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
             reasoning_effort="high",
         )
-        assert "--effort high" in cmd
+        assert "--effort" not in cmd
+        assert "--reasoning-effort" not in cmd
 
-    def test_claude_with_xhigh_raises(self, ai_cli_manager):
-        with pytest.raises(ValueError):
-            ai_cli_manager.build_stdin_command(
-                AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
-                reasoning_effort="xhigh",
-            )
+    def test_claude_ignores_xhigh_effort(self, ai_cli_manager):
+        cmd = ai_cli_manager.build_stdin_command(
+            AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",
+            reasoning_effort="xhigh",
+        )
+        assert "--effort" not in cmd
+        assert "--reasoning-effort" not in cmd
 
     def test_codex_with_xhigh(self, ai_cli_manager):
         cmd = ai_cli_manager.build_stdin_command(

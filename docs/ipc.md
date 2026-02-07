@@ -26,15 +26,15 @@
 ```
 1. Worker が report_task_completion() を呼ぶ
    ↓
-2. Dashboard を更新
-   ↓
-3. IPC ディレクトリにメッセージファイルを作成
+2. IPC ディレクトリにメッセージファイルを作成
    (ipc/{admin_id}/{timestamp}_{message_id}.md)
    ↓
-4. Admin の tmux ペインに通知を送信
+3. Admin の tmux ペインに通知を送信
    echo '[IPC] 新しいメッセージ: task_complete from worker_xxx'
    ↓
-5. Admin は read_messages() でメッセージ内容を取得
+4. Admin は read_messages() でメッセージ内容を取得
+   ↓
+5. read_messages() 内で Dashboard を自動更新
 ```
 
 ### Worker → Admin（質問/ブロック）
@@ -140,15 +140,16 @@ subprocess.run([
 
 | ツール | 説明 | 使用者 |
 |--------|------|--------|
-| `report_task_completion` | 完了報告（Dashboard更新 + IPC自動送信） | Worker |
-| `report_task_progress` | 進捗報告（Dashboard更新 + IPC自動送信） | Worker |
+| `report_task_completion` | 完了報告（Admin への IPC 自動送信） | Worker |
+| `report_task_progress` | 進捗報告（Admin への IPC 自動送信） | Worker |
 
 ## 重要なポイント
 
 ### Worker が覚えておくこと
 
 1. **完了報告**: `report_task_completion` を使う
-   - Dashboard 更新 + IPC 通知が**自動で行われる**
+   - IPC 通知が**自動で行われる**
+   - Dashboard 更新は Admin の `read_messages()` 時に自動反映される
    - 別途 `send_message` は**不要**
 
 2. **質問/ブロック**: `send_message` を使う
