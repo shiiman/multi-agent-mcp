@@ -6,12 +6,16 @@ YAML Front Matter 付き Markdown で統一管理。
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 from src.managers.dashboard_cost import DashboardCostMixin
 from src.managers.dashboard_rendering_mixin import DashboardRenderingMixin
 from src.models.dashboard import Dashboard
+
+if TYPE_CHECKING:
+    from src.config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +28,14 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
         workspace_id: str,
         workspace_path: str,
         dashboard_dir: str,
+        settings: "Settings | None" = None,
     ) -> None:
+        from src.config.settings import load_settings_for_project
+
         self.workspace_id = workspace_id
         self.workspace_path = workspace_path
         self.dashboard_dir = Path(dashboard_dir)
+        self.settings = settings or load_settings_for_project(workspace_path)
 
     def initialize(self) -> None:
         """ダッシュボード環境を初期化する。"""

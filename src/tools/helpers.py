@@ -28,12 +28,26 @@ def refresh_app_settings(app_ctx: AppContext, project_root: str) -> None:
     from src.tools.helpers_git import resolve_main_repo_root
 
     main_repo_root = resolve_main_repo_root(project_root)
+    os.environ["MCP_PROJECT_ROOT"] = str(main_repo_root)
     env_file = resolve_project_env_file(main_repo_root)
     settings = load_settings_for_project(main_repo_root)
 
     app_ctx.settings = settings
     app_ctx.ai_cli.settings = settings
     app_ctx.tmux.settings = settings
+    if app_ctx.healthcheck_manager is not None:
+        app_ctx.healthcheck_manager.healthcheck_interval_seconds = (
+            settings.healthcheck_interval_seconds
+        )
+        app_ctx.healthcheck_manager.stall_timeout_seconds = (
+            settings.healthcheck_stall_timeout_seconds
+        )
+        app_ctx.healthcheck_manager.in_progress_no_ipc_timeout_seconds = (
+            settings.healthcheck_in_progress_no_ipc_timeout_seconds
+        )
+        app_ctx.healthcheck_manager.max_recovery_attempts = (
+            settings.healthcheck_max_recovery_attempts
+        )
 
     if env_file:
         logger.info(f"project settings を .env から再読み込み: {env_file}")

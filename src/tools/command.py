@@ -263,6 +263,7 @@ def register_tools(mcp: FastMCP) -> None:
                 project_name=project_name,
                 working_dir=str(project_root),
                 mcp_tool_prefix=mcp_prefix,
+                settings=app_ctx.settings,
             )
 
             # Keep role/task separation: role guidance is passed via CLI bootstrap command.

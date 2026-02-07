@@ -3,7 +3,6 @@
 import logging
 import os
 
-from src.config.settings import get_mcp_dir
 from src.context import AppContext
 from src.managers.dashboard_manager import DashboardManager
 from src.managers.gtrconfig_manager import GtrconfigManager
@@ -51,7 +50,7 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
                 "session_id が設定されていません。"
                 "init_tmux_workspace で session_id を指定してください。"
             )
-        ipc_dir = os.path.join(base_dir, get_mcp_dir(), session_id, "ipc")
+        ipc_dir = os.path.join(base_dir, app_ctx.settings.mcp_dir, session_id, "ipc")
         app_ctx.ipc_manager = IPCManager(ipc_dir)
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager
@@ -79,7 +78,7 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
             "init_tmux_workspace で session_id を指定してください。"
         )
 
-    dashboard_dir = os.path.join(base_dir, get_mcp_dir(), session_id, "dashboard")
+    dashboard_dir = os.path.join(base_dir, app_ctx.settings.mcp_dir, session_id, "dashboard")
     dashboard_dir_abs = os.path.realpath(os.path.abspath(dashboard_dir))
 
     # セッション切替後に古い DashboardManager を使い回さない
@@ -92,7 +91,7 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
             os.path.realpath(os.path.abspath(base_dir))
         )
         is_session_scoped_dashboard = (
-            f"{os.sep}{get_mcp_dir()}{os.sep}" in current_dir_abs
+            f"{os.sep}{app_ctx.settings.mcp_dir}{os.sep}" in current_dir_abs
             and current_dir_abs.endswith(f"{os.sep}dashboard")
         )
         same_workspace_id = current.workspace_id == session_id
@@ -112,7 +111,10 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
             workspace_id=session_id,
             workspace_path=base_dir,
             dashboard_dir=dashboard_dir,
+            settings=app_ctx.settings,
         )
+    else:
+        app_ctx.dashboard_manager.settings = app_ctx.settings
     return app_ctx.dashboard_manager
 
 
@@ -167,9 +169,14 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
         # session_id を確保（config.json から読み取り）
         session_id = ensure_session_id(app_ctx)
         if session_id:
-            memory_dir = os.path.join(project_root, get_mcp_dir(), session_id, "memory")
+            memory_dir = os.path.join(
+                project_root,
+                app_ctx.settings.mcp_dir,
+                session_id,
+                "memory",
+            )
         else:
-            memory_dir = os.path.join(project_root, get_mcp_dir(), "memory")
+            memory_dir = os.path.join(project_root, app_ctx.settings.mcp_dir, "memory")
         app_ctx.memory_manager = MemoryManager(storage_dir=memory_dir)
     return app_ctx.memory_manager
 

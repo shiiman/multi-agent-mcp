@@ -6,7 +6,6 @@ DashboardManager のコスト関連メソッドを分離するための Mixin �
 import logging
 from datetime import datetime
 
-from src.config.settings import Settings
 from src.models.dashboard import ApiCallRecord, CostInfo, Dashboard
 
 logger = logging.getLogger(__name__)
@@ -42,7 +41,7 @@ class DashboardCostMixin:
             status_line: コスト抽出元の statusLine
             cost_source: コスト種別（actual / estimated）
         """
-        settings = Settings()
+        settings = self.settings
         normalized_cli = ai_cli.lower()
         tokens = estimated_tokens or settings.estimated_tokens_per_call
         estimated_cost = (tokens / 1000) * self._get_cost_per_1k_tokens(
@@ -97,7 +96,7 @@ class DashboardCostMixin:
 
     def _get_cost_per_1k_tokens(self, ai_cli: str, model: str | None) -> float:
         """モデル別の 1000 トークンあたりコストを取得する。"""
-        settings = Settings()
+        settings = self.settings
         table = settings.get_model_cost_table()
         lookup_model = model
         if not lookup_model:

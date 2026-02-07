@@ -1,8 +1,5 @@
 """プロジェクト別 .env ファイル読み込みのテスト。"""
 
-
-
-import src.config.settings as settings_module
 from src.config.settings import (
     AICli,
     ModelDefaults,
@@ -19,8 +16,6 @@ class TestGetMcpDir:
 
     def test_returns_default_mcp_dir(self, monkeypatch):
         """デフォルト値 .multi-agent-mcp を返すことをテスト。"""
-        # シングルトンキャッシュをリセット
-        monkeypatch.setattr(settings_module, "_settings_instance", None)
         monkeypatch.delenv("MCP_MCP_DIR", raising=False)
 
         result = get_mcp_dir()
@@ -28,29 +23,18 @@ class TestGetMcpDir:
 
     def test_returns_custom_mcp_dir_from_env(self, monkeypatch):
         """環境変数でカスタム値を設定できることをテスト。"""
-        # シングルトンキャッシュをリセット
-        monkeypatch.setattr(settings_module, "_settings_instance", None)
         monkeypatch.setenv("MCP_MCP_DIR", ".custom-mcp-dir")
 
         result = get_mcp_dir()
         assert result == ".custom-mcp-dir"
 
-    def test_caches_settings_instance(self, monkeypatch):
-        """Settings インスタンスがキャッシュされることをテスト。"""
-        # シングルトンキャッシュをリセット
-        monkeypatch.setattr(settings_module, "_settings_instance", None)
-        monkeypatch.delenv("MCP_MCP_DIR", raising=False)
+    def test_reflects_env_change_without_cache(self, monkeypatch):
+        """キャッシュせず呼び出しごとに環境変数変更を反映することをテスト。"""
+        monkeypatch.setenv("MCP_MCP_DIR", ".custom-a")
+        assert get_mcp_dir() == ".custom-a"
 
-        # 最初の呼び出し
-        get_mcp_dir()
-
-        # キャッシュが設定されていることを確認
-        assert settings_module._settings_instance is not None
-
-        # 2回目の呼び出しで同じインスタンスを使用
-        cached_instance = settings_module._settings_instance
-        get_mcp_dir()
-        assert settings_module._settings_instance is cached_instance
+        monkeypatch.setenv("MCP_MCP_DIR", ".custom-b")
+        assert get_mcp_dir() == ".custom-b"
 
 
 class TestGetProjectEnvFile:

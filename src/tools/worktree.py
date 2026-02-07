@@ -6,7 +6,6 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.config.settings import Settings
 from src.tools.helpers import get_worktree_manager, require_permission, save_agent_to_file
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,7 @@ def register_tools(mcp: FastMCP) -> None:
             return role_error
 
         # worktree 無効モードの場合はスキップ
-        settings = Settings()
+        settings = app_ctx.settings
         if not settings.enable_worktree:
             logger.info(f"worktree が無効のためスキップ: {branch} (MCP_ENABLE_WORKTREE=false)")
             return {
@@ -141,7 +140,7 @@ def register_tools(mcp: FastMCP) -> None:
             return role_error
 
         # worktree 無効モードの場合はスキップ
-        settings = Settings()
+        settings = app_ctx.settings
         if not settings.enable_worktree:
             logger.info(f"worktree が無効のため削除をスキップ: {worktree_path}")
             return {
@@ -339,4 +338,3 @@ def register_tools(mcp: FastMCP) -> None:
             "branch": branch if success else None,
             "message": message,
         }
-

@@ -25,7 +25,6 @@ class TmuxManager(TmuxWorkspaceMixin):
 
     def __init__(self, settings: "Settings") -> None:
         self.settings = settings
-        self.default_terminal = settings.default_terminal
 
     async def _run(self, *args: str) -> tuple[int, str, str]:
         """tmuxコマンドを実行する。"""
@@ -142,8 +141,9 @@ class TmuxManager(TmuxWorkspaceMixin):
             TerminalApp.ITERM2: self._open_in_iterm2,
             TerminalApp.TERMINAL: self._open_in_terminal_app,
         }
-        if self.default_terminal in openers:
-            return await openers[self.default_terminal](attach_cmd)
+        default_terminal = self.settings.default_terminal
+        if default_terminal in openers:
+            return await openers[default_terminal](attach_cmd)
         for opener in (self._open_in_ghostty, self._open_in_iterm2, self._open_in_terminal_app):
             if await opener(attach_cmd):
                 return True

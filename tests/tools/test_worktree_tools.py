@@ -377,15 +377,14 @@ class TestCreateWorktree:
         )
 
         # worktree を無効にして実行
-        with patch("src.tools.worktree.Settings") as mock_settings:
-            mock_settings.return_value.enable_worktree = False
-            result = await create_worktree(
-                repo_path=str(git_repo),
-                worktree_path="/tmp/test-worktree",
-                branch="feature/test",
-                caller_agent_id="owner-001",
-                ctx=worktree_mock_ctx,
-            )
+        app_ctx.settings.enable_worktree = False
+        result = await create_worktree(
+            repo_path=str(git_repo),
+            worktree_path="/tmp/test-worktree",
+            branch="feature/test",
+            caller_agent_id="owner-001",
+            ctx=worktree_mock_ctx,
+        )
 
         assert result["success"] is True
         assert result.get("skipped") is True
@@ -424,14 +423,13 @@ class TestRemoveWorktree:
         )
 
         # worktree を無効にして実行
-        with patch("src.tools.worktree.Settings") as mock_settings:
-            mock_settings.return_value.enable_worktree = False
-            result = await remove_worktree(
-                repo_path=str(git_repo),
-                worktree_path="/tmp/test-worktree",
-                caller_agent_id="owner-001",
-                ctx=worktree_mock_ctx,
-            )
+        app_ctx.settings.enable_worktree = False
+        result = await remove_worktree(
+            repo_path=str(git_repo),
+            worktree_path="/tmp/test-worktree",
+            caller_agent_id="owner-001",
+            ctx=worktree_mock_ctx,
+        )
 
         assert result["success"] is True
         assert result.get("skipped") is True

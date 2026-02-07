@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.config.settings import Settings
+from src.config.settings import Settings, load_settings_for_project
 from src.tools.helpers_git import resolve_main_repo_root
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ def _format_env_value(value: object) -> str:
     return str(value)
 
 
-def generate_env_template() -> str:
+def generate_env_template(settings: Settings | None = None) -> str:
     """設定可能な変数とデフォルト値を含む .env テンプレートを生成する。
 
     Settings クラスのデフォルト値から動的に生成するため、
@@ -32,7 +32,7 @@ def generate_env_template() -> str:
     Returns:
         .env ファイルの内容
     """
-    s = Settings()
+    s = settings or load_settings_for_project(Path.cwd())
     v = _format_env_value
 
     # 長い変数名の値を事前に取得（E501 対策）
@@ -221,13 +221,13 @@ def _setup_mcp_directories(
     """
     import json
 
-    if settings is None:
-        settings = Settings()
-
     try:
         project_root = Path(resolve_main_repo_root(working_dir))
     except ValueError:
         project_root = Path(working_dir).expanduser()
+
+    if settings is None:
+        settings = load_settings_for_project(project_root)
 
     mcp_dir = project_root / settings.mcp_dir
     created_dirs = []
@@ -248,7 +248,7 @@ def _setup_mcp_directories(
     env_file = mcp_dir / ".env"
     env_created = False
     if not env_file.exists():
-        env_file.write_text(generate_env_template())
+        env_file.write_text(generate_env_template(settings=settings))
         env_created = True
         logger.info(f".env テンプレートを作成しました: {env_file}")
 

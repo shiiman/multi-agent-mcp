@@ -3,10 +3,11 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from src.config.settings import Settings
+from src.config.settings import load_settings_for_project
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.tmux_manager import TmuxManager
@@ -33,7 +34,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     logger.info("Multi-Agent MCP Server を起動しています...")
 
     # リソースを初期化
-    settings = Settings()
+    settings = load_settings_for_project(Path.cwd())
     tmux = TmuxManager(settings)
     ai_cli = AiCliManager(settings)
 

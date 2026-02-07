@@ -4,8 +4,9 @@ Admin および Worker エージェント用のタスク指示テンプレート
 """
 
 from datetime import datetime
+from pathlib import Path
 
-from src.config.settings import Settings
+from src.config.settings import Settings, load_settings_for_project
 from src.config.template_loader import get_template_loader
 
 
@@ -39,7 +40,7 @@ def generate_admin_task(
         Admin 用のタスク指示（Markdown形式）
     """
     if settings is None:
-        settings = Settings()
+        settings = load_settings_for_project(working_dir or Path.cwd())
 
     max_iterations = settings.quality_check_max_iterations
     same_issue_limit = settings.quality_check_same_issue_limit

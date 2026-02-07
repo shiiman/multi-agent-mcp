@@ -639,7 +639,7 @@ class TmuxWorkspaceMixin:
             return False, "tmux がインストールされていません"
 
         # ターミナル設定
-        terminal = terminal or self.default_terminal
+        terminal = terminal or self.settings.default_terminal
 
         # プロジェクト名を含むセッション名を生成
         project_name = self._get_project_name(working_dir)
