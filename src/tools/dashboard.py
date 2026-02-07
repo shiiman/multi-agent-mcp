@@ -1,7 +1,7 @@
 """ダッシュボード/タスク管理ツール。"""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -22,6 +22,72 @@ from src.tools.helpers import (
 )
 
 logger = logging.getLogger(__name__)
+_ADMIN_DASHBOARD_GRANT_SECONDS = 90
+
+
+def _get_admin_poll_state(app_ctx: Any, admin_id: str) -> dict[str, Any]:
+    """Admin ごとのポーリングガード状態を取得する。"""
+    state_map = getattr(app_ctx, "_admin_poll_state", None)
+    if not isinstance(state_map, dict):
+        state_map = {}
+        app_ctx._admin_poll_state = state_map
+    state = state_map.get(admin_id)
+    if not isinstance(state, dict):
+        state = {
+            "waiting_for_ipc": False,
+            "allow_dashboard_until": None,
+        }
+        state_map[admin_id] = state
+    return state
+
+
+def _has_recent_healthcheck_event(app_ctx: Any, admin_id: str) -> bool:
+    events = getattr(app_ctx, "_admin_last_healthcheck_at", None)
+    if not isinstance(events, dict):
+        return False
+    at = events.get(admin_id)
+    if not isinstance(at, datetime):
+        return False
+    window = max(
+        _ADMIN_DASHBOARD_GRANT_SECONDS,
+        int(getattr(app_ctx.settings, "healthcheck_interval_seconds", 60)),
+    )
+    return datetime.now() - at <= timedelta(seconds=window)
+
+
+def _should_block_admin_dashboard_polling(app_ctx: Any, admin_id: str) -> bool:
+    state = _get_admin_poll_state(app_ctx, admin_id)
+    if not bool(state.get("waiting_for_ipc")):
+        return False
+
+    allow_until = state.get("allow_dashboard_until")
+    if isinstance(allow_until, datetime) and datetime.now() <= allow_until:
+        return False
+
+    try:
+        ipc = ensure_ipc_manager(app_ctx)
+        if ipc.get_unread_count(admin_id) > 0:
+            return False
+    except Exception:
+        pass
+
+    if _has_recent_healthcheck_event(app_ctx, admin_id):
+        state["allow_dashboard_until"] = datetime.now() + timedelta(
+            seconds=_ADMIN_DASHBOARD_GRANT_SECONDS
+        )
+        return False
+
+    return True
+
+
+def _polling_blocked_response() -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": (
+            "polling_blocked: IPC 通知待機中のため連続ダッシュボード参照はできません"
+        ),
+        "next_action": "wait_for_ipc_notification",
+    }
 
 
 async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
@@ -263,6 +329,14 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "list_tasks", caller_agent_id)
         if role_error:
             return role_error
+
+        caller = app_ctx.agents.get(caller_agent_id)
+        caller_role = getattr(caller, "role", None)
+        is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
+        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
+            app_ctx, caller_agent_id
+        ):
+            return _polling_blocked_response()
 
         dashboard = ensure_dashboard_manager(app_ctx)
 
@@ -606,9 +680,15 @@ def register_tools(mcp: FastMCP) -> None:
         # Worker の場合は Dashboard を読み取り専用で返す（上書き防止）
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
+        is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
         is_admin_or_owner = caller_role in (
             AgentRole.ADMIN.value, AgentRole.OWNER.value, "admin", "owner",
         )
+
+        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
+            app_ctx, caller_agent_id
+        ):
+            return _polling_blocked_response()
 
         if is_admin_or_owner:
             await _sync_dashboard_for_admin(app_ctx, dashboard)
@@ -642,9 +722,15 @@ def register_tools(mcp: FastMCP) -> None:
         # Worker の場合は Dashboard を読み取り専用で返す（上書き防止）
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
+        is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
         is_admin_or_owner = caller_role in (
             AgentRole.ADMIN.value, AgentRole.OWNER.value, "admin", "owner",
         )
+
+        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
+            app_ctx, caller_agent_id
+        ):
+            return _polling_blocked_response()
 
         if is_admin_or_owner:
             await _sync_dashboard_for_admin(app_ctx, dashboard)

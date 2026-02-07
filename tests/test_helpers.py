@@ -508,3 +508,30 @@ class TestEnsureDashboardManager:
             ".multi-agent-mcp/new-session/dashboard"
         )
         assert app_ctx.workspace_id == "new-session"
+
+
+class TestCodexPromptDetection:
+    """Codex 入力残留判定のテスト。"""
+
+    def test_pending_codex_prompt_detects_prefix_match(self):
+        from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
+
+        output = "\n".join([
+            "some logs...",
+            "› echo '[IPC] 新しいメッセージ: task_progress from worker-001'",
+        ])
+        command = "echo '[IPC] 新しいメッセージ: task_progress from worker-001'"
+
+        assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is True
+
+    def test_pending_codex_prompt_returns_false_after_confirmed(self):
+        from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
+
+        output = "\n".join([
+            "processed",
+            "›",
+            "tab to queue message",
+        ])
+        command = "echo '[IPC] 新しいメッセージ: task_progress from worker-001'"
+
+        assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is False

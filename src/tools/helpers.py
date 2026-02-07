@@ -334,13 +334,15 @@ async def notify_agent_via_tmux(
     notification_text = (
         f"echo '[IPC] 新しいメッセージ: {msg_type_value} from {sender_id}'"
     )
+    default_cli = app_ctx.ai_cli.get_default_cli()
+    resolved_cli = agent.ai_cli or default_cli
     agent_cli = (
-        agent.ai_cli.value
-        if hasattr(agent.ai_cli, "value")
-        else str(agent.ai_cli or "")
+        resolved_cli.value
+        if hasattr(resolved_cli, "value")
+        else str(resolved_cli or "")
     ).lower()
     try:
-        await app_ctx.tmux.send_with_rate_limit_to_pane(
+        success = await app_ctx.tmux.send_with_rate_limit_to_pane(
             agent.session_name,
             agent.window_index or 0,
             agent.pane_index,
@@ -348,6 +350,12 @@ async def notify_agent_via_tmux(
             clear_input=False,
             confirm_codex_prompt=agent_cli == "codex",
         )
+        if not success:
+            logger.warning(
+                "tmux 通知の送信に失敗（未確定の可能性）: %s",
+                getattr(agent, "id", "unknown"),
+            )
+            return False
         logger.info(
             f"tmux 通知を送信: {getattr(agent, 'id', 'unknown')}"
         )

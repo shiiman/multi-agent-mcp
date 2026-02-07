@@ -320,9 +320,18 @@ class DashboardMarkdownMixin:
             content = msg.content.strip() if msg.content else "(本文なし)"
             sender_id = msg.sender_id or "unknown"
             receiver_id = msg.receiver_id
-            sender = agent_labels.get(sender_id, sender_id)
+
+            def _format_actor(actor_id: str | None) -> str:
+                if not actor_id:
+                    return "unknown"
+                label = agent_labels.get(actor_id)
+                if label:
+                    return label
+                return f"unknown({actor_id[:8]})"
+
+            sender = _format_actor(sender_id)
             receiver = (
-                agent_labels.get(receiver_id, receiver_id)
+                _format_actor(receiver_id)
                 if receiver_id
                 else "broadcast"
             )

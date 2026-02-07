@@ -1,6 +1,7 @@
 """ヘルスチェック管理ツール。"""
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -8,6 +9,17 @@ from mcp.server.fastmcp import Context, FastMCP
 from src.tools.helpers import ensure_healthcheck_manager, require_permission
 
 logger = logging.getLogger(__name__)
+
+
+def _mark_healthcheck_event(app_ctx: Any, caller_agent_id: str | None) -> None:
+    """Admin のヘルスチェック実行時刻を記録する。"""
+    if not caller_agent_id:
+        return
+    events = getattr(app_ctx, "_admin_last_healthcheck_at", None)
+    if not isinstance(events, dict):
+        events = {}
+        app_ctx._admin_last_healthcheck_at = events
+    events[caller_agent_id] = datetime.now()
 
 
 async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
@@ -194,6 +206,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        _mark_healthcheck_event(app_ctx, caller_agent_id)
         healthcheck = ensure_healthcheck_manager(app_ctx)
 
         status = await healthcheck.check_agent(agent_id)
@@ -222,6 +235,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        _mark_healthcheck_event(app_ctx, caller_agent_id)
         healthcheck = ensure_healthcheck_manager(app_ctx)
 
         statuses = await healthcheck.check_all_agents()
@@ -257,6 +271,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        _mark_healthcheck_event(app_ctx, caller_agent_id)
         healthcheck = ensure_healthcheck_manager(app_ctx)
 
         unhealthy = await healthcheck.get_unhealthy_agents()
@@ -288,6 +303,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        _mark_healthcheck_event(app_ctx, caller_agent_id)
         healthcheck = ensure_healthcheck_manager(app_ctx)
 
         success, message = await healthcheck.attempt_recovery(agent_id)
@@ -326,6 +342,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        _mark_healthcheck_event(app_ctx, caller_agent_id)
         return await execute_full_recovery(app_ctx, agent_id)
 
     @mcp.tool()
@@ -340,6 +357,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        _mark_healthcheck_event(app_ctx, caller_agent_id)
         healthcheck = ensure_healthcheck_manager(app_ctx)
         result = await healthcheck.monitor_and_recover_workers(app_ctx)
 

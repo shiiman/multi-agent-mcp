@@ -221,6 +221,64 @@ class TestSendMessage:
         assert result["next_action"] == "replan_and_reassign"
         assert result["gate"]["status"] == "needs_replan"
 
+    @pytest.mark.asyncio
+    async def test_worker_request_reroutes_invalid_receiver_to_admin(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Worker の request は不正 receiver_id 指定時に Admin へ補正されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_message(
+            sender_id="worker-001",
+            receiver_id="stale-admin-id",
+            message_type="request",
+            content="判断をお願いします",
+            caller_agent_id="worker-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["receiver_id"] == "admin-001"
+        assert result["rerouted_receiver_id"] == "admin-001"
+
 
 class TestReadMessages:
     """read_messages ツールのテスト。"""
@@ -262,6 +320,57 @@ class TestReadMessages:
         )
 
         assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_read_messages_blocks_admin_polling_after_empty_read(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Admin が unread=0 で read_messages を連続実行するとブロックされることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        first = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+        second = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert first["success"] is True
+        assert first["count"] == 0
+        assert second["success"] is False
+        assert "polling_blocked" in second["error"]
 
 
 class TestGetUnreadCount:

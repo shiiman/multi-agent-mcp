@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -365,16 +366,27 @@ class TmuxWorkspaceMixin:
         if not expected:
             return False
 
-        lines = output.splitlines()[-12:]
+        def _normalize(text: str) -> str:
+            return re.sub(r"\s+", " ", text.strip().lower())
+
+        expected_norm = _normalize(expected)
+        lines = output.splitlines()[-80:]
         for line in lines:
             stripped = line.strip()
             if not stripped.startswith("›"):
                 continue
             pending = stripped[1:].strip()
-            if pending == expected:
+            if not pending:
+                continue
+
+            pending_norm = _normalize(pending)
+            if pending_norm == expected_norm:
                 return True
-            # 折り返しで末尾が欠ける場合の緩和判定
-            if pending and expected.startswith(pending):
+            # 折り返しや切り詰めで末尾が欠ける場合の緩和判定
+            if pending_norm and (
+                expected_norm.startswith(pending_norm)
+                or pending_norm.startswith(expected_norm)
+            ):
                 return True
         return False
 
