@@ -389,10 +389,6 @@ class Settings(BaseSettings):
         default=WorkerCliMode.UNIFORM,
         description="Worker CLI 設定モード（uniform/per-worker）",
     )
-    worker_cli_uniform: AICli = Field(
-        default=AICli.CLAUDE,
-        description="uniform モード時の Worker CLI",
-    )
     worker_cli_1: str | None = Field(default=None, description="Worker 1 の CLI")
     worker_cli_2: str | None = Field(default=None, description="Worker 2 の CLI")
     worker_cli_3: str | None = Field(default=None, description="Worker 3 の CLI")
@@ -511,6 +507,12 @@ class Settings(BaseSettings):
             return {}
         return {str(k): float(v) for k, v in loaded.items()}
 
+    def get_active_profile_cli(self) -> AICli:
+        """現在アクティブなモデルプロファイルの CLI を返す。"""
+        if self.model_profile_active == ModelProfile.STANDARD:
+            return self.model_profile_standard_cli
+        return self.model_profile_performance_cli
+
     def get_worker_cli(self, worker_index: int) -> AICli:
         """Worker index(1..16) に対する CLI を取得する。"""
         def _to_cli(value: str | AICli | None) -> AICli | None:
@@ -520,13 +522,14 @@ class Settings(BaseSettings):
                 return value
             return AICli(str(value).strip())
 
+        profile_cli = self.get_active_profile_cli()
         if self.worker_cli_mode == WorkerCliMode.UNIFORM:
-            return self.worker_cli_uniform
+            return profile_cli
         if not (1 <= worker_index <= 16):
             raise ValueError(f"worker_index は 1..16 で指定してください: {worker_index}")
         per_worker = getattr(self, f"worker_cli_{worker_index}")
         parsed = _to_cli(per_worker)
-        return parsed or self.worker_cli_uniform
+        return parsed or profile_cli
 
     def get_worker_model(self, worker_index: int, profile_worker_model: str) -> str:
         """Worker index(1..16) に対するモデルを取得する。

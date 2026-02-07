@@ -208,14 +208,16 @@ class TestWorkerCliAndModelResolution:
     def test_get_worker_cli_uniform(self):
         settings = load_settings_for_project(None)
         settings.worker_cli_mode = WorkerCliMode.UNIFORM
-        settings.worker_cli_uniform = AICli.CODEX
+        settings.model_profile_active = "standard"
+        settings.model_profile_standard_cli = AICli.CODEX
         assert settings.get_worker_cli(1) == AICli.CODEX
         assert settings.get_worker_cli(16) == AICli.CODEX
 
     def test_get_worker_cli_per_worker(self):
         settings = load_settings_for_project(None)
         settings.worker_cli_mode = WorkerCliMode.PER_WORKER
-        settings.worker_cli_uniform = AICli.CLAUDE
+        settings.model_profile_active = "standard"
+        settings.model_profile_standard_cli = AICli.CLAUDE
         settings.worker_cli_2 = "gemini"
         assert settings.get_worker_cli(1) == AICli.CLAUDE
         assert settings.get_worker_cli(2) == AICli.GEMINI

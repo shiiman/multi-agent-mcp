@@ -29,7 +29,7 @@ def _generate_per_worker_env_lines(
 ) -> str:
     """Worker 1〜16 の per-worker CLI/MODEL 行を生成する。"""
     default_model = v(s.model_profile_performance_worker_model)
-    default_cli = v(s.worker_cli_uniform)
+    default_cli = v(s.get_active_profile_cli())
     lines: list[str] = []
     for i in range(1, 17):
         cli_val = getattr(s, f"worker_cli_{i}", None)

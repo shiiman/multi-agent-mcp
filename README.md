@@ -356,8 +356,7 @@ cleanup_workspace()
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro | Gemini CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash | Gemini CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
-| `MCP_WORKER_CLI_UNIFORM` | claude | uniformモード時のWorker CLI |
-| `MCP_WORKER_CLI_1..16` | (empty) | per-workerモードでのWorker別CLI設定（未設定時はUNIFORMを利用） |
+| `MCP_WORKER_CLI_1..16` | (empty) | per-workerモードでのWorker別CLI設定（未設定時はアクティブプロファイルCLIを利用） |
 | `MCP_WORKER_MODEL_MODE` | uniform | Workerモデル設定モード（uniform/per-worker） |
 | `MCP_WORKER_MODEL_UNIFORM` | (empty) | uniformモード時のWorkerモデル（未設定時はプロファイルのWORKER_MODEL） |
 | `MCP_WORKER_MODEL_1..16` | (empty) | per-workerモードでのWorker別モデル設定（未設定時はUNIFORM→プロファイル順で解決） |

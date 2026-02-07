@@ -98,7 +98,7 @@ def register_tools(mcp: FastMCP) -> None:
             "settings": current_settings,
             "worker_cli": {
                 "mode": settings.worker_cli_mode.value,
-                "uniform": settings.worker_cli_uniform.value,
+                "uniform": settings.get_active_profile_cli().value,
             },
             "worker_model": {
                 "mode": settings.worker_model_mode.value,
@@ -205,7 +205,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "active_profile": settings.model_profile_active.value,
                 "worker_cli": {
                     "mode": settings.worker_cli_mode.value,
-                    "uniform": settings.worker_cli_uniform.value,
+                    "uniform": settings.get_active_profile_cli().value,
                 },
                 "worker_model": {
                     "mode": settings.worker_model_mode.value,

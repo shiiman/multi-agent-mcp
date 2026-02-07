@@ -268,7 +268,6 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | Gemini CLI Admin default model | gemini-3-pro |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | Gemini CLI Worker default model | gemini-3-flash |
 | `MCP_WORKER_CLI_MODE` | Worker CLI mode (`uniform` / `per-worker`) | uniform |
-| `MCP_WORKER_CLI_UNIFORM` | Uniform Worker CLI value | claude |
 | `MCP_WORKER_MODEL_MODE` | Worker model mode (`uniform` / `per-worker`) | uniform |
 | `MCP_WORKER_MODEL_UNIFORM` | Uniform Worker model value (falls back to profile worker model) | - |
 | `MCP_QUALITY_CHECK_MAX_ITERATIONS` | Max quality check iterations | 5 |
