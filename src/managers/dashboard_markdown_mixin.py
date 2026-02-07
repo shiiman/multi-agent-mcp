@@ -66,6 +66,15 @@ class DashboardMarkdownMixin:
         except Exception:
             return worktree_path
 
+    def _is_worktree_enabled(self, workspace_path: str | None = None) -> bool:
+        """worktree 表示が有効かを返す。"""
+        try:
+            from src.config.settings import load_settings_for_project
+
+            return bool(load_settings_for_project(workspace_path).enable_worktree)
+        except Exception:
+            return True
+
     def _extract_agent_index(self, agent_id: str) -> str:
         """agent_id 末尾の数字を抽出する。"""
         match = re.search(r"(\d+)$", agent_id)
@@ -160,20 +169,17 @@ class DashboardMarkdownMixin:
             "",
             "## エージェント状態",
             "",
-            "| ID | 名前 | 役割 | 状態 | 現在のタスク | worktree |",
-            "|:---|:---|:---|:---|:---|:---|",
+            "| ID | 名前 | 役割 | 状態 | 現在のタスク |",
+            "|:---|:---|:---|:---|:---|",
         ]
 
         for agent in dashboard.agents:
             emoji = status_emoji.get(str(agent.status).lower(), "⚪")
             current_task = agent.current_task_id or "-"
             name = self._label_for_agent(agent)
-            worktree = self._format_worktree_path(
-                agent.worktree_path, dashboard.workspace_path
-            )
             lines.append(
                 f"| `{agent.agent_id}` | `{name}` | {agent.role} | {emoji} {agent.status} | "
-                f"{current_task} | `{worktree}` |"
+                f"{current_task} |"
             )
 
         return lines
@@ -189,15 +195,27 @@ class DashboardMarkdownMixin:
             "cancelled": "🗑️",
         }
 
-        lines = [
-            "",
-            "---",
-            "",
-            "## タスク状態",
-            "",
-            "| ID | タイトル | 状態 | 担当 | 進捗 |",
-            "|:---|:---|:---|:---|:---|",
-        ]
+        show_worktree = self._is_worktree_enabled(dashboard.workspace_path)
+        if show_worktree:
+            lines = [
+                "",
+                "---",
+                "",
+                "## タスク状態",
+                "",
+                "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |",
+                "|:---|:---|:---|:---|:---|:---|",
+            ]
+        else:
+            lines = [
+                "",
+                "---",
+                "",
+                "## タスク状態",
+                "",
+                "| ID | タイトル | 状態 | 担当 | 進捗 |",
+                "|:---|:---|:---|:---|:---|",
+            ]
         agent_labels = self._build_agent_label_map(dashboard)
 
         for task in dashboard.tasks:
@@ -207,10 +225,19 @@ class DashboardMarkdownMixin:
                 agent_labels,
                 with_id=False,
             ) if task.assigned_agent_id else "-"
-            lines.append(
-                f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
-                f"`{assigned}` | {task.progress}% |"
-            )
+            if show_worktree:
+                worktree = self._format_worktree_path(
+                    task.worktree_path, dashboard.workspace_path
+                )
+                lines.append(
+                    f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
+                    f"`{assigned}` | {task.progress}% | `{worktree}` |"
+                )
+            else:
+                lines.append(
+                    f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
+                    f"`{assigned}` | {task.progress}% |"
+                )
 
         return lines
 

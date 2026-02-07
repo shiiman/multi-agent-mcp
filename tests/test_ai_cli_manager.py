@@ -148,15 +148,14 @@ class TestBuildStdinCommand:
         assert "--reasoning-effort" not in cmd
 
     def test_build_stdin_command_codex_uses_reasoning_effort(self, ai_cli_manager):
-        """Codex では reasoning_effort を --reasoning-effort として付与する。"""
+        """Codex では reasoning_effort を -c reasoning.effort 形式で付与する。"""
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CODEX,
             "/tmp/task.md",
             "/path/to/worktree",
             reasoning_effort="xhigh",
         )
-        assert "--reasoning-effort" in cmd
-        assert "xhigh" in cmd
+        assert "-c 'reasoning.effort=\"xhigh\"'" in cmd
 
 
 class TestBuildStdinCommandWithModel:
@@ -379,14 +378,14 @@ class TestBuildStdinCommandWithReasoningEffort:
             AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
             reasoning_effort="xhigh",
         )
-        assert "--reasoning-effort xhigh" in cmd
+        assert "-c 'reasoning.effort=\"xhigh\"'" in cmd
 
     def test_none_effort_is_omitted(self, ai_cli_manager):
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
             reasoning_effort="none",
         )
-        assert "--reasoning-effort" not in cmd
+        assert "reasoning.effort" not in cmd
 
 
 class TestAiCliManagerTerminal:

@@ -359,17 +359,23 @@ async def _send_task_to_worker(
             "task_sent": bool,
             "dispatch_mode": "bootstrap" | "followup" | "none",
             "dispatch_error": str | None,
+            "task_file": str | None,
+            "command_sent": str | None,
         }
     """
     def _result(
         task_sent: bool,
         dispatch_mode: str = "none",
         dispatch_error: str | None = None,
+        task_file: str | None = None,
+        command_sent: str | None = None,
     ) -> dict[str, Any]:
         return {
             "task_sent": task_sent,
             "dispatch_mode": dispatch_mode,
             "dispatch_error": dispatch_error,
+            "task_file": task_file,
+            "command_sent": command_sent,
         }
 
     async def _reset_bootstrap_state_if_shell() -> str | None:
@@ -464,9 +470,7 @@ async def _send_task_to_worker(
         thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
         reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
 
-        should_bootstrap = not bool(getattr(agent, "ai_bootstrapped", False))
-        if should_bootstrap:
-            # 初回: AI CLI を起動し、role template + task file を投入する。
+        async def _dispatch_bootstrap() -> tuple[bool, str]:
             bootstrap_command = app_ctx.ai_cli.build_stdin_command(
                 cli=agent_cli_name,
                 task_file_path=str(task_file),
@@ -484,6 +488,13 @@ async def _send_task_to_worker(
                 agent.pane_index,
                 bootstrap_command,
             )
+            return success, bootstrap_command
+
+        should_bootstrap = not bool(getattr(agent, "ai_bootstrapped", False))
+        command_sent: str | None = None
+        if should_bootstrap:
+            # 初回: AI CLI を起動し、role template + task file を投入する。
+            success, command_sent = await _dispatch_bootstrap()
             dispatch_mode = "bootstrap"
         else:
             dispatch_mode = "followup"
@@ -504,9 +515,12 @@ async def _send_task_to_worker(
                             "failed to change directory before followup dispatch"
                             f" (pane_current_command={current_command or 'unknown'})"
                         ),
+                        task_file=str(task_file),
+                        command_sent=change_dir,
                     )
 
             instruction = f"次のタスク指示ファイルを実行してください: {task_file}"
+            command_sent = instruction
             success = await tmux.send_keys_to_pane(
                 agent.session_name,
                 agent.window_index,
@@ -537,19 +551,49 @@ async def _send_task_to_worker(
             logger.info(
                 f"Worker {worker_index + 1} (ID: {agent.id}) にタスクを送信しました"
             )
-            return _result(True, dispatch_mode=dispatch_mode)
+            return _result(
+                True,
+                dispatch_mode=dispatch_mode,
+                task_file=str(task_file),
+                command_sent=command_sent,
+            )
         else:
             correction_info = ""
             if dispatch_mode == "followup":
                 current_command = await _reset_bootstrap_state_if_shell()
-                correction_info = (
-                    f" (pane_current_command={current_command or 'unknown'})"
-                )
+                if (current_command or "").strip().lower() in _SHELL_COMMANDS:
+                    logger.info(
+                        "Worker %s の followup 失敗を検知。bootstrap を 1 回再試行します",
+                        worker_index + 1,
+                    )
+                    retry_success, retry_command = await _dispatch_bootstrap()
+                    if retry_success:
+                        agent.status = AgentStatus.BUSY
+                        agent.last_activity = datetime.now()
+                        agent.ai_bootstrapped = True
+                        save_agent_to_file(app_ctx, agent)
+                        dashboard.save_markdown_dashboard(project_root, session_id)
+                        return _result(
+                            True,
+                            dispatch_mode="bootstrap",
+                            task_file=str(task_file),
+                            command_sent=retry_command,
+                        )
+                    correction_info = (
+                        " (pane_current_command=shell, bootstrap_retry_failed)"
+                    )
+                    command_sent = retry_command
+                else:
+                    correction_info = (
+                        f" (pane_current_command={current_command or 'unknown'})"
+                    )
             logger.warning(f"Worker {worker_index + 1}: タスク送信失敗")
             return _result(
                 False,
                 dispatch_mode=dispatch_mode,
                 dispatch_error=f"tmux send_keys_to_pane failed{correction_info}",
+                task_file=str(task_file),
+                command_sent=command_sent,
             )
     except Exception as e:
         logger.warning(f"Worker {worker_index + 1}: タスク送信エラー - {e}")

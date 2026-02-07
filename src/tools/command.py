@@ -2,6 +2,7 @@
 
 import logging
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ from src.config.workflow_guides import get_role_template_path
 from src.models.agent import AgentRole, AgentStatus
 from src.tools.helpers import (
     ensure_dashboard_manager,
-    ensure_persona_manager,
+    get_worktree_manager,
     get_mcp_tool_prefix_from_config,
     require_permission,
     resolve_main_repo_root,
@@ -20,9 +21,13 @@ from src.tools.helpers import (
     search_memory_context,
     sync_agents_from_file,
 )
-from src.tools.agent_helpers import resolve_worker_number_from_slot
+from src.tools.agent_helpers import (
+    _create_worktree_for_worker,
+    _send_task_to_worker,
+    resolve_worker_number_from_slot,
+)
 from src.tools.model_profile import get_current_profile_settings
-from src.tools.task_templates import generate_7section_task, generate_admin_task
+from src.tools.task_templates import generate_admin_task
 
 logger = logging.getLogger(__name__)
 
@@ -264,10 +269,9 @@ def register_tools(mcp: FastMCP) -> None:
 
         # タスク内容の処理
         final_task_content = task_content
-        persona_info = None
         is_admin = agent.role == AgentRole.ADMIN.value
 
-        if auto_enhance:
+        if auto_enhance and is_admin:
             # メモリから関連情報を検索（プロジェクト + グローバル）
             memory_context = search_memory_context(app_ctx, task_content)
 
@@ -277,92 +281,153 @@ def register_tools(mcp: FastMCP) -> None:
             # config.json から MCP ツールプレフィックスを取得（Admin/Worker 共通）
             mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
 
-            if is_admin:
-                # Admin 用: 計画書 + Worker管理手順
-                actual_branch = branch_name or f"feature/{session_id}"
-                final_task_content = generate_admin_task(
-                    session_id=session_id,
-                    agent_id=agent_id,
-                    plan_content=task_content,
-                    branch_name=actual_branch,
-                    worker_count=effective_worker_count,
-                    memory_context=memory_context,
-                    project_name=project_name,
-                    working_dir=str(project_root),
-                    mcp_tool_prefix=mcp_prefix,
-                )
-            else:
-                # Worker 用: 7セクション構造 + ペルソナ + 作業環境情報
-                persona_manager = ensure_persona_manager(app_ctx)
-                persona = persona_manager.get_optimal_persona(task_content)
-                persona_info = {
-                    "name": persona.name,
-                    "description": persona.description,
-                }
-                # Worker の作業環境情報を取得
-                worker_worktree = agent.worktree_path
-                worker_branch = agent.branch if hasattr(agent, "branch") else None
-                final_task_content = generate_7section_task(
-                    task_id=session_id,
-                    agent_id=agent_id,
-                    task_description=task_content,
-                    persona_name=persona.name,
-                    persona_prompt=persona.system_prompt_addition,
-                    memory_context=memory_context,
-                    project_name=project_name,
-                    worktree_path=worker_worktree,
-                    branch_name=worker_branch,
-                    admin_id=caller_agent_id,  # Worker に Admin の ID を渡す
-                    mcp_tool_prefix=mcp_prefix,
-                )
+            # Admin 用: 計画書 + Worker管理手順
+            actual_branch = branch_name or f"feature/{session_id}"
+            final_task_content = generate_admin_task(
+                session_id=session_id,
+                agent_id=agent_id,
+                plan_content=task_content,
+                branch_name=actual_branch,
+                worker_count=effective_worker_count,
+                memory_context=memory_context,
+                project_name=project_name,
+                working_dir=str(project_root),
+                mcp_tool_prefix=mcp_prefix,
+            )
 
             # Keep role/task separation: role guidance is passed via CLI bootstrap command.
 
-        # タスクファイル作成
         dashboard = ensure_dashboard_manager(app_ctx)
+
+        # Worker は _send_task_to_worker に統一し、
+        # ai_bootstrapped / followup 分岐を共通化する。
+        if not is_admin:
+            if (
+                agent.session_name is None
+                or agent.window_index is None
+                or agent.pane_index is None
+            ):
+                return {
+                    "success": False,
+                    "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
+                }
+
+            try:
+                worker_no = resolve_worker_number_from_slot(
+                    app_ctx.settings,
+                    agent.window_index,
+                    agent.pane_index,
+                )
+            except Exception:
+                worker_no = 1
+
+            # 2回目以降も含め、タスク割当直前に worktree 準備を実施する
+            # （MCP_ENABLE_WORKTREE=false の場合は作成・切替を行わない）
+            dispatch_worktree_path = agent.worktree_path or agent.working_dir or str(project_root)
+            dispatch_branch = branch_name or ""
+
+            if app_ctx.settings.enable_worktree:
+                safe_session_id = re.sub(r"[^0-9A-Za-z._-]+", "-", session_id).strip("-")
+                if not safe_session_id:
+                    safe_session_id = "task"
+                generated_branch = (
+                    branch_name
+                    or f"feature/{safe_session_id}-worker-{worker_no}-{uuid.uuid4().hex[:6]}"
+                )
+
+                worktree_manager = get_worktree_manager(app_ctx, str(project_root))
+                base_branch = await worktree_manager.get_current_branch(str(project_root))
+                if not base_branch:
+                    base_branch = "main"
+
+                wt_path, wt_error = await _create_worktree_for_worker(
+                    app_ctx=app_ctx,
+                    repo_path=str(project_root),
+                    branch=generated_branch,
+                    base_branch=base_branch,
+                    worker_index=max(worker_no - 1, 0),
+                )
+                if wt_error or not wt_path:
+                    return {
+                        "success": False,
+                        "error": wt_error or "worktree 作成に失敗しました",
+                    }
+
+                dispatch_worktree_path = wt_path
+                dispatch_branch = generated_branch
+                agent.worktree_path = wt_path
+                agent.working_dir = wt_path
+
+            try:
+                assigned, _ = dashboard.assign_task(
+                    task_id=session_id,
+                    agent_id=agent_id,
+                    branch=dispatch_branch or None,
+                    worktree_path=dispatch_worktree_path if app_ctx.settings.enable_worktree else None,
+                )
+                if not assigned:
+                    logger.debug("send_task: task %s は dashboard 未登録のため割当更新をスキップ", session_id)
+            except Exception as assign_error:
+                logger.debug("send_task: task 割当更新をスキップ: %s", assign_error)
+
+            agent.current_task = session_id
+            agent.status = AgentStatus.BUSY
+            agent.last_activity = datetime.now()
+            save_agent_to_file(app_ctx, agent)
+            dashboard.update_agent_summary(agent)
+
+            send_result = await _send_task_to_worker(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content=task_content,
+                task_id=session_id,
+                branch=dispatch_branch,
+                worktree_path=dispatch_worktree_path,
+                session_id=session_id,
+                worker_index=max(worker_no - 1, 0),
+                enable_worktree=app_ctx.settings.enable_worktree,
+                profile_settings=profile_settings,
+                caller_agent_id=caller_agent_id,
+            )
+
+            success = bool(send_result.get("task_sent"))
+            result = {
+                "success": success,
+                "agent_id": agent_id,
+                "agent_role": agent.role,
+                "session_id": session_id,
+                "task_file": send_result.get("task_file"),
+                "command_sent": send_result.get("command_sent"),
+                "auto_enhanced": auto_enhance,
+                "dispatch_mode": send_result.get("dispatch_mode", "none"),
+                "dispatch_error": send_result.get("dispatch_error"),
+                "branch_name": dispatch_branch or None,
+                "worktree_path": (
+                    dispatch_worktree_path if app_ctx.settings.enable_worktree else None
+                ),
+                "message": "タスクを送信しました" if success else "タスク送信に失敗しました",
+            }
+            return result
+
+        # Admin への送信は従来どおり bootstrap コマンドを使用
         task_file = dashboard.write_task_file(
             project_root, session_id, agent_id, final_task_content
         )
 
-        # WorkerにAI CLIコマンドを送信
-        # エージェントのAI CLIを取得（未設定の場合はデフォルト）
         agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
-
-        # ロール別のモデルを取得
-        if agent.role == AgentRole.ADMIN.value:
-            agent_model = profile_settings.get("admin_model")
-        else:  # WORKER
-            worker_model_default = profile_settings.get("worker_model")
-            try:
-                worker_no = resolve_worker_number_from_slot(
-                    app_ctx.settings,
-                    agent.window_index or 0,
-                    agent.pane_index or 0,
-                )
-                agent_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
-            except Exception:
-                agent_model = worker_model_default
-
-        # ロール名を build_stdin_command に渡す
-        agent_role_name = "admin" if agent.role == AgentRole.ADMIN.value else "worker"
-
-        # Extended Thinking トークン数をプロファイル設定から取得
-        if agent.role == AgentRole.ADMIN.value:
-            thinking_tokens = profile_settings.get("admin_thinking_tokens", 4000)
-            reasoning_effort = profile_settings.get("admin_reasoning_effort", "none")
-        else:
-            thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
-            reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
+        agent_model = profile_settings.get("admin_model")
+        thinking_tokens = profile_settings.get("admin_thinking_tokens", 4000)
+        reasoning_effort = profile_settings.get("admin_reasoning_effort", "none")
 
         try:
             read_command = app_ctx.ai_cli.build_stdin_command(
                 cli=agent_cli,
                 task_file_path=str(task_file),
                 worktree_path=agent.worktree_path,
-                project_root=str(project_root),  # MCP_PROJECT_ROOT 環境変数用
+                project_root=str(project_root),
                 model=agent_model,
-                role=agent_role_name,
-                role_template_path=str(get_role_template_path(agent_role_name)),
+                role="admin",
+                role_template_path=str(get_role_template_path("admin")),
                 thinking_tokens=thinking_tokens,
                 reasoning_effort=reasoning_effort,
             )
@@ -371,7 +436,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "error": f"CLIコマンド生成に失敗しました: {e}",
             }
-        # tmux ペインが設定されていない場合（Owner）はエラー
+
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
             return {
                 "success": False,
@@ -384,18 +449,10 @@ def register_tools(mcp: FastMCP) -> None:
         if success:
             agent.status = AgentStatus.BUSY
             agent.last_activity = datetime.now()
-            # ファイルに保存（MCP インスタンス間で共有）
             save_agent_to_file(app_ctx, agent)
-            # ダッシュボード更新
             dashboard.save_markdown_dashboard(project_root, session_id)
 
-            # コスト記録（CLI 起動 = API 呼び出し）
             try:
-                thinking_tokens = (
-                    profile_settings.get("admin_thinking_tokens", 4000)
-                    if is_admin
-                    else profile_settings.get("worker_thinking_tokens", 4000)
-                )
                 dashboard.record_api_call(
                     ai_cli=agent_cli,
                     model=agent_model,
@@ -415,14 +472,9 @@ def register_tools(mcp: FastMCP) -> None:
             "command_sent": read_command,
             "auto_enhanced": auto_enhance,
             "message": "タスクを送信しました" if success else "タスク送信に失敗しました",
+            "branch_name": branch_name or f"feature/{session_id}",
+            "model_profile": profile_settings["profile"],
         }
-
-        if persona_info:
-            result["persona"] = persona_info
-
-        if is_admin:
-            result["branch_name"] = branch_name or f"feature/{session_id}"
-            result["model_profile"] = profile_settings["profile"]
 
         return result
 

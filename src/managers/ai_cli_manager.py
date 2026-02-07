@@ -195,7 +195,8 @@ class AiCliManager:
             if resolved_model:
                 parts.extend(["--model", resolved_model])
             if effort in {"low", "medium", "high", "xhigh"}:
-                parts.extend(["--reasoning-effort", effort])
+                # Codex は設定上書き(-c)で reasoning.effort を受け取る。
+                parts.extend(["-c", shlex.quote(f'reasoning.effort="{effort}"')])
             # Claude Code の --dangerously-skip-permissions 相当。
             # 外部サンドボックス前提で、Codex 側の確認プロンプトを抑止する。
             parts.append("--dangerously-bypass-approvals-and-sandbox")

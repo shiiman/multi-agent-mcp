@@ -434,8 +434,8 @@ class TestMarkdownDashboard:
         assert "✅" in md_content
         assert "Completed Task" in md_content
 
-    def test_agent_worktree_is_rendered_as_relative_path(self, dashboard_manager, temp_dir):
-        """エージェントの Worktree が workspace 相対パスで表示されることをテスト。"""
+    def test_task_worktree_is_rendered_as_relative_path(self, dashboard_manager, temp_dir):
+        """タスクの Worktree が workspace 相対パスで表示されることをテスト。"""
         dashboard = dashboard_manager.get_dashboard()
         dashboard.agents.append(
             AgentSummary(
@@ -450,12 +450,32 @@ class TestMarkdownDashboard:
         )
         dashboard.calculate_stats()
         dashboard_manager._write_dashboard(dashboard)
+        dashboard_manager.create_task(
+            title="Worktree Task",
+            assigned_agent_id="worker-001",
+            worktree_path=str(temp_dir / "worktrees" / "feature-worker-1"),
+        )
 
         md_content = dashboard_manager.generate_markdown_dashboard()
-        assert "| ID | 名前 | 役割 | 状態 | 現在のタスク | worktree |" in md_content
+        assert "| ID | 名前 | 役割 | 状態 | 現在のタスク |" in md_content
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |" in md_content
         assert "`worker-001`" in md_content
         assert "`worktrees/feature-worker-1`" in md_content
         assert str(temp_dir) not in md_content
+
+    def test_task_worktree_column_hidden_when_worktree_disabled(
+        self, dashboard_manager, temp_dir, monkeypatch
+    ):
+        """MCP_ENABLE_WORKTREE=false のとき worktree 列を表示しないことをテスト。"""
+        monkeypatch.setenv("MCP_ENABLE_WORKTREE", "false")
+        dashboard_manager.create_task(
+            title="No Worktree Task",
+            worktree_path=str(temp_dir / "worktrees" / "feature-worker-1"),
+        )
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |" not in md_content
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 |" in md_content
 
     def test_task_assignee_is_rendered_as_agent_label(self, dashboard_manager, temp_dir):
         """タスク担当が agent_id ではなく表示名で描画されることをテスト。"""

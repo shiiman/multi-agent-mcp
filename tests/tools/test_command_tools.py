@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -770,3 +770,160 @@ class TestSendTask:
         assert result["success"] is True
         task_text = Path(result["task_file"]).read_text(encoding="utf-8")
         assert "# Multi-Agent MCP - Admin Agent" not in task_text
+
+    @pytest.mark.asyncio
+    async def test_send_task_worker_uses_helper_dispatch(
+        self, command_mock_ctx, git_repo
+    ):
+        """Worker 送信時は _send_task_to_worker 経路を使うことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+            ai_bootstrapped=True,
+        )
+
+        mock_worktree_manager = MagicMock()
+        mock_worktree_manager.get_current_branch = AsyncMock(return_value="main")
+
+        with (
+            patch("src.tools.command.get_worktree_manager", return_value=mock_worktree_manager),
+            patch(
+                "src.tools.command._create_worktree_for_worker",
+                new=AsyncMock(return_value=(str(git_repo / ".worktrees" / "feature-test"), None)),
+            ) as mock_create_wt,
+            patch(
+                "src.tools.command._send_task_to_worker",
+                new=AsyncMock(
+                    return_value={
+                        "task_sent": True,
+                        "dispatch_mode": "followup",
+                        "dispatch_error": None,
+                        "task_file": "/tmp/task.md",
+                        "command_sent": "次のタスク指示ファイルを実行してください: /tmp/task.md",
+                    }
+                ),
+            ) as mock_send,
+        ):
+            result = await send_task(
+                agent_id="worker-001",
+                task_content="worker task",
+                session_id="task-001",
+                auto_enhance=False,
+                caller_agent_id="owner-001",
+                ctx=command_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["dispatch_mode"] == "followup"
+        assert result["task_file"] == "/tmp/task.md"
+        mock_create_wt.assert_called_once()
+        mock_send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_send_task_worker_skips_worktree_when_disabled(
+        self, command_mock_ctx, git_repo
+    ):
+        """MCP_ENABLE_WORKTREE=false 時は worktree 作成を行わないことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_worktree = False
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        with (
+            patch(
+                "src.tools.command._create_worktree_for_worker",
+                new=AsyncMock(return_value=(str(git_repo / ".worktrees" / "unused"), None)),
+            ) as mock_create_wt,
+            patch(
+                "src.tools.command._send_task_to_worker",
+                new=AsyncMock(
+                    return_value={
+                        "task_sent": True,
+                        "dispatch_mode": "bootstrap",
+                        "dispatch_error": None,
+                        "task_file": "/tmp/task.md",
+                        "command_sent": "bootstrap command",
+                    }
+                ),
+            ) as mock_send,
+        ):
+            result = await send_task(
+                agent_id="worker-001",
+                task_content="worker task",
+                session_id="task-002",
+                auto_enhance=False,
+                caller_agent_id="owner-001",
+                ctx=command_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["worktree_path"] is None
+        mock_create_wt.assert_not_called()
+        mock_send.assert_called_once()

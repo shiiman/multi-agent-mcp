@@ -342,9 +342,12 @@ class DashboardTasksMixin:
         worktrees = await worktree_manager.list_worktrees()
         dashboard.total_worktrees = len(worktrees)
 
-        # アクティブなworktree（エージェントに割り当てられている）をカウント
+        # アクティブなworktree（未完了タスクに紐づくもの）をカウント
         assigned_paths = {
-            a.worktree_path for a in dashboard.agents if a.worktree_path
+            t.worktree_path
+            for t in dashboard.tasks
+            if t.worktree_path
+            and t.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
         }
         dashboard.active_worktrees = len(
             [wt for wt in worktrees if wt.path in assigned_paths]
