@@ -39,6 +39,7 @@ env/
 htmlcov/
 .tox/
 .nox/
+coverage.json
 
 # mypy
 .mypy_cache/
