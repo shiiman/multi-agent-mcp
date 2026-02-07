@@ -61,6 +61,10 @@ class TmuxWorkspaceMixin:
             return False
         if not await self._configure_session_options(session_name):
             return False
+        # 新規セッションでも、ユーザーの global base-index 設定に影響される可能性があるため
+        # ウィンドウ番号を必ず再採番して main=0 を保証する。
+        if not await self._normalize_window_indices(session_name):
+            return False
         if not await self._split_main_window_layout(session_name):
             return False
 

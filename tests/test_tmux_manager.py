@@ -93,6 +93,40 @@ class TestTmuxManager:
             await tmux_manager._run("set", "-g", "pane-base-index", pane_base_index)
 
     @pytest.mark.asyncio
+    async def test_create_main_session_normalizes_new_session_window_index(
+        self, tmux_manager, git_repo
+    ):
+        """新規セッションでも main ウィンドウが 0 番になることをテスト。"""
+        session_name = "repo"  # git_repo fixture の project_name と一致
+
+        # グローバルの index 設定を退避
+        _, base_stdout, _ = await tmux_manager._run("show", "-g", "base-index")
+        _, pane_stdout, _ = await tmux_manager._run("show", "-g", "pane-base-index")
+        base_parts = base_stdout.strip().split()
+        pane_parts = pane_stdout.strip().split()
+        base_index = base_parts[-1] if base_parts else "0"
+        pane_base_index = pane_parts[-1] if pane_parts else "0"
+
+        # base-index=1 の環境を再現
+        await tmux_manager._run("set", "-g", "base-index", "1")
+        await tmux_manager._run("set", "-g", "pane-base-index", "1")
+
+        try:
+            # 新規セッション経路でも正規化されることを確認
+            success = await tmux_manager.create_main_session(str(git_repo))
+            assert success is True
+
+            code, stdout, _ = await tmux_manager._run(
+                "list-windows", "-t", session_name, "-F", "#{window_index}:#{window_name}"
+            )
+            assert code == 0
+            assert "0:main" in stdout
+        finally:
+            await tmux_manager.kill_session(session_name)
+            await tmux_manager._run("set", "-g", "base-index", base_index)
+            await tmux_manager._run("set", "-g", "pane-base-index", pane_base_index)
+
+    @pytest.mark.asyncio
     async def test_send_keys(self, tmux_manager, temp_dir):
         """キー送信をテスト。"""
         session_name = "test-session-002"
