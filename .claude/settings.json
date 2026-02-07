@@ -29,19 +29,6 @@
     ],
     "deny": []
   },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd /Users/a12665/Documents/personal/multi-agent-mcp && uv run pytest --tb=short -q 2>&1 | tail -20"
-          }
-        ]
-      }
-    ]
-  },
   "plugins": [
     "pyright-lsp@claude-plugins-official"
   ],
