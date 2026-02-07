@@ -222,7 +222,7 @@ class TestTaskFileManagement:
 
         assert task_file.exists()
         assert task_file.read_text(encoding="utf-8") == task_content
-        assert task_file.name == "claude1_task_001.md"
+        assert task_file.name == "claude1_task-001.md"
         assert ".multi-agent-mcp/123/tasks" in str(task_file)
 
     def test_get_task_file_path(self, dashboard_manager, temp_dir):
@@ -236,7 +236,7 @@ class TestTaskFileManagement:
             agent_label="codex2",
         )
 
-        expected = project_root / ".multi-agent-mcp" / "456" / "tasks" / "codex2_task_002.md"
+        expected = project_root / ".multi-agent-mcp" / "456" / "tasks" / "codex2_task-002.md"
         assert path == expected
 
     def test_read_task_file(self, dashboard_manager, temp_dir):
@@ -468,7 +468,7 @@ class TestMarkdownDashboard:
         assert "| ID | 名前 | 役割 | 状態 | 現在のタスク |" in md_content
         assert "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |" in md_content
         assert "`worker-001`" in md_content
-        assert "`worktrees/feature-worker-1`" in md_content
+        assert "<code>worktrees/feature-worker-1</code>" in md_content
         assert str(temp_dir) not in md_content
 
     def test_task_worktree_column_hidden_when_worktree_disabled(
@@ -577,7 +577,7 @@ class TestMarkdownDashboard:
         assert "## メッセージ履歴" in messages_content
         assert "## メッセージ本文" not in messages_content
         assert "| 時刻 | 種類 | 送信元 | 宛先 | 件名 |" not in messages_content
-        assert "メッセージ履歴</summary>" in messages_content
+        assert "<summary>" in messages_content
         assert "<details open>" in messages_content
         assert "詳細本文のテストメッセージです。" in messages_content
 

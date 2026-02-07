@@ -262,6 +262,9 @@ class HealthcheckManager:
                     pane_command = await pane_command_result
                 else:
                     pane_command = pane_command_result
+                # 文字列以外が返った場合は安全に変換
+                if pane_command is not None and not isinstance(pane_command, str):
+                    pane_command = str(pane_command)
 
         # Worker がタスク中なのに shell に戻っている場合は異常
         role = str(getattr(agent, "role", ""))
