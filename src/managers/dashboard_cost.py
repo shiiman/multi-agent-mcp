@@ -51,11 +51,7 @@ class DashboardCostMixin:
 
         # 実測コストは Claude のみ許可
         source = (cost_source or ("actual" if actual_cost_usd is not None else "estimated")).lower()
-        if normalized_cli != "claude":
-            actual_cost_usd = None
-            status_line = None
-            source = "estimated"
-        elif source != "actual":
+        if normalized_cli != "claude" or source != "actual":
             actual_cost_usd = None
             status_line = None
             source = "estimated"
@@ -293,11 +289,10 @@ class DashboardCostMixin:
             )
 
             # エージェント別（estimated/non-actual のみ加算。actual は最新値を後で上書き）
-            if call.agent_id:
-                if call.cost_source != "actual":
-                    by_agent_estimated_non_actual[call.agent_id] = (
-                        by_agent_estimated_non_actual.get(call.agent_id, 0.0) + call_cost
-                    )
+            if call.agent_id and call.cost_source != "actual":
+                by_agent_estimated_non_actual[call.agent_id] = (
+                    by_agent_estimated_non_actual.get(call.agent_id, 0.0) + call_cost
+                )
 
             # タスク別
             if call.task_id:

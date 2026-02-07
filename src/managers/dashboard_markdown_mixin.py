@@ -63,7 +63,8 @@ class DashboardMarkdownMixin:
 
         try:
             return os.path.relpath(worktree_path, workspace_path)
-        except Exception:
+        except Exception as e:
+            logger.debug("Worktree パスの相対変換に失敗: %s", e)
             return worktree_path
 
     def _is_worktree_enabled(self, workspace_path: str | None = None) -> bool:
@@ -72,7 +73,8 @@ class DashboardMarkdownMixin:
             from src.config.settings import load_settings_for_project
 
             return bool(load_settings_for_project(workspace_path).enable_worktree)
-        except Exception:
+        except Exception as e:
+            logger.debug("worktree 有効判定に失敗: %s", e)
             return True
 
     def _extract_agent_index(self, agent_id: str) -> str:
@@ -402,7 +404,8 @@ class DashboardMarkdownMixin:
                 agent_data["tokens"] += call.tokens
 
                 model_key = call.model or "unknown"
-                model_data = model_stats.setdefault(model_key, {"calls": 0, "tokens": 0, "cost": 0.0})
+                defaults = {"calls": 0, "tokens": 0, "cost": 0.0}
+                model_data = model_stats.setdefault(model_key, defaults)
                 model_data["calls"] += 1
                 model_data["tokens"] += call.tokens
                 model_data["cost"] += call_cost

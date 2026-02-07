@@ -361,280 +361,365 @@ async def _create_worktree_for_worker(
     return actual_path, None
 
 
-async def _send_task_to_worker(
+def _make_dispatch_result(
+    task_sent: bool,
+    dispatch_mode: str = "none",
+    dispatch_error: str | None = None,
+    task_file: str | None = None,
+    command_sent: str | None = None,
+) -> dict[str, Any]:
+    """_send_task_to_worker の結果辞書を組み立てる。"""
+    return {
+        "task_sent": task_sent,
+        "dispatch_mode": dispatch_mode,
+        "dispatch_error": dispatch_error,
+        "task_file": task_file,
+        "command_sent": command_sent,
+    }
+
+
+async def _reset_bootstrap_state_if_shell(
     app_ctx: AppContext,
     agent: Agent,
-    task_content: str,
-    task_id: str | None,
-    branch: str,
-    worktree_path: str,
-    session_id: str,
+    tmux: Any,
     worker_index: int,
-    enable_worktree: bool,
-    profile_settings: dict,
-    caller_agent_id: str | None,
-) -> dict[str, Any]:
-    """Worker にタスクを送信する。
-
-    Returns:
-        {
-            "task_sent": bool,
-            "dispatch_mode": "bootstrap" | "followup" | "none",
-            "dispatch_error": str | None,
-            "task_file": str | None,
-            "command_sent": str | None,
-        }
-    """
-    def _result(
-        task_sent: bool,
-        dispatch_mode: str = "none",
-        dispatch_error: str | None = None,
-        task_file: str | None = None,
-        command_sent: str | None = None,
-    ) -> dict[str, Any]:
-        return {
-            "task_sent": task_sent,
-            "dispatch_mode": dispatch_mode,
-            "dispatch_error": dispatch_error,
-            "task_file": task_file,
-            "command_sent": command_sent,
-        }
-
-    async def _reset_bootstrap_state_if_shell() -> str | None:
-        """異常時に pane の実行コマンドを確認し、必要なら bootstrap 状態を戻す。"""
-        if (
-            agent.session_name is None
-            or agent.window_index is None
-            or agent.pane_index is None
-        ):
-            return None
-
-        try:
-            current_command = await tmux.get_pane_current_command(
-                agent.session_name,
-                agent.window_index,
-                agent.pane_index,
-            )
-        except Exception as check_error:
-            logger.debug(
-                "Worker %s pane command の補正判定に失敗: %s",
-                worker_index + 1,
-                check_error,
-            )
-            return None
-
-        command_name = (current_command or "").strip().lower()
-        if command_name in _SHELL_COMMANDS:
-            agent.ai_bootstrapped = False
-            save_agent_to_file(app_ctx, agent)
-            logger.info(
-                "Worker %s の pane が shell (%s) のため ai_bootstrapped を False に戻しました",
-                worker_index + 1,
-                current_command,
-            )
-        return current_command
+) -> str | None:
+    """pane の実行コマンドを確認し、shell なら bootstrap 状態をリセットする。"""
+    if (
+        agent.session_name is None
+        or agent.window_index is None
+        or agent.pane_index is None
+    ):
+        return None
 
     try:
-        project_root = Path(resolve_main_repo_root(worktree_path))
-        if not task_id:
-            logger.warning(
-                "Worker %s へのタスク送信を中止: task_id が未指定です",
-                worker_index + 1,
-            )
-            return _result(False, dispatch_error="task_id is required")
-        effective_task_id = task_id
-
-        # メモリから関連情報を検索
-        memory_context = search_memory_context(app_ctx, task_content)
-
-        # ペルソナを取得
-        persona_manager = ensure_persona_manager(app_ctx)
-        persona = persona_manager.get_optimal_persona(task_content)
-
-        # 7セクション構造のタスクを生成
-        mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
-        final_task_content = generate_7section_task(
-            task_id=effective_task_id,
-            agent_id=agent.id,
-            task_description=task_content,
-            persona_name=persona.name,
-            persona_prompt=persona.system_prompt_addition,
-            memory_context=memory_context,
-            project_name=project_root.name,
-            worktree_path=worktree_path if enable_worktree else None,
-            branch_name=branch,
-            admin_id=caller_agent_id,
-            mcp_tool_prefix=mcp_prefix,
-        )
-
-        # タスクファイル作成・送信
-        dashboard = ensure_dashboard_manager(app_ctx)
-        agent_label = (
-            dashboard.get_agent_label(agent)
-            if hasattr(dashboard, "get_agent_label")
-            else agent.id
-        )
-        task_file = dashboard.write_task_file(
-            project_root,
-            session_id,
-            effective_task_id,
-            agent_label,
-            final_task_content,
-        )
-
-        tmux = app_ctx.tmux
-        agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
-        if (
-            agent.session_name is None
-            or agent.window_index is None
-            or agent.pane_index is None
-        ):
-            return _result(False, dispatch_error="worker pane is not configured")
-
-        worker_no = resolve_worker_number_from_slot(
-            app_ctx.settings,
+        current_command = await tmux.get_pane_current_command(
+            agent.session_name,
             agent.window_index,
             agent.pane_index,
         )
-        worker_model_default = profile_settings.get("worker_model")
-        worker_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
+    except Exception as check_error:
+        logger.debug(
+            "Worker %s pane command の補正判定に失敗: %s",
+            worker_index + 1,
+            check_error,
+        )
+        return None
+
+    command_name = (current_command or "").strip().lower()
+    if command_name in _SHELL_COMMANDS:
+        agent.ai_bootstrapped = False
+        save_agent_to_file(app_ctx, agent)
+        logger.info(
+            "Worker %s の pane が shell (%s) のため ai_bootstrapped を False に戻しました",
+            worker_index + 1,
+            current_command,
+        )
+    return current_command
+
+
+def _prepare_worker_task_content(
+    app_ctx: AppContext,
+    agent: Agent,
+    task_content: str,
+    task_id: str,
+    branch: str,
+    worktree_path: str,
+    session_id: str,
+    enable_worktree: bool,
+    caller_agent_id: str | None,
+) -> tuple[Path, Path]:
+    """Worker 用の7セクション構造タスクを生成し、ファイルに書き出す。
+
+    Returns:
+        (project_root, task_file)
+    """
+    project_root = Path(resolve_main_repo_root(worktree_path))
+
+    # メモリから関連情報を検索
+    memory_context = search_memory_context(app_ctx, task_content)
+
+    # ペルソナを取得
+    persona_manager = ensure_persona_manager(app_ctx)
+    persona = persona_manager.get_optimal_persona(task_content)
+
+    # 7セクション構造のタスクを生成
+    mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
+    final_task_content = generate_7section_task(
+        task_id=task_id,
+        agent_id=agent.id,
+        task_description=task_content,
+        persona_name=persona.name,
+        persona_prompt=persona.system_prompt_addition,
+        memory_context=memory_context,
+        project_name=project_root.name,
+        worktree_path=worktree_path if enable_worktree else None,
+        branch_name=branch,
+        admin_id=caller_agent_id,
+        mcp_tool_prefix=mcp_prefix,
+    )
+
+    # タスクファイル作成
+    dashboard = ensure_dashboard_manager(app_ctx)
+    agent_label = (
+        dashboard.get_agent_label(agent)
+        if hasattr(dashboard, "get_agent_label")
+        else agent.id
+    )
+    task_file = dashboard.write_task_file(
+        project_root,
+        session_id,
+        task_id,
+        agent_label,
+        final_task_content,
+    )
+    return project_root, task_file
+
+
+async def _dispatch_bootstrap_command(
+    app_ctx: AppContext,
+    agent: Agent,
+    task_file: Path,
+    worktree_path: str,
+    project_root: Path,
+    enable_worktree: bool,
+    profile_settings: dict,
+) -> tuple[bool, str]:
+    """AI CLI の初回起動コマンドを tmux に送信する。"""
+    tmux = app_ctx.tmux
+    agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
+    worker_no = resolve_worker_number_from_slot(
+        app_ctx.settings, agent.window_index, agent.pane_index,
+    )
+    worker_model_default = profile_settings.get("worker_model")
+    worker_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
+    thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
+    reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
+
+    bootstrap_command = app_ctx.ai_cli.build_stdin_command(
+        cli=agent_cli_name,
+        task_file_path=str(task_file),
+        worktree_path=worktree_path if enable_worktree else None,
+        project_root=str(project_root),
+        model=worker_model,
+        role="worker",
+        role_template_path=str(get_role_template_path("worker")),
+        thinking_tokens=thinking_tokens,
+        reasoning_effort=reasoning_effort,
+    )
+    success = await tmux.send_with_rate_limit_to_pane(
+        agent.session_name,
+        agent.window_index,
+        agent.pane_index,
+        bootstrap_command,
+        clear_input=False,
+        confirm_codex_prompt=agent_cli_name == "codex",
+    )
+    return success, bootstrap_command
+
+
+async def _dispatch_followup_command(
+    app_ctx: AppContext,
+    agent: Agent,
+    task_file: Path,
+    worktree_path: str,
+    enable_worktree: bool,
+    worker_index: int,
+    profile_settings: dict,
+) -> tuple[bool, str, str | None]:
+    """既に起動中の AI CLI に followup タスクを送信する。
+
+    Returns:
+        (success, command_sent, dispatch_error)
+    """
+    tmux = app_ctx.tmux
+    agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
+    confirm_codex_prompt = agent_cli_name == "codex"
+
+    if enable_worktree:
+        change_dir = _build_change_directory_command(agent_cli_name, worktree_path)
+        changed = await tmux.send_with_rate_limit_to_pane(
+            agent.session_name,
+            agent.window_index,
+            agent.pane_index,
+            change_dir,
+            clear_input=False,
+            confirm_codex_prompt=confirm_codex_prompt,
+        )
+        if not changed:
+            current_command = await _reset_bootstrap_state_if_shell(
+                app_ctx, agent, tmux, worker_index,
+            )
+            error = (
+                "failed to change directory before followup dispatch"
+                f" (pane_current_command={current_command or 'unknown'})"
+            )
+            return False, change_dir, error
+        await asyncio.sleep(0.25)
+
+    instruction = f"次のタスク指示ファイルを実行してください: {task_file}"
+    success = await tmux.send_with_rate_limit_to_pane(
+        agent.session_name,
+        agent.window_index,
+        agent.pane_index,
+        instruction,
+        clear_input=False,
+        confirm_codex_prompt=confirm_codex_prompt,
+    )
+    return success, instruction, None
+
+
+async def _handle_dispatch_failure(
+    app_ctx: AppContext,
+    agent: Agent,
+    task_file: Path,
+    worktree_path: str,
+    project_root: Path,
+    session_id: str,
+    worker_index: int,
+    dispatch_mode: str,
+    command_sent: str | None,
+    enable_worktree: bool,
+    profile_settings: dict,
+) -> dict[str, Any]:
+    """dispatch 失敗時の bootstrap リトライと結果組み立てを行う。"""
+    tmux = app_ctx.tmux
+    dashboard = ensure_dashboard_manager(app_ctx)
+    correction_info = ""
+
+    if dispatch_mode == "followup":
+        current_command = await _reset_bootstrap_state_if_shell(
+            app_ctx, agent, tmux, worker_index,
+        )
+        if (current_command or "").strip().lower() in _SHELL_COMMANDS:
+            logger.info(
+                "Worker %s の followup 失敗を検知。bootstrap を 1 回再試行します",
+                worker_index + 1,
+            )
+            retry_success, retry_command = await _dispatch_bootstrap_command(
+                app_ctx, agent, task_file, worktree_path, project_root,
+                enable_worktree, profile_settings,
+            )
+            if retry_success:
+                agent.status = AgentStatus.BUSY
+                agent.last_activity = datetime.now()
+                agent.ai_bootstrapped = True
+                save_agent_to_file(app_ctx, agent)
+                dashboard.save_markdown_dashboard(project_root, session_id)
+                return _make_dispatch_result(
+                    True,
+                    dispatch_mode="bootstrap",
+                    task_file=str(task_file),
+                    command_sent=retry_command,
+                )
+            correction_info = " (pane_current_command=shell, bootstrap_retry_failed)"
+            command_sent = retry_command
+        else:
+            correction_info = f" (pane_current_command={current_command or 'unknown'})"
+
+    logger.warning(f"Worker {worker_index + 1}: タスク送信失敗")
+    return _make_dispatch_result(
+        False,
+        dispatch_mode=dispatch_mode,
+        dispatch_error=f"tmux send_keys_to_pane failed{correction_info}",
+        task_file=str(task_file),
+        command_sent=command_sent,
+    )
+
+
+def _record_dispatch_success(
+    app_ctx: AppContext, agent: Agent, dispatch_mode: str,
+    project_root: Path, session_id: str,
+    agent_cli_name: str, worker_model: str | None, thinking_tokens: int,
+    task_id: str, worker_index: int,
+) -> None:
+    """dispatch 成功時のエージェント状態更新とコスト記録を行う。"""
+    agent.status = AgentStatus.BUSY
+    agent.last_activity = datetime.now()
+    if dispatch_mode == "bootstrap":
+        agent.ai_bootstrapped = True
+    save_agent_to_file(app_ctx, agent)
+    dashboard = ensure_dashboard_manager(app_ctx)
+    dashboard.save_markdown_dashboard(project_root, session_id)
+    try:
+        dashboard.record_api_call(
+            ai_cli=agent_cli_name, model=worker_model,
+            estimated_tokens=thinking_tokens, agent_id=agent.id, task_id=task_id,
+        )
+    except Exception as e:
+        logger.debug("API コール記録に失敗: %s", e)
+    logger.info(f"Worker {worker_index + 1} (ID: {agent.id}) にタスクを送信しました")
+
+
+async def _send_task_to_worker(
+    app_ctx: AppContext, agent: Agent, task_content: str, task_id: str | None,
+    branch: str, worktree_path: str, session_id: str, worker_index: int,
+    enable_worktree: bool, profile_settings: dict, caller_agent_id: str | None,
+) -> dict[str, Any]:
+    """Worker にタスクを送信する。"""
+    try:
+        if not task_id:
+            logger.warning("Worker %s へのタスク送信を中止: task_id が未指定です", worker_index + 1)
+            return _make_dispatch_result(False, dispatch_error="task_id is required")
+
+        project_root, task_file = _prepare_worker_task_content(
+            app_ctx, agent, task_content, task_id, branch,
+            worktree_path, session_id, enable_worktree, caller_agent_id,
+        )
+
+        if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
+            return _make_dispatch_result(False, dispatch_error="worker pane is not configured")
+
+        agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
+        worker_no = resolve_worker_number_from_slot(
+            app_ctx.settings, agent.window_index, agent.pane_index,
+        )
+        worker_model = app_ctx.settings.get_worker_model(
+            worker_no, profile_settings.get("worker_model"),
+        )
         thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
-        reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
-        confirm_codex_prompt = agent_cli_name == "codex"
-
-        async def _dispatch_bootstrap() -> tuple[bool, str]:
-            bootstrap_command = app_ctx.ai_cli.build_stdin_command(
-                cli=agent_cli_name,
-                task_file_path=str(task_file),
-                worktree_path=worktree_path if enable_worktree else None,
-                project_root=str(project_root),
-                model=worker_model,
-                role="worker",
-                role_template_path=str(get_role_template_path("worker")),
-                thinking_tokens=thinking_tokens,
-                reasoning_effort=reasoning_effort,
-            )
-            success = await tmux.send_with_rate_limit_to_pane(
-                agent.session_name,
-                agent.window_index,
-                agent.pane_index,
-                bootstrap_command,
-                clear_input=False,
-                confirm_codex_prompt=confirm_codex_prompt,
-            )
-            return success, bootstrap_command
-
         should_bootstrap = not bool(getattr(agent, "ai_bootstrapped", False))
-        command_sent: str | None = None
+
         if should_bootstrap:
-            # 初回: AI CLI を起動し、role template + task file を投入する。
-            success, command_sent = await _dispatch_bootstrap()
+            success, command_sent = await _dispatch_bootstrap_command(
+                app_ctx, agent, task_file, worktree_path,
+                project_root, enable_worktree, profile_settings,
+            )
             dispatch_mode = "bootstrap"
         else:
             dispatch_mode = "followup"
-            if enable_worktree:
-                change_dir = _build_change_directory_command(agent_cli_name, worktree_path)
-                changed = await tmux.send_with_rate_limit_to_pane(
-                    agent.session_name,
-                    agent.window_index,
-                    agent.pane_index,
-                    change_dir,
-                    clear_input=False,
-                    confirm_codex_prompt=confirm_codex_prompt,
+            success, command_sent, followup_error = (
+                await _dispatch_followup_command(
+                    app_ctx, agent, task_file, worktree_path,
+                    enable_worktree, worker_index, profile_settings,
                 )
-                if not changed:
-                    current_command = await _reset_bootstrap_state_if_shell()
-                    return _result(
-                        False,
-                        dispatch_mode=dispatch_mode,
-                        dispatch_error=(
-                            "failed to change directory before followup dispatch"
-                            f" (pane_current_command={current_command or 'unknown'})"
-                        ),
-                        task_file=str(task_file),
-                        command_sent=change_dir,
-                    )
-                # 次の followup 指示が同一入力行に連結されないように待機する。
-                await asyncio.sleep(0.25)
-
-            instruction = f"次のタスク指示ファイルを実行してください: {task_file}"
-            command_sent = instruction
-            success = await tmux.send_with_rate_limit_to_pane(
-                agent.session_name,
-                agent.window_index,
-                agent.pane_index,
-                instruction,
-                clear_input=False,
-                confirm_codex_prompt=confirm_codex_prompt,
             )
+            if followup_error:
+                return _make_dispatch_result(
+                    False, dispatch_mode=dispatch_mode,
+                    dispatch_error=followup_error,
+                    task_file=str(task_file),
+                    command_sent=command_sent,
+                )
 
         if success:
-            agent.status = AgentStatus.BUSY
-            agent.last_activity = datetime.now()
-            if dispatch_mode == "bootstrap":
-                agent.ai_bootstrapped = True
-            save_agent_to_file(app_ctx, agent)
-            dashboard.save_markdown_dashboard(project_root, session_id)
-
-            # コスト記録（Worker CLI 起動）
-            try:
-                dashboard.record_api_call(
-                    ai_cli=agent_cli_name,
-                    model=worker_model,
-                    estimated_tokens=thinking_tokens,
-                    agent_id=agent.id,
-                    task_id=effective_task_id,
-                )
-            except Exception:
-                pass
-
-            logger.info(
-                f"Worker {worker_index + 1} (ID: {agent.id}) にタスクを送信しました"
+            _record_dispatch_success(
+                app_ctx, agent, dispatch_mode, project_root,
+                session_id, agent_cli_name, worker_model,
+                thinking_tokens, task_id, worker_index,
             )
-            return _result(
-                True,
-                dispatch_mode=dispatch_mode,
+            return _make_dispatch_result(
+                True, dispatch_mode=dispatch_mode,
                 task_file=str(task_file),
                 command_sent=command_sent,
             )
-        else:
-            correction_info = ""
-            if dispatch_mode == "followup":
-                current_command = await _reset_bootstrap_state_if_shell()
-                if (current_command or "").strip().lower() in _SHELL_COMMANDS:
-                    logger.info(
-                        "Worker %s の followup 失敗を検知。bootstrap を 1 回再試行します",
-                        worker_index + 1,
-                    )
-                    retry_success, retry_command = await _dispatch_bootstrap()
-                    if retry_success:
-                        agent.status = AgentStatus.BUSY
-                        agent.last_activity = datetime.now()
-                        agent.ai_bootstrapped = True
-                        save_agent_to_file(app_ctx, agent)
-                        dashboard.save_markdown_dashboard(project_root, session_id)
-                        return _result(
-                            True,
-                            dispatch_mode="bootstrap",
-                            task_file=str(task_file),
-                            command_sent=retry_command,
-                        )
-                    correction_info = (
-                        " (pane_current_command=shell, bootstrap_retry_failed)"
-                    )
-                    command_sent = retry_command
-                else:
-                    correction_info = (
-                        f" (pane_current_command={current_command or 'unknown'})"
-                    )
-            logger.warning(f"Worker {worker_index + 1}: タスク送信失敗")
-            return _result(
-                False,
-                dispatch_mode=dispatch_mode,
-                dispatch_error=f"tmux send_keys_to_pane failed{correction_info}",
-                task_file=str(task_file),
-                command_sent=command_sent,
-            )
+
+        return await _handle_dispatch_failure(
+            app_ctx, agent, task_file, worktree_path,
+            project_root, session_id, worker_index,
+            dispatch_mode, command_sent,
+            enable_worktree, profile_settings,
+        )
     except Exception as e:
         logger.warning(f"Worker {worker_index + 1}: タスク送信エラー - {e}")
-        return _result(False, dispatch_error=str(e))
+        return _make_dispatch_result(False, dispatch_error=str(e))

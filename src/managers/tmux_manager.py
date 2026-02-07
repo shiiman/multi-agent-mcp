@@ -120,17 +120,18 @@ class TmuxManager(TmuxWorkspaceMixin):
     async def cleanup_project_session(self, project_name: str) -> int:
         return await self.cleanup_sessions([project_name])
 
-    async def _run_shell(self, command: str) -> tuple[int, str, str]:
+    async def _run_exec(self, *args: str) -> tuple[int, str, str]:
+        """サブプロセスをリスト形式で安全に実行する。"""
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
+            proc = await asyncio.create_subprocess_exec(
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await proc.communicate()
             return proc.returncode or 0, stdout.decode(), stderr.decode()
         except Exception as e:
-            logger.error(f"シェルコマンド実行エラー: {e}")
+            logger.error(f"コマンド実行エラー: {e}")
             return 1, "", str(e)
 
     async def open_session_in_terminal(self, session: str) -> bool:
@@ -160,32 +161,36 @@ class TmuxManager(TmuxWorkspaceMixin):
                 ghostty_path = str(macos_ghostty)
 
         if ghostty_path:
-            code, _, _ = await self._run_shell(f'"{ghostty_path}" -e "{attach_cmd}"')
+            code, _, _ = await self._run_exec(ghostty_path, "-e", attach_cmd)
             return code == 0
         return False
 
     async def _open_in_iterm2(self, attach_cmd: str) -> bool:
-        iterm_check = await self._run_shell("osascript -e 'application \"iTerm\" exists'")
+        iterm_check = await self._run_exec(
+            "osascript", "-e", 'application "iTerm" exists'
+        )
         if iterm_check[0] == 0:
+            escaped_cmd = tmux_shared.escape_applescript(attach_cmd)
             applescript = f'''
             tell application "iTerm"
                 activate
                 create window with default profile
                 tell current session of current window
-                    write text "{attach_cmd}"
+                    write text "{escaped_cmd}"
                 end tell
             end tell
             '''
-            code, _, _ = await self._run_shell(f"osascript -e '{applescript}'")
+            code, _, _ = await self._run_exec("osascript", "-e", applescript)
             return code == 0
         return False
 
     async def _open_in_terminal_app(self, attach_cmd: str) -> bool:
+        escaped_cmd = tmux_shared.escape_applescript(attach_cmd)
         applescript = f'''
         tell application "Terminal"
             activate
-            do script "{attach_cmd}"
+            do script "{escaped_cmd}"
         end tell
         '''
-        code, _, _ = await self._run_shell(f"osascript -e '{applescript}'")
+        code, _, _ = await self._run_exec("osascript", "-e", applescript)
         return code == 0

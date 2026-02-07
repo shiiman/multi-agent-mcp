@@ -7,11 +7,13 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from src.managers.tmux_shared import escape_applescript
 from src.models.agent import AgentRole, AgentStatus
-from src.models.dashboard import TaskStatus
+from src.models.dashboard import TaskStatus, normalize_task_id
 from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import (
     ensure_ipc_manager,
+    notify_agent_via_tmux,
     require_permission,
     save_agent_to_file,
     sync_agents_from_file,
@@ -19,18 +21,6 @@ from src.tools.helpers import (
 from src.tools.helpers_managers import ensure_dashboard_manager
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_task_id(task_id: str | None) -> str:
-    """task_id を比較用に正規化する。"""
-    if not task_id:
-        return ""
-    normalized = task_id.strip().lower()
-    for prefix in ("task:", "task_", "task-"):
-        if normalized.startswith(prefix):
-            normalized = normalized[len(prefix):]
-            break
-    return normalized
 
 
 def _auto_update_dashboard_from_messages(
@@ -58,7 +48,7 @@ def _auto_update_dashboard_from_messages(
 
     task_map: dict[str, str] = {}
     for task in dashboard.list_tasks():
-        normalized = _normalize_task_id(task.id)
+        normalized = normalize_task_id(task.id)
         if normalized:
             task_map[normalized] = task.id
 
@@ -67,7 +57,7 @@ def _auto_update_dashboard_from_messages(
 
     for msg in task_messages:
         raw_task_id = msg.metadata.get("task_id")
-        normalized_task_id = msg.metadata.get("normalized_task_id") or _normalize_task_id(
+        normalized_task_id = msg.metadata.get("normalized_task_id") or normalize_task_id(
             raw_task_id
         )
         if not normalized_task_id:
@@ -146,17 +136,6 @@ def _auto_update_dashboard_from_messages(
     return True, applied, skipped_reasons
 
 
-def _resolve_session_name(agent: Any) -> str | None:
-    """Agent から tmux セッション名を解決する。"""
-    session_name = getattr(agent, "session_name", None)
-    if session_name:
-        return session_name
-    tmux_session = getattr(agent, "tmux_session", None)
-    if tmux_session:
-        return str(tmux_session).split(":", 1)[0]
-    return None
-
-
 def _task_context_text(title: str, description: str, metadata: dict | None = None) -> str:
     requested = ""
     if isinstance(metadata, dict):
@@ -189,7 +168,8 @@ def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[st
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except Exception:
+    except Exception as e:
+        logger.debug("ブランチマージ状態の確認に失敗: %s", e)
         return []
 
     unmerged: list[str] = []
@@ -213,7 +193,8 @@ def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[st
             )
             if merged.returncode != 0:
                 unmerged.append(branch)
-        except Exception:
+        except Exception as e:
+            logger.debug("ブランチ %s のマージ判定に失敗: %s", branch, e)
             continue
     return unmerged
 
@@ -384,57 +365,34 @@ def register_tools(mcp: FastMCP) -> None:
         notification_sent = False
         notification_method = None
         if receiver_id:
-            # エージェント情報を同期
             sync_agents_from_file(app_ctx)
-            agents = app_ctx.agents
-            tmux = app_ctx.tmux
-
-            receiver_agent = agents.get(receiver_id)
+            receiver_agent = app_ctx.agents.get(receiver_id)
             if receiver_agent:
                 # tmux ペインがある場合は tmux 経由で通知
-                if (
+                tmux_ok = await notify_agent_via_tmux(
+                    app_ctx, receiver_agent, msg_type.value, sender_id
+                )
+                if tmux_ok:
+                    notification_sent = True
+                    notification_method = "tmux"
+                elif not (
                     receiver_agent.session_name
-                    and receiver_agent.window_index is not None
                     and receiver_agent.pane_index is not None
                 ):
-                    notification_text = (
-                        "echo '[IPC] 新しいメッセージ:"
-                        f" {msg_type.value} from {sender_id}'"
-                    )
-                    receiver_cli = (
-                        receiver_agent.ai_cli.value
-                        if hasattr(receiver_agent.ai_cli, "value")
-                        else str(receiver_agent.ai_cli or "")
-                    ).lower()
-                    try:
-                        await tmux.send_with_rate_limit_to_pane(
-                            receiver_agent.session_name,
-                            receiver_agent.window_index,
-                            receiver_agent.pane_index,
-                            notification_text,
-                            clear_input=False,
-                            confirm_codex_prompt=receiver_cli == "codex",
-                        )
-                        notification_sent = True
-                        notification_method = "tmux"
-                        logger.info(
-                            f"IPC通知を送信(tmux): {receiver_id}"
-                        )
-                    except Exception as e:
-                        logger.warning(f"tmux通知の送信に失敗: {e}")
-                else:
                     # tmux ペインがない場合（Owner など）は macOS 通知を送る
                     try:
-                        import subprocess
                         notification_title = "Multi-Agent MCP"
-                        notification_body = f"{msg_type.value}: {content[:100]}"
+                        notification_body = escape_applescript(
+                            f"{msg_type.value}: {content[:100]}"
+                        )
+                        escaped_title = escape_applescript(notification_title)
                         subprocess.run(
                             [
                                 "osascript",
                                 "-e",
                                 "display notification"
                                 f' "{notification_body}"'
-                                f' with title "{notification_title}"',
+                                f' with title "{escaped_title}"',
                             ],
                             capture_output=True,
                             timeout=5,

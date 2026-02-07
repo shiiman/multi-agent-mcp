@@ -43,7 +43,7 @@ def _get_agents_file_path(
     return Path(project_root) / get_mcp_dir() / session_id / "agents.json"
 
 
-def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
+def save_agent_to_file(app_ctx: AppContext, agent: Agent) -> bool:
     """エージェント情報をファイルに保存する。
 
     worktree 内で実行されている場合でも、メインリポジトリの agents.json に保存する。
@@ -105,7 +105,7 @@ def save_agent_to_file(app_ctx: AppContext, agent: "Agent") -> bool:
         return False
 
 
-def load_agents_from_file(app_ctx: AppContext) -> dict[str, "Agent"]:
+def load_agents_from_file(app_ctx: AppContext) -> dict[str, Agent]:
     """ファイルからエージェント情報を読み込む。
 
     Args:

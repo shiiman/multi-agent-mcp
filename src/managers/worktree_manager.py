@@ -9,6 +9,7 @@ gtr: https://github.com/coderabbitai/git-worktree-runner
 import asyncio
 import logging
 import os
+import subprocess
 
 from src.models.workspace import WorktreeInfo
 
@@ -50,7 +51,7 @@ class WorktreeManager:
             )
             await proc.communicate()
             self._gtr_available = proc.returncode == 0
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             logger.debug(f"gtr 検出をスキップ: {e}")
             self._gtr_available = False
 
@@ -85,7 +86,7 @@ class WorktreeManager:
             return proc.returncode or 0, stdout.decode(), stderr.decode()
         except FileNotFoundError:
             return 1, "", f"コマンドが見つかりません: {args[0]}"
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             logger.error(f"コマンド実行エラー: {e}")
             return 1, "", str(e)
 

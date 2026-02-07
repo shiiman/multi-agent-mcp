@@ -10,9 +10,9 @@ from .templates import (
 )
 
 __all__ = [
+    "TEMPLATES",
     "AICli",
     "Settings",
-    "TEMPLATES",
     "WorkspaceTemplate",
     "get_template",
     "get_template_names",

@@ -99,7 +99,7 @@ class IPCManager:
                     front_matter["read_at"]
                 ) if front_matter.get("read_at") else None,
             )
-        except Exception as e:
+        except (OSError, yaml.YAMLError, KeyError, ValueError) as e:
             logger.warning(f"メッセージの読み込みに失敗 ({file_path}): {e}")
             return None
 

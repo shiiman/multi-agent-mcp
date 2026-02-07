@@ -21,6 +21,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=7.0.0",
     "ruff>=0.1.0",
 ]
 
@@ -39,14 +40,33 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W"]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "UP007",   # X | Y 型ヒント (Python 3.10+ で対応済みだが既存コードとの一貫性維持)
+    "RUF001",  # 日本語文字列中の全角文字を誤検出するため除外
+    "RUF002",  # 日本語docstring中の全角文字を誤検出するため除外
+    "RUF003",  # 日本語コメント中の全角文字を誤検出するため除外
+    "RUF059",  # require_permission() の戻り値 (app_ctx, error) で未使用変数が出るため除外
+    "SIM105",  # contextlib.suppress は可読性が下がるケースがあるため除外
+    "SIM108",  # if-else ブロックの方が可読性が高いケースがあるため除外
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/tools/session_env.py" = ["E501"]  # .env テンプレート文字列は行長制限を除外
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
-[dependency-groups]
-dev = [
-    "pytest-cov>=7.0.0",
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__",
 ]

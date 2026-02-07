@@ -30,20 +30,29 @@ def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str
             "max_workers": settings.model_profile_standard_max_workers,
             "admin_thinking_tokens": settings.model_profile_standard_admin_thinking_tokens,
             "worker_thinking_tokens": settings.model_profile_standard_worker_thinking_tokens,
-            "admin_reasoning_effort": settings.model_profile_standard_admin_reasoning_effort.value,
-            "worker_reasoning_effort": settings.model_profile_standard_worker_reasoning_effort.value,
+            "admin_reasoning_effort": (
+                settings.model_profile_standard_admin_reasoning_effort.value
+            ),
+            "worker_reasoning_effort": (
+                settings.model_profile_standard_worker_reasoning_effort.value
+            ),
         }
     else:  # PERFORMANCE
+        p = settings
         return {
             "profile": profile.value,
-            "ai_cli": settings.model_profile_performance_cli.value,
-            "admin_model": settings.model_profile_performance_admin_model,
-            "worker_model": settings.model_profile_performance_worker_model,
-            "max_workers": settings.model_profile_performance_max_workers,
-            "admin_thinking_tokens": settings.model_profile_performance_admin_thinking_tokens,
-            "worker_thinking_tokens": settings.model_profile_performance_worker_thinking_tokens,
-            "admin_reasoning_effort": settings.model_profile_performance_admin_reasoning_effort.value,
-            "worker_reasoning_effort": settings.model_profile_performance_worker_reasoning_effort.value,
+            "ai_cli": p.model_profile_performance_cli.value,
+            "admin_model": p.model_profile_performance_admin_model,
+            "worker_model": p.model_profile_performance_worker_model,
+            "max_workers": p.model_profile_performance_max_workers,
+            "admin_thinking_tokens": p.model_profile_performance_admin_thinking_tokens,
+            "worker_thinking_tokens": p.model_profile_performance_worker_thinking_tokens,
+            "admin_reasoning_effort": (
+                p.model_profile_performance_admin_reasoning_effort.value
+            ),
+            "worker_reasoning_effort": (
+                p.model_profile_performance_worker_reasoning_effort.value
+            ),
         }
 
 

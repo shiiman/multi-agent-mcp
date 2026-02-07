@@ -80,7 +80,7 @@ async def tmux_manager(settings):
     manager.add_extra_worker_window = AsyncMock(return_value=True)
     manager.open_session_in_terminal = AsyncMock(return_value=True)
     manager._run = AsyncMock(return_value=(0, "", ""))
-    manager._run_shell = AsyncMock(return_value=(0, "", ""))
+    manager._run_exec = AsyncMock(return_value=(0, "", ""))
     manager._get_window_name = MagicMock(return_value=settings.window_name_main)
     yield manager
 
@@ -114,7 +114,14 @@ def git_repo(temp_dir):
     """テスト用のgitリポジトリを作成する。"""
     repo_path = temp_dir / "repo"
     repo_path.mkdir()
-    os.system(f"cd {repo_path} && git init && git commit --allow-empty -m 'init'")
+    import subprocess
+    subprocess.run(
+        ["git", "init"], cwd=str(repo_path), capture_output=True, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=str(repo_path), capture_output=True, check=True,
+    )
     return repo_path
 
 

@@ -5,6 +5,15 @@ MAIN_WINDOW_PANE_ADMIN = 0
 MAIN_WINDOW_WORKER_PANES = [1, 2, 3, 4, 5, 6]
 
 
+def escape_applescript(value: str) -> str:
+    """AppleScript 文字列リテラル用にエスケープする。
+
+    バックスラッシュとダブルクォートをエスケープして
+    AppleScript インジェクションを防止する。
+    """
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def get_project_name(working_dir: str) -> str:
     """作業ディレクトリからプロジェクト名を取得する。"""
     import subprocess

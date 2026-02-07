@@ -135,5 +135,6 @@ class DashboardSyncMixin:
                 content=parts[2].strip(),
                 created_at=created_at,
             )
-        except Exception:
+        except Exception as e:
+            logger.debug("メッセージサマリーのパースに失敗: %s", e)
             return None

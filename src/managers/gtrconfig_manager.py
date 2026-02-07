@@ -46,7 +46,7 @@ class GtrconfigManager:
         try:
             with open(config_path, "rb") as f:
                 return tomli.load(f)
-        except Exception as e:
+        except (OSError, tomli.TOMLDecodeError) as e:
             logger.error(f".gtrconfig読み込みエラー: {e}")
             return None
 
@@ -64,7 +64,7 @@ class GtrconfigManager:
             with open(config_path, "wb") as f:
                 tomli_w.dump(config, f)
             return True
-        except Exception as e:
+        except OSError as e:
             logger.error(f".gtrconfig書き込みエラー: {e}")
             return False
 
@@ -178,9 +178,11 @@ class GtrconfigManager:
 
         # AI CLI の設定ファイルがあれば include に追加
         for cli_file in ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "CODEX.md", ".cursorrules"]:
-            if (self.project_root / cli_file).exists():
-                if cli_file not in config["copy"]["include"]:
-                    config["copy"]["include"].append(cli_file)
+            if (
+                (self.project_root / cli_file).exists()
+                and cli_file not in config["copy"]["include"]
+            ):
+                config["copy"]["include"].append(cli_file)
 
         # 重複を除去
         config["copy"]["include"] = list(set(config["copy"]["include"]))

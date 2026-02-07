@@ -434,7 +434,7 @@ class TmuxWorkspaceMixin:
         lock = getattr(self, "_send_lock", None)
         if lock is None:
             lock = asyncio.Lock()
-            setattr(self, "_send_lock", lock)
+            self._send_lock = lock
 
         async with lock:
             cooldown = float(getattr(self.settings, "send_cooldown_seconds", 2.0))
@@ -454,7 +454,7 @@ class TmuxWorkspaceMixin:
                 clear_input=clear_input,
                 confirm_codex_prompt=confirm_codex_prompt,
             )
-            setattr(self, "_last_send_at", time.monotonic())
+            self._last_send_at = time.monotonic()
             return success
 
     async def capture_pane_by_index(

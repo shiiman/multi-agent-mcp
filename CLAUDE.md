@@ -27,7 +27,8 @@ multi-agent-mcp/
 │   │   ├── settings.py          # Pydantic Settings configuration
 │   │   ├── templates.py         # Workspace templates
 │   │   ├── template_loader.py   # Template loading with caching
-│   │   └── workflow_guides.py   # Role-based workflow guides
+│   │   ├── workflow_guides.py   # Role-based workflow guides
+│   │   └── role_permissions.py  # Role-based permission definitions
 │   ├── models/
 │   │   ├── agent.py             # Agent, AgentRole, AgentStatus
 │   │   ├── dashboard.py         # Dashboard, TaskInfo
@@ -45,8 +46,11 @@ multi-agent-mcp/
 │   │   ├── healthcheck_manager.py # Agent health monitoring
 │   │   ├── healthcheck_daemon.py # Background monitor loop
 │   │   ├── ipc_manager.py       # Inter-process communication
-│   │   ├── dashboard_manager.py # Dashboard state management
-│   │   ├── dashboard_*_mixin.py # Dashboard I/O/rendering/task mixins
+│   │   ├── dashboard_manager.py  # Dashboard state management
+│   │   ├── dashboard_markdown_mixin.py # Dashboard Markdown rendering
+│   │   ├── dashboard_rendering_mixin.py # Dashboard output rendering
+│   │   ├── dashboard_sync_mixin.py # Dashboard sync/message helpers
+│   │   ├── dashboard_tasks_mixin.py # Dashboard task file management
 │   │   ├── dashboard_cost.py    # Cost calculation helpers
 │   │   ├── memory_manager.py    # Persistent knowledge management
 │   │   ├── persona_manager.py   # Task-based persona optimization
@@ -58,7 +62,10 @@ multi-agent-mcp/
 │   └── tools/                   # MCP tool definitions (86 tools)
 │       ├── __init__.py          # register_all_tools()
 │       ├── helpers.py           # Compatibility exports + permission helpers
-│       ├── helpers_*.py         # Persistence/manager/git helper split modules
+│       ├── helpers_git.py        # Git worktree root resolution helpers
+│       ├── helpers_managers.py  # Manager initialization helpers
+│       ├── helpers_registry.py  # Registry/config JSON helpers
+│       ├── helpers_persistence.py # Agent persistence helpers
 │       ├── session.py           # Session entry module (re-export)
 │       ├── session_tools.py     # Session tools (4)
 │       ├── session_env.py       # Session .env/template helpers
@@ -67,7 +74,9 @@ multi-agent-mcp/
 │       ├── agent_tools.py       # Agent tool registration entry
 │       ├── agent_lifecycle_tools.py # Agent lifecycle tools (5)
 │       ├── agent_batch_tools.py # Batch worker tools (1)
+│       ├── agent_helpers.py     # Worker dispatch/task helpers
 │       ├── command.py           # Command execution (5)
+│       ├── cost_capture.py      # Claude actual cost capture
 │       ├── worktree.py          # Git worktree (7)
 │       ├── merge.py             # Merge completed task branches (1)
 │       ├── ipc.py               # IPC/messaging (4)
@@ -99,7 +108,7 @@ multi-agent-mcp/
 - **MCP**: FastMCP pattern
 - **Pydantic**: v2 with ConfigDict
 - **TOML**: tomli/tomli-w for .gtrconfig
-- **Testing**: pytest with pytest-asyncio
+- **Testing**: pytest with pytest-asyncio, pytest-cov
 - **Linting**: ruff
 
 ## Development Commands
@@ -116,6 +125,9 @@ uv run pytest -v
 
 # Run specific test file
 uv run pytest tests/test_scheduler_manager.py
+
+# Run tests with coverage report
+uv run pytest --cov=src
 
 # Lint code
 uv run ruff check src/

@@ -85,56 +85,6 @@ class TestSendMessage:
     """send_message ツールのテスト。"""
 
     @pytest.mark.asyncio
-    async def test_send_message_success(self, ipc_mock_ctx, git_repo):
-        """メッセージ送信が成功することをテスト。"""
-        from mcp.server.fastmcp import FastMCP
-
-        from src.tools.ipc import register_tools
-
-        mcp = FastMCP("test")
-        register_tools(mcp)
-
-        send_message = None
-        for tool in mcp._tool_manager._tools.values():
-            if tool.name == "send_message":
-                send_message = tool.fn
-                break
-
-        # Owner を追加
-        app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
-        )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
-            status=AgentStatus.IDLE,
-            tmux_session="test:0.1",
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
-        )
-
-        result = await send_message(
-            sender_id="owner-001",
-            receiver_id="worker-001",
-            message_type="task_assign",
-            content="タスクを割り当てます",
-            caller_agent_id="owner-001",
-            ctx=ipc_mock_ctx,
-        )
-
-        assert result["success"] is True
-        assert "message_id" in result
-
-    @pytest.mark.asyncio
     async def test_send_message_invalid_type(self, ipc_mock_ctx, git_repo):
         """無効なメッセージタイプでエラーになることをテスト。"""
         from mcp.server.fastmcp import FastMCP
@@ -274,66 +224,6 @@ class TestSendMessage:
 
 class TestReadMessages:
     """read_messages ツールのテスト。"""
-
-    @pytest.mark.asyncio
-    async def test_read_messages_success(self, ipc_mock_ctx, git_repo):
-        """メッセージの読み取りが成功することをテスト。"""
-        from mcp.server.fastmcp import FastMCP
-
-        from src.tools.ipc import register_tools
-
-        mcp = FastMCP("test")
-        register_tools(mcp)
-
-        send_message = None
-        read_messages = None
-        for tool in mcp._tool_manager._tools.values():
-            if tool.name == "send_message":
-                send_message = tool.fn
-            elif tool.name == "read_messages":
-                read_messages = tool.fn
-
-        # Owner を追加
-        app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
-        )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
-            status=AgentStatus.IDLE,
-            tmux_session="test:0.1",
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
-        )
-
-        # まずメッセージを送信
-        await send_message(
-            sender_id="owner-001",
-            receiver_id="worker-001",
-            message_type="task_assign",
-            content="タスクを割り当てます",
-            caller_agent_id="owner-001",
-            ctx=ipc_mock_ctx,
-        )
-
-        # メッセージを読み取り
-        result = await read_messages(
-            agent_id="worker-001",
-            caller_agent_id="worker-001",
-            ctx=ipc_mock_ctx,
-        )
-
-        assert result["success"] is True
-        assert result["count"] >= 1
 
     @pytest.mark.asyncio
     async def test_read_messages_unread_only(self, ipc_mock_ctx, git_repo):

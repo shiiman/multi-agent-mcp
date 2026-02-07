@@ -17,6 +17,7 @@ from src.models.dashboard import (
     TaskInfo,
     TaskLog,
     TaskStatus,
+    normalize_task_id,
 )
 
 if TYPE_CHECKING:
@@ -37,36 +38,24 @@ class DashboardTasksMixin:
         """
         return self._read_dashboard()
 
-    @staticmethod
-    def _normalize_task_id(task_id: str | None) -> str:
-        """task_id を比較用に正規化する。"""
-        if not task_id:
-            return ""
-        normalized = task_id.strip().lower()
-        for prefix in ("task:", "task_", "task-"):
-            if normalized.startswith(prefix):
-                normalized = normalized[len(prefix):]
-                break
-        return normalized
-
     def _resolve_task(self, dashboard: Dashboard, task_id: str) -> TaskInfo | None:
         """task_id を exact / normalized / unique prefix で解決する。"""
         task = dashboard.get_task(task_id)
         if task:
             return task
 
-        normalized_target = self._normalize_task_id(task_id)
+        normalized_target = normalize_task_id(task_id)
         if not normalized_target:
             return None
 
         normalized_matches = [
-            t for t in dashboard.tasks if self._normalize_task_id(t.id) == normalized_target
+            t for t in dashboard.tasks if normalize_task_id(t.id) == normalized_target
         ]
         if len(normalized_matches) == 1:
             return normalized_matches[0]
 
         prefix_matches = [
-            t for t in dashboard.tasks if self._normalize_task_id(t.id).startswith(normalized_target)
+            t for t in dashboard.tasks if normalize_task_id(t.id).startswith(normalized_target)
         ]
         if len(prefix_matches) == 1:
             return prefix_matches[0]
@@ -562,7 +551,8 @@ class DashboardTasksMixin:
         """タスクファイルパスを取得する。"""
         safe_label = self._sanitize_task_file_part(agent_label)
         safe_task_id = self._sanitize_task_file_part(task_id)
-        return project_root / get_mcp_dir() / session_id / "tasks" / f"{safe_label}_{safe_task_id}.md"
+        tasks_dir = project_root / get_mcp_dir() / session_id / "tasks"
+        return tasks_dir / f"{safe_label}_{safe_task_id}.md"
 
     def read_task_file(
         self, project_root: Path, session_id: str, task_id: str, agent_label: str
