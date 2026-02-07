@@ -28,6 +28,19 @@ class TmuxWorkspaceMixin:
         """tmux target 文字列を構築する。"""
         return f"{session}:{window}.{pane}"
 
+    async def _send_enter_key(self, target: str) -> bool:
+        """Enter キーを送信する（C-m 優先、失敗時は Enter をフォールバック）。"""
+        code, _, stderr = await self._run("send-keys", "-t", target, "C-m")
+        if code == 0:
+            return True
+
+        logger.warning(f"C-m 送信に失敗、Enter へフォールバックします: {stderr}")
+        code, _, stderr = await self._run("send-keys", "-t", target, "Enter")
+        if code != 0:
+            logger.error(f"Enterキー送信エラー: {stderr}")
+            return False
+        return True
+
     async def create_main_session(self, working_dir: str) -> bool:
         """メインセッション（左40:右60分離レイアウト）を作成する。
 
@@ -354,10 +367,7 @@ class TmuxWorkspaceMixin:
             return False
 
         # Enter キーを別途送信
-        code, _, stderr = await self._run("send-keys", "-t", target, "Enter")
-        if code != 0:
-            logger.error(f"Enterキー送信エラー: {stderr}")
-        return code == 0
+        return await self._send_enter_key(target)
 
     @staticmethod
     def _is_pending_codex_prompt(output: str, command: str) -> bool:
@@ -418,17 +428,17 @@ class TmuxWorkspaceMixin:
         target = self._pane_target(session, window, pane)
 
         for _ in range(retries):
-            output = await self.capture_pane_by_index(session, window, pane, lines=30)
+            # Codex の画面出力は行数が増えやすいため広めに取得する
+            output = await self.capture_pane_by_index(session, window, pane, lines=120)
             if not self._is_pending_codex_prompt(output, command):
                 return True
-            code, _, stderr = await self._run("send-keys", "-t", target, "Enter")
-            if code != 0:
-                logger.error(f"Codex Enter再送エラー: {stderr}")
+            if not await self._send_enter_key(target):
+                logger.error("Codex Enter再送エラー")
                 return False
             if interval_ms:
                 await asyncio.sleep(interval_ms / 1000)
 
-        output = await self.capture_pane_by_index(session, window, pane, lines=30)
+        output = await self.capture_pane_by_index(session, window, pane, lines=120)
         return not self._is_pending_codex_prompt(output, command)
 
     async def send_with_rate_limit_to_pane(
