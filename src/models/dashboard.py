@@ -36,7 +36,8 @@ class TaskInfo(BaseModel):
 
     id: str = Field(..., description="タスクID")
     title: str = Field(..., description="タスクタイトル")
-    description: str = Field(default="", description="タスク説明")
+    description: str = Field(default="", description="タスク参照情報（task_file_path）")
+    task_file_path: str | None = Field(default=None, description="タスク指示ファイルパス")
     status: TaskStatus = Field(
         default=TaskStatus.PENDING, description="ステータス"
     )

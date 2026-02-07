@@ -62,9 +62,8 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
             window_name = tmux._get_window_name(old_window_index)
             target = f"{old_session_name}:{window_name}.{old_pane_index}"
             await tmux._run("send-keys", "-t", target, "C-c")
-            await tmux._run("send-keys", "-t", target, "clear", "Enter")
         except Exception as e:
-            logger.warning(f"tmux ペインのクリアに失敗: {e}")
+            logger.warning(f"tmux ペインへの割り込み送信に失敗: {e}")
 
     del agents[agent_id]
 

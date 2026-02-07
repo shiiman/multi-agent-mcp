@@ -215,13 +215,14 @@ class TestTaskFileManagement:
         task_file = dashboard_manager.write_task_file(
             project_root=project_root,
             session_id="123",
-            agent_id="agent-001",
+            task_id="task-001",
+            agent_label="claude1",
             task_content=task_content,
         )
 
         assert task_file.exists()
         assert task_file.read_text(encoding="utf-8") == task_content
-        assert task_file.name == "agent-001.md"
+        assert task_file.name == "claude1_task_001.md"
         assert ".multi-agent-mcp/123/tasks" in str(task_file)
 
     def test_get_task_file_path(self, dashboard_manager, temp_dir):
@@ -231,10 +232,11 @@ class TestTaskFileManagement:
         path = dashboard_manager.get_task_file_path(
             project_root=project_root,
             session_id="456",
-            agent_id="agent-002",
+            task_id="task-002",
+            agent_label="codex2",
         )
 
-        expected = project_root / ".multi-agent-mcp" / "456" / "tasks" / "agent-002.md"
+        expected = project_root / ".multi-agent-mcp" / "456" / "tasks" / "codex2_task_002.md"
         assert path == expected
 
     def test_read_task_file(self, dashboard_manager, temp_dir):
@@ -246,14 +248,16 @@ class TestTaskFileManagement:
         dashboard_manager.write_task_file(
             project_root=project_root,
             session_id="789",
-            agent_id="agent-003",
+            task_id="task-003",
+            agent_label="gemini3",
             task_content=task_content,
         )
 
         read_content = dashboard_manager.read_task_file(
             project_root=project_root,
             session_id="789",
-            agent_id="agent-003",
+            task_id="task-003",
+            agent_label="gemini3",
         )
 
         assert read_content == task_content
@@ -299,7 +303,8 @@ class TestDashboardMarkdownSync:
         read_content = dashboard_manager.read_task_file(
             project_root=project_root,
             session_id="999",
-            agent_id="nonexistent",
+            task_id="task-999",
+            agent_label="nonexistent",
         )
 
         assert read_content is None
@@ -313,7 +318,8 @@ class TestDashboardMarkdownSync:
         task_file = dashboard_manager.write_task_file(
             project_root=project_root,
             session_id="delete-test",
-            agent_id="agent-delete",
+            task_id="task-delete",
+            agent_label="admin",
             task_content="To be deleted",
         )
         assert task_file.exists()
@@ -322,7 +328,8 @@ class TestDashboardMarkdownSync:
         success = dashboard_manager.clear_task_file(
             project_root=project_root,
             session_id="delete-test",
-            agent_id="agent-delete",
+            task_id="task-delete",
+            agent_label="admin",
         )
 
         assert success is True
@@ -335,7 +342,8 @@ class TestDashboardMarkdownSync:
         success = dashboard_manager.clear_task_file(
             project_root=project_root,
             session_id="nonexistent",
-            agent_id="nonexistent",
+            task_id="task-none",
+            agent_label="nonexistent",
         )
 
         assert success is False

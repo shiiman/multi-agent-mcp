@@ -1,6 +1,7 @@
 """Dashboard のタスク/エージェント更新ロジック mixin。"""
 
 import logging
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,47 @@ class DashboardTasksMixin:
         """
         return self._read_dashboard()
 
+    @staticmethod
+    def _normalize_task_id(task_id: str | None) -> str:
+        """task_id を比較用に正規化する。"""
+        if not task_id:
+            return ""
+        normalized = task_id.strip().lower()
+        for prefix in ("task:", "task_", "task-"):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+                break
+        return normalized
+
+    def _resolve_task(self, dashboard: Dashboard, task_id: str) -> TaskInfo | None:
+        """task_id を exact / normalized / unique prefix で解決する。"""
+        task = dashboard.get_task(task_id)
+        if task:
+            return task
+
+        normalized_target = self._normalize_task_id(task_id)
+        if not normalized_target:
+            return None
+
+        normalized_matches = [
+            t for t in dashboard.tasks if self._normalize_task_id(t.id) == normalized_target
+        ]
+        if len(normalized_matches) == 1:
+            return normalized_matches[0]
+
+        prefix_matches = [
+            t for t in dashboard.tasks if self._normalize_task_id(t.id).startswith(normalized_target)
+        ]
+        if len(prefix_matches) == 1:
+            return prefix_matches[0]
+        return None
+
+    @staticmethod
+    def _sanitize_task_file_part(value: str) -> str:
+        """タスクファイル名向けに安全な文字列へ変換する。"""
+        cleaned = re.sub(r"[^0-9A-Za-z_-]+", "_", value or "").strip("_").lower()
+        return cleaned or "unknown"
+
     # タスク管理メソッド
 
     def create_task(
@@ -51,7 +93,7 @@ class DashboardTasksMixin:
 
         Args:
             title: タスクタイトル
-            description: タスク説明
+            description: タスク説明（metadata に保持）
             assigned_agent_id: 割り当て先エージェントID
             branch: 作業ブランチ
             worktree_path: worktreeパス
@@ -61,16 +103,20 @@ class DashboardTasksMixin:
             作成されたTaskInfo
         """
         dashboard = self._read_dashboard()
+        task_metadata = metadata.copy() if metadata else {}
+        if description:
+            task_metadata["requested_description"] = description
 
         task = TaskInfo(
             id=str(uuid.uuid4()),
             title=title,
-            description=description,
+            description="",
+            task_file_path=None,
             status=TaskStatus.PENDING,
             assigned_agent_id=assigned_agent_id,
             branch=branch,
             worktree_path=worktree_path,
-            metadata=metadata or {},
+            metadata=task_metadata,
             created_at=datetime.now(),
         )
 
@@ -101,7 +147,7 @@ class DashboardTasksMixin:
         """
         dashboard = self._read_dashboard()
 
-        task = dashboard.get_task(task_id)
+        task = self._resolve_task(dashboard, task_id)
         if not task:
             return False, f"タスク {task_id} が見つかりません"
 
@@ -118,10 +164,21 @@ class DashboardTasksMixin:
         now = datetime.now()
         if status == TaskStatus.IN_PROGRESS and old_status == TaskStatus.PENDING:
             task.started_at = now
-        elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            if task.assigned_agent_id:
+                for agent_summary in dashboard.agents:
+                    if agent_summary.agent_id == task.assigned_agent_id:
+                        agent_summary.current_task_id = task.id
+                        agent_summary.status = "busy"
+                        break
+        elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
             task.completed_at = now
             if status == TaskStatus.COMPLETED:
                 task.progress = 100
+            for agent_summary in dashboard.agents:
+                if agent_summary.current_task_id == task.id:
+                    agent_summary.current_task_id = None
+                    if agent_summary.role == "worker":
+                        agent_summary.status = "idle"
 
         dashboard.calculate_stats()
         self._write_dashboard(dashboard)
@@ -149,7 +206,7 @@ class DashboardTasksMixin:
         """
         dashboard = self._read_dashboard()
 
-        task = dashboard.get_task(task_id)
+        task = self._resolve_task(dashboard, task_id)
         if not task:
             return False, f"タスク {task_id} が見つかりません"
 
@@ -162,7 +219,9 @@ class DashboardTasksMixin:
         # エージェントの current_task_id も更新
         for agent_summary in dashboard.agents:
             if agent_summary.agent_id == agent_id:
-                agent_summary.current_task_id = task_id
+                agent_summary.current_task_id = task.id
+                if agent_summary.role == "worker":
+                    agent_summary.status = "busy"
                 break
 
         self._write_dashboard(dashboard)
@@ -181,7 +240,7 @@ class DashboardTasksMixin:
         """
         dashboard = self._read_dashboard()
 
-        task = dashboard.get_task(task_id)
+        task = self._resolve_task(dashboard, task_id)
         if not task:
             return False, f"タスク {task_id} が見つかりません"
 
@@ -202,7 +261,7 @@ class DashboardTasksMixin:
             TaskInfo、見つからない場合はNone
         """
         dashboard = self._read_dashboard()
-        return dashboard.get_task(task_id)
+        return self._resolve_task(dashboard, task_id)
 
     def list_tasks(
         self,
@@ -248,7 +307,7 @@ class DashboardTasksMixin:
         """
         dashboard = self._read_dashboard()
 
-        task = dashboard.get_task(task_id)
+        task = self._resolve_task(dashboard, task_id)
         if not task:
             return False, f"タスク {task_id} が見つかりません"
 
@@ -388,6 +447,14 @@ class DashboardTasksMixin:
         """
         dashboard = self._read_dashboard()
         cost = dashboard.cost
+        pending_tasks = len(dashboard.get_tasks_by_status(TaskStatus.PENDING))
+        in_progress_tasks = len(dashboard.get_tasks_by_status(TaskStatus.IN_PROGRESS))
+        all_tasks_completed = (
+            dashboard.total_tasks > 0
+            and pending_tasks == 0
+            and in_progress_tasks == 0
+            and dashboard.failed_tasks == 0
+        )
         return {
             "workspace_id": dashboard.workspace_id,
             "total_agents": dashboard.total_agents,
@@ -395,12 +462,9 @@ class DashboardTasksMixin:
             "total_tasks": dashboard.total_tasks,
             "completed_tasks": dashboard.completed_tasks,
             "failed_tasks": dashboard.failed_tasks,
-            "pending_tasks": len(
-                dashboard.get_tasks_by_status(TaskStatus.PENDING)
-            ),
-            "in_progress_tasks": len(
-                dashboard.get_tasks_by_status(TaskStatus.IN_PROGRESS)
-            ),
+            "pending_tasks": pending_tasks,
+            "in_progress_tasks": in_progress_tasks,
+            "all_tasks_completed": all_tasks_completed,
             "total_worktrees": dashboard.total_worktrees,
             "active_worktrees": dashboard.active_worktrees,
             "updated_at": dashboard.updated_at.isoformat(),
@@ -433,6 +497,10 @@ class DashboardTasksMixin:
             pane_index=agent.pane_index,
         )
 
+    def get_agent_label(self, agent: Agent) -> str:
+        """Agent の表示名を返す（task file 命名にも利用）。"""
+        return self._compute_agent_name(agent)
+
     def add_message(
         self,
         sender_id: str,
@@ -458,73 +526,56 @@ class DashboardTasksMixin:
     # タスクファイル管理メソッド（ファイルベースのタスク配布）
 
     def write_task_file(
-        self, project_root: Path, session_id: str, agent_id: str, task_content: str
+        self,
+        project_root: Path,
+        session_id: str,
+        task_id: str,
+        agent_label: str,
+        task_content: str,
     ) -> Path:
-        """Worker用のタスクファイルを作成する（Markdown形式）。
-
-        Args:
-            project_root: プロジェクトルートパス
-            session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
-            agent_id: エージェントID
-            task_content: タスク内容
-
-        Returns:
-            作成したタスクファイルのパス
-        """
+        """タスクファイルを作成する（Markdown形式）。"""
+        safe_label = self._sanitize_task_file_part(agent_label)
+        safe_task_id = self._sanitize_task_file_part(task_id)
         task_dir = project_root / get_mcp_dir() / session_id / "tasks"
         task_dir.mkdir(parents=True, exist_ok=True)
-        task_file = task_dir / f"{agent_id}.md"
+        task_file = task_dir / f"{safe_label}_{safe_task_id}.md"
         task_file.write_text(task_content, encoding="utf-8")
+        try:
+            relative_path = str(task_file.relative_to(project_root))
+        except ValueError:
+            relative_path = str(task_file)
+
+        dashboard = self._read_dashboard()
+        task = self._resolve_task(dashboard, task_id)
+        if task:
+            task.task_file_path = relative_path
+            task.description = relative_path
+            self._write_dashboard(dashboard)
         logger.info(f"タスクファイルを作成しました: {task_file}")
         return task_file
 
     def get_task_file_path(
-        self, project_root: Path, session_id: str, agent_id: str
+        self, project_root: Path, session_id: str, task_id: str, agent_label: str
     ) -> Path:
-        """Worker用のタスクファイルパスを取得する。
-
-        Args:
-            project_root: プロジェクトルートパス
-            session_id: Issue番号または一意なタスクID
-            agent_id: エージェントID
-
-        Returns:
-            タスクファイルのパス
-        """
-        return project_root / get_mcp_dir() / session_id / "tasks" / f"{agent_id}.md"
+        """タスクファイルパスを取得する。"""
+        safe_label = self._sanitize_task_file_part(agent_label)
+        safe_task_id = self._sanitize_task_file_part(task_id)
+        return project_root / get_mcp_dir() / session_id / "tasks" / f"{safe_label}_{safe_task_id}.md"
 
     def read_task_file(
-        self, project_root: Path, session_id: str, agent_id: str
+        self, project_root: Path, session_id: str, task_id: str, agent_label: str
     ) -> str | None:
-        """Worker用のタスクファイルを読み取る。
-
-        Args:
-            project_root: プロジェクトルートパス
-            session_id: Issue番号または一意なタスクID
-            agent_id: エージェントID
-
-        Returns:
-            タスクファイルの内容、存在しない場合はNone
-        """
-        task_file = self.get_task_file_path(project_root, session_id, agent_id)
+        """タスクファイルを読み取る。"""
+        task_file = self.get_task_file_path(project_root, session_id, task_id, agent_label)
         if task_file.exists():
             return task_file.read_text(encoding="utf-8")
         return None
 
     def clear_task_file(
-        self, project_root: Path, session_id: str, agent_id: str
+        self, project_root: Path, session_id: str, task_id: str, agent_label: str
     ) -> bool:
-        """タスクファイルをクリアする。
-
-        Args:
-            project_root: プロジェクトルートパス
-            session_id: Issue番号または一意なタスクID
-            agent_id: エージェントID
-
-        Returns:
-            削除に成功した場合True
-        """
-        task_file = self.get_task_file_path(project_root, session_id, agent_id)
+        """タスクファイルを削除する。"""
+        task_file = self.get_task_file_path(project_root, session_id, task_id, agent_label)
         if task_file.exists():
             task_file.unlink()
             logger.info(f"タスクファイルを削除しました: {task_file}")

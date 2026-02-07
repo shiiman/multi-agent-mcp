@@ -344,38 +344,6 @@ def register_tools(mcp: FastMCP) -> None:
                         if success:
                             gtr_status["gtrconfig_generated"] = True
                             logger.info(f".gtrconfig を自動生成しました: {working_dir}")
-
-                            # .gtrconfig をコミット
-                            try:
-                                import asyncio
-
-                                proc = await asyncio.create_subprocess_exec(
-                                    "git", "add", ".gtrconfig",
-                                    cwd=working_dir,
-                                    stdout=asyncio.subprocess.PIPE,
-                                    stderr=asyncio.subprocess.PIPE,
-                                )
-                                await proc.communicate()
-
-                                if proc.returncode == 0:
-                                    commit_msg = (
-                                        "chore: add .gtrconfig"
-                                        " for gtr worktree runner"
-                                    )
-                                    proc = await asyncio.create_subprocess_exec(
-                                        "git", "commit", "-m", commit_msg,
-                                        cwd=working_dir,
-                                        stdout=asyncio.subprocess.PIPE,
-                                        stderr=asyncio.subprocess.PIPE,
-                                    )
-                                    await proc.communicate()
-                                    if proc.returncode == 0:
-                                        gtr_status["gtrconfig_committed"] = True
-                                        logger.info(".gtrconfig をコミットしました")
-                                    else:
-                                        logger.warning(".gtrconfig のコミットに失敗しました")
-                            except Exception as e:
-                                logger.warning(f".gtrconfig のコミットに失敗: {e}")
                         else:
                             logger.warning(f".gtrconfig 自動生成に失敗: {result}")
             except Exception as e:

@@ -1,7 +1,6 @@
 """コマンド実行ツール。"""
 
 import logging
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -10,6 +9,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.workflow_guides import get_role_template_path
 from src.models.agent import AgentRole, AgentStatus
+from src.models.dashboard import TaskStatus
 from src.tools.helpers import (
     ensure_dashboard_manager,
     get_worktree_manager,
@@ -21,6 +21,7 @@ from src.tools.helpers import (
     sync_agents_from_file,
 )
 from src.tools.agent_helpers import (
+    build_worker_task_branch,
     _create_worktree_for_worker,
     _send_task_to_worker,
     resolve_worker_number_from_slot,
@@ -30,26 +31,6 @@ from src.tools.model_profile import get_current_profile_settings
 from src.tools.task_templates import generate_admin_task
 
 logger = logging.getLogger(__name__)
-
-
-def _sanitize_branch_part(value: str) -> str:
-    """ブランチ名用に安全な文字へ正規化する。"""
-    cleaned = re.sub(r"[^0-9A-Za-z._-]+", "-", value or "").strip("-")
-    return cleaned or "main"
-
-
-def _short_task_id(task_id: str) -> str:
-    """task_id を 8 桁に短縮する。"""
-    alnum = re.sub(r"[^0-9A-Za-z]", "", task_id or "")
-    if not alnum:
-        return "task0000"
-    return alnum[:8].lower()
-
-
-def _build_worker_task_branch(base_branch: str, worker_no: int, task_id: str) -> str:
-    """task 単位 worktree 用のブランチ名を生成する。"""
-    base = _sanitize_branch_part(base_branch)
-    return f"feature/{base}-worker-{worker_no}-{_short_task_id(task_id)}"
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -301,10 +282,35 @@ def register_tools(mcp: FastMCP) -> None:
             except Exception:
                 worker_no = 1
 
+            # Worker への送信は Dashboard に存在する task_id が必須
+            effective_task_id = agent.current_task
+            selected_task = None
+            if not effective_task_id:
+                assigned_tasks = dashboard.list_tasks(agent_id=agent_id)
+                active_tasks = [
+                    task
+                    for task in assigned_tasks
+                    if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+                ]
+                if len(active_tasks) == 1:
+                    selected_task = active_tasks[0]
+                    effective_task_id = selected_task.id
+
+            if not effective_task_id:
+                return {
+                    "success": False,
+                    "error": (
+                        "worker へ送信する task_id を特定できません。"
+                        "先に create_task + assign_task_to_agent を実行してください。"
+                    ),
+                    "assignment_error": "task_id_unresolved",
+                }
+
             # 2回目以降も含め、タスク割当直前に worktree 準備を実施する
             # （MCP_ENABLE_WORKTREE=false の場合は作成・切替を行わない）
             dispatch_worktree_path = agent.worktree_path or agent.working_dir or str(project_root)
-            dispatch_branch = branch_name or ""
+            dispatch_branch = branch_name or (selected_task.branch if selected_task else "")
+            assignment_error: str | None = None
 
             if app_ctx.settings.enable_worktree:
                 worktree_manager = get_worktree_manager(app_ctx, str(project_root))
@@ -313,7 +319,7 @@ def register_tools(mcp: FastMCP) -> None:
                     base_branch = "main"
                 generated_branch = (
                     branch_name
-                    or _build_worker_task_branch(base_branch, worker_no, session_id)
+                    or build_worker_task_branch(base_branch, worker_no, effective_task_id)
                 )
 
                 wt_path, wt_error = await _create_worktree_for_worker(
@@ -336,17 +342,30 @@ def register_tools(mcp: FastMCP) -> None:
 
             try:
                 assigned, _ = dashboard.assign_task(
-                    task_id=session_id,
+                    task_id=effective_task_id,
                     agent_id=agent_id,
                     branch=dispatch_branch or None,
                     worktree_path=dispatch_worktree_path if app_ctx.settings.enable_worktree else None,
                 )
                 if not assigned:
-                    logger.debug("send_task: task %s は dashboard 未登録のため割当更新をスキップ", session_id)
+                    assignment_error = f"task_not_found:{effective_task_id}"
+                    return {
+                        "success": False,
+                        "error": (
+                            f"task {effective_task_id} を dashboard に割り当てできませんでした。"
+                            "task を登録してから送信してください。"
+                        ),
+                        "assignment_error": assignment_error,
+                    }
             except Exception as assign_error:
-                logger.debug("send_task: task 割当更新をスキップ: %s", assign_error)
+                assignment_error = str(assign_error)
+                return {
+                    "success": False,
+                    "error": f"task 割当更新に失敗しました: {assign_error}",
+                    "assignment_error": assignment_error,
+                }
 
-            agent.current_task = session_id
+            agent.current_task = effective_task_id
             agent.status = AgentStatus.BUSY
             agent.last_activity = datetime.now()
             save_agent_to_file(app_ctx, agent)
@@ -356,7 +375,7 @@ def register_tools(mcp: FastMCP) -> None:
                 app_ctx=app_ctx,
                 agent=agent,
                 task_content=task_content,
-                task_id=session_id,
+                task_id=effective_task_id,
                 branch=dispatch_branch,
                 worktree_path=dispatch_worktree_path,
                 session_id=session_id,
@@ -377,6 +396,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "auto_enhanced": auto_enhance,
                 "dispatch_mode": send_result.get("dispatch_mode", "none"),
                 "dispatch_error": send_result.get("dispatch_error"),
+                "assignment_error": assignment_error,
                 "branch_name": dispatch_branch or None,
                 "worktree_path": (
                     dispatch_worktree_path if app_ctx.settings.enable_worktree else None
@@ -386,8 +406,18 @@ def register_tools(mcp: FastMCP) -> None:
             return result
 
         # Admin への送信は従来どおり bootstrap コマンドを使用
+        admin_task_id = session_id
+        agent_label = (
+            dashboard.get_agent_label(agent)
+            if hasattr(dashboard, "get_agent_label")
+            else agent.id
+        )
         task_file = dashboard.write_task_file(
-            project_root, session_id, agent_id, final_task_content
+            project_root,
+            session_id,
+            admin_task_id,
+            agent_label,
+            final_task_content,
         )
 
         agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,26 @@ def _build_change_directory_command(cli_name: str, worktree_path: str) -> str:
     if cli_name == AICli.CLAUDE.value:
         return f"!cd {worktree_path}"
     return f"cd {worktree_path}"
+
+
+def _sanitize_branch_part(value: str) -> str:
+    """ブランチ名用に安全な文字へ正規化する。"""
+    cleaned = re.sub(r"[^0-9A-Za-z._-]+", "-", value or "").strip("-")
+    return cleaned or "main"
+
+
+def _short_task_id(task_id: str) -> str:
+    """task_id を 8 桁に短縮する。"""
+    alnum = re.sub(r"[^0-9A-Za-z]", "", task_id or "")
+    if not alnum:
+        return "task0000"
+    return alnum[:8].lower()
+
+
+def build_worker_task_branch(base_branch: str, worker_no: int, task_id: str) -> str:
+    """task 単位 worktree 用のブランチ名を生成する。"""
+    base = _sanitize_branch_part(base_branch)
+    return f"feature/{base}-worker-{worker_no}-{_short_task_id(task_id)}"
 
 
 def resolve_worker_number_from_slot(settings: Settings, window_index: int, pane_index: int) -> int:
@@ -448,8 +469,17 @@ async def _send_task_to_worker(
 
         # タスクファイル作成・送信
         dashboard = ensure_dashboard_manager(app_ctx)
+        agent_label = (
+            dashboard.get_agent_label(agent)
+            if hasattr(dashboard, "get_agent_label")
+            else agent.id
+        )
         task_file = dashboard.write_task_file(
-            project_root, session_id, agent.id, final_task_content
+            project_root,
+            session_id,
+            effective_task_id,
+            agent_label,
+            final_task_content,
         )
 
         tmux = app_ctx.tmux
@@ -488,6 +518,7 @@ async def _send_task_to_worker(
                 agent.window_index,
                 agent.pane_index,
                 bootstrap_command,
+                clear_input=False,
             )
             return success, bootstrap_command
 
@@ -506,6 +537,7 @@ async def _send_task_to_worker(
                     agent.window_index,
                     agent.pane_index,
                     change_dir,
+                    clear_input=False,
                 )
                 if not changed:
                     current_command = await _reset_bootstrap_state_if_shell()
@@ -529,6 +561,7 @@ async def _send_task_to_worker(
                 agent.window_index,
                 agent.pane_index,
                 instruction,
+                clear_input=False,
             )
 
         if success:

@@ -7,7 +7,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from src.models.agent import AgentRole
+from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus
 from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import (
@@ -92,6 +92,8 @@ def _auto_update_dashboard_from_messages(
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
                     agent.current_task = task_id
+                    if str(agent.role) == AgentRole.WORKER.value:
+                        agent.status = AgentStatus.BUSY
                     save_agent_to_file(app_ctx, agent)
                 applied += 1
 
@@ -108,6 +110,8 @@ def _auto_update_dashboard_from_messages(
                     agent = app_ctx.agents[reporter]
                     if agent.current_task == task_id:
                         agent.current_task = None
+                    if str(agent.role) == AgentRole.WORKER.value:
+                        agent.status = AgentStatus.IDLE
                     save_agent_to_file(app_ctx, agent)
                 applied += 1
 
@@ -122,6 +126,8 @@ def _auto_update_dashboard_from_messages(
                     agent = app_ctx.agents[reporter]
                     if agent.current_task == task_id:
                         agent.current_task = None
+                    if str(agent.role) == AgentRole.WORKER.value:
+                        agent.status = AgentStatus.IDLE
                     save_agent_to_file(app_ctx, agent)
                 applied += 1
         except Exception as e:
@@ -151,19 +157,26 @@ def _resolve_session_name(agent: Any) -> str | None:
     return None
 
 
-def _is_quality_task(title: str, description: str) -> bool:
-    text = f"{title} {description}".lower()
+def _task_context_text(title: str, description: str, metadata: dict | None = None) -> str:
+    requested = ""
+    if isinstance(metadata, dict):
+        requested = str(metadata.get("requested_description", "") or "")
+    return f"{title} {requested} {description}".lower()
+
+
+def _is_quality_task(title: str, description: str, metadata: dict | None = None) -> bool:
+    text = _task_context_text(title, description, metadata)
     keywords = ("qa", "quality", "test", "e2e", "検証", "テスト", "品質", "playwright")
     return any(keyword in text for keyword in keywords)
 
 
-def _is_playwright_task(title: str, description: str) -> bool:
-    text = f"{title} {description}".lower()
+def _is_playwright_task(title: str, description: str, metadata: dict | None = None) -> bool:
+    text = _task_context_text(title, description, metadata)
     return "playwright" in text
 
 
-def _is_ui_related_task(title: str, description: str) -> bool:
-    text = f"{title} {description}".lower()
+def _is_ui_related_task(title: str, description: str, metadata: dict | None = None) -> bool:
+    text = _task_context_text(title, description, metadata)
     keywords = ("ui", "frontend", "画面", "表示", "フロント", "browser", "e2e")
     return any(keyword in text for keyword in keywords)
 
@@ -242,13 +255,23 @@ def _validate_admin_completion_gate(
         suggestions.append("未完了/失敗タスクを再計画し、Worker に再割り当てしてください。")
 
     completed_tasks = [t for t in tasks if t.status == TaskStatus.COMPLETED]
-    quality_tasks = [t for t in completed_tasks if _is_quality_task(t.title, t.description)]
+    quality_tasks = [
+        t
+        for t in completed_tasks
+        if _is_quality_task(t.title, t.description, getattr(t, "metadata", None))
+    ]
     if not quality_tasks:
         reasons.append("品質証跡タスク（test/QA/検証）が完了していません")
         suggestions.append("品質チェック専用タスクを作成し、証跡を揃えてください。")
 
-    ui_required = any(_is_ui_related_task(t.title, t.description) for t in tasks)
-    playwright_done = any(_is_playwright_task(t.title, t.description) for t in quality_tasks)
+    ui_required = any(
+        _is_ui_related_task(t.title, t.description, getattr(t, "metadata", None))
+        for t in tasks
+    )
+    playwright_done = any(
+        _is_playwright_task(t.title, t.description, getattr(t, "metadata", None))
+        for t in quality_tasks
+    )
     if ui_required and not playwright_done:
         reasons.append("UI関連タスクに対する Playwright 証跡が不足しています")
         suggestions.append("Playwright 実行タスクを追加し、完了報告を取り込んでください。")

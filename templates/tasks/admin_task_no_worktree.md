@@ -129,16 +129,14 @@ for task in subtasks:
     task_ids.append(result["task_id"])
 
 # ステップ 2: Worker 設定を準備（task_id を含める）
-# Non-Worktree モードでは branch は使用されないが、識別用に指定
+# Non-Worktree モードでは branch は使用されない
 worker_configs = [
     {{
-        "branch": "worker-1",
         "task_title": subtasks[0]["title"],
         "task_id": task_ids[0],      # ← create_task で取得した ID
         "task_content": subtasks[0]["description"]
     }},
     {{
-        "branch": "worker-2",
         "task_title": subtasks[1]["title"],
         "task_id": task_ids[1],      # ← create_task で取得した ID
         "task_content": subtasks[1]["description"]

@@ -353,6 +353,15 @@ class DashboardMarkdownMixin:
             f"- **完了タスク**: {dashboard.completed_tasks}",
             f"- **失敗タスク**: {dashboard.failed_tasks}",
         ]
+        pending_tasks = len(dashboard.get_tasks_by_status(TaskStatus.PENDING))
+        in_progress_tasks = len(dashboard.get_tasks_by_status(TaskStatus.IN_PROGRESS))
+        all_tasks_completed = (
+            dashboard.total_tasks > 0
+            and pending_tasks == 0
+            and in_progress_tasks == 0
+            and dashboard.failed_tasks == 0
+        )
+        lines.append(f"- **実装完了**: {'✅' if all_tasks_completed else '❌'}")
 
         cost = dashboard.cost
         if cost.total_api_calls > 0:

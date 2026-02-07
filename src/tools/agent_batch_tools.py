@@ -11,6 +11,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from src.managers.tmux_manager import MAIN_WINDOW_WORKER_PANES, get_project_name
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.agent_helpers import (
+    build_worker_task_branch,
     _create_worktree_for_worker,
     _post_create_agent,
     _send_task_to_worker,
@@ -158,17 +159,46 @@ def register_batch_tools(mcp: FastMCP) -> None:
             config: dict, worker_index: int, assigned_slot: tuple[int, int] | None
         ) -> dict[str, Any]:
             """単一の Worker を作成する内部関数。"""
-            branch = config.get("branch")
+            requested_branch = config.get("branch")
             task_title = config.get("task_title", f"Worker {worker_index + 1}")
-
-            if not branch:
+            task_id = config.get("task_id")
+            task_content = config.get("task_content")
+            if task_content and not task_id:
                 return {
                     "success": False,
-                    "error": f"Worker {worker_index + 1}: branch が指定されていません",
+                    "error": (
+                        f"Worker {worker_index + 1}: task_content を送信する場合は "
+                        "task_id が必須です"
+                    ),
                     "worker_index": worker_index,
                 }
 
             try:
+                if assigned_slot is None:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Worker {worker_index + 1}: "
+                            "利用可能なスロットがありません（事前割り当て失敗）"
+                        ),
+                        "worker_index": worker_index,
+                    }
+
+                window_index, pane_index = assigned_slot
+                worker_no = resolve_worker_number_from_slot(settings, window_index, pane_index)
+                branch = requested_branch or f"worker-{worker_no}"
+                if enable_worktree:
+                    if not task_id:
+                        return {
+                            "success": False,
+                            "error": (
+                                f"Worker {worker_index + 1}: MCP_ENABLE_WORKTREE=true のため "
+                                "task_id が必須です"
+                            ),
+                            "worker_index": worker_index,
+                        }
+                    branch = build_worker_task_branch(base_branch, worker_no, task_id)
+
                 # 1. Worktree 作成（有効な場合のみ）
                 worktree_path = repo_path
                 if enable_worktree:
@@ -192,17 +222,6 @@ def register_batch_tools(mcp: FastMCP) -> None:
                         "worker_index": worker_index,
                     }
 
-                if assigned_slot is None:
-                    return {
-                        "success": False,
-                        "error": (
-                            f"Worker {worker_index + 1}: "
-                            "利用可能なスロットがありません（事前割り当て失敗）"
-                        ),
-                        "worker_index": worker_index,
-                    }
-                window_index, pane_index = assigned_slot
-                worker_no = resolve_worker_number_from_slot(settings, window_index, pane_index)
                 worker_cli = settings.get_worker_cli(worker_no)
 
                 if window_index > 0:
@@ -251,7 +270,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
 
                 # 4. タスク割り当て（task_id が指定されている場合）
                 task_assigned = False
-                task_id = config.get("task_id")
+                assignment_error = None
                 dashboard = None
                 if app_ctx.session_id and app_ctx.project_root:
                     try:
@@ -269,6 +288,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
                         )
                         task_assigned = success
                         if not success:
+                            assignment_error = message
                             logger.warning(
                                 f"Worker {worker_index + 1}: タスク割り当て失敗 - {message}"
                             )
@@ -280,13 +300,13 @@ def register_batch_tools(mcp: FastMCP) -> None:
                             save_agent_to_file(app_ctx, agent)
                             dashboard.update_agent_summary(agent)
                     except Exception as e:
+                        assignment_error = str(e)
                         logger.warning(f"Worker {worker_index + 1}: タスク割り当てエラー - {e}")
 
                 # 5. タスク送信（task_content が指定されている場合）
                 task_sent = False
                 dispatch_mode = "none"
                 dispatch_error = None
-                task_content = config.get("task_content")
                 if task_content and session_id:
                     send_result = await _send_task_to_worker(
                         app_ctx, agent, task_content, task_id, branch, worktree_path,
@@ -309,6 +329,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     "file_persisted": post_result["file_persisted"],
                     "dashboard_updated": post_result["dashboard_updated"],
                     "task_assigned": task_assigned,
+                    "assignment_error": assignment_error,
                     "task_sent": task_sent,
                     "dispatch_mode": dispatch_mode,
                     "dispatch_error": dispatch_error,
@@ -326,12 +347,17 @@ def register_batch_tools(mcp: FastMCP) -> None:
             config: dict, worker_index: int, worker: Agent
         ) -> dict[str, Any]:
             """既存 idle Worker を再利用してタスクを割り当てる。"""
-            branch = config.get("branch")
+            requested_branch = config.get("branch")
             task_title = config.get("task_title", f"Worker {worker_index + 1}")
-            if enable_worktree and not branch:
+            task_id = config.get("task_id")
+            task_content = config.get("task_content")
+            if task_content and not task_id:
                 return {
                     "success": False,
-                    "error": f"Worker {worker_index + 1}: branch が指定されていません",
+                    "error": (
+                        f"Worker {worker_index + 1}: task_content を送信する場合は "
+                        "task_id が必須です"
+                    ),
                     "worker_index": worker_index,
                 }
 
@@ -342,7 +368,18 @@ def register_batch_tools(mcp: FastMCP) -> None:
                 worker.pane_index or 0,
             )
             worker.ai_cli = settings.get_worker_cli(worker_no)
+            branch = requested_branch or f"worker-{worker_no}"
             if enable_worktree:
+                if not task_id:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Worker {worker_index + 1}: MCP_ENABLE_WORKTREE=true のため "
+                            "task_id が必須です"
+                        ),
+                        "worker_index": worker_index,
+                    }
+                branch = build_worker_task_branch(base_branch, worker_no, task_id)
                 wt_path, wt_error = await _create_worktree_for_worker(
                     app_ctx, repo_path, branch, base_branch, worker_index
                 )
@@ -357,7 +394,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
                 worker.working_dir = wt_path
 
             task_assigned = False
-            task_id = config.get("task_id")
+            assignment_error = None
             dashboard = None
             if app_ctx.session_id and app_ctx.project_root:
                 try:
@@ -375,6 +412,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     )
                     task_assigned = success
                     if not success:
+                        assignment_error = message
                         logger.warning(f"再利用Workerへのタスク割り当て失敗: {message}")
                     else:
                         worker.current_task = task_id
@@ -384,12 +422,12 @@ def register_batch_tools(mcp: FastMCP) -> None:
                         save_agent_to_file(app_ctx, worker)
                         dashboard.update_agent_summary(worker)
                 except Exception as e:
+                    assignment_error = str(e)
                     logger.warning(f"再利用Workerへのタスク割り当てエラー: {e}")
 
             task_sent = False
             dispatch_mode = "none"
             dispatch_error = None
-            task_content = config.get("task_content")
             if task_content and session_id:
                 send_result = await _send_task_to_worker(
                     app_ctx,
@@ -421,6 +459,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
                 "task_title": task_title,
                 "reused": True,
                 "task_assigned": task_assigned,
+                "assignment_error": assignment_error,
                 "task_sent": task_sent,
                 "dispatch_mode": dispatch_mode,
                 "dispatch_error": dispatch_error,

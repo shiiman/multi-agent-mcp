@@ -121,13 +121,11 @@ for task in subtasks:
 # ステップ 2: Worker 設定を準備（task_id を含める）
 worker_configs = [
     {{
-        "branch": "{branch_name}-worker-1",
         "task_title": subtasks[0]["title"],
         "task_id": task_ids[0],      # ← create_task で取得した ID
         "task_content": subtasks[0]["description"]
     }},
     {{
-        "branch": "{branch_name}-worker-2",
         "task_title": subtasks[1]["title"],
         "task_id": task_ids[1],      # ← create_task で取得した ID
         "task_content": subtasks[1]["description"]
@@ -159,7 +157,8 @@ create_workers_batch(worker_configs=worker_configs, ...)  # Dashboard に登録�
 **注意事項:**
 - **`create_task` なしで `create_workers_batch` を呼ぶと、Dashboard にタスクが登録されず、Owner が進捗を追跡できません**
 - `create_workers_batch` は worktree 作成 → agent 作成 → タスク割り当て → タスク送信を Worker ごとに並列実行
-- ブランチ名は `{branch_name}-worker-N` 形式（N は Worker 番号）
+- `MCP_ENABLE_WORKTREE=true` の場合、ブランチ名は自動で
+  `feature/[元ブランチ名]-worker-[worker番号]-[taskID短縮8桁]` に統一されます
 
 ### 4. Worker 完了待ち（🔴 ポーリング禁止・IPC 通知駆動・終了禁止）
 

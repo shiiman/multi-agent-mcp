@@ -636,19 +636,32 @@ def register_tools(mcp: FastMCP) -> None:
             sync_agents_from_file(app_ctx)
             for agent in app_ctx.agents.values():
                 dashboard.update_agent_summary(agent)
-            admin_agents = [
-                a for a in app_ctx.agents.values()
-                if str(a.role) in (AgentRole.ADMIN.value, "admin")
-            ]
-            for admin_agent in admin_agents:
+            claude_agents = []
+            for candidate in app_ctx.agents.values():
+                role_value = str(candidate.role)
+                if role_value not in (
+                    AgentRole.ADMIN.value,
+                    AgentRole.WORKER.value,
+                    "admin",
+                    "worker",
+                ):
+                    continue
+                cli_value = (
+                    candidate.ai_cli.value
+                    if hasattr(candidate.ai_cli, "value")
+                    else str(candidate.ai_cli or "")
+                )
+                if cli_value == "claude":
+                    claude_agents.append(candidate)
+            for target_agent in claude_agents:
                 try:
                     await capture_claude_actual_cost_for_agent(
                         app_ctx=app_ctx,
-                        agent=admin_agent,
-                        task_id=admin_agent.current_task,
+                        agent=target_agent,
+                        task_id=target_agent.current_task,
                     )
                 except Exception as e:
-                    logger.debug(f"Dashboard 取得時の Admin コスト更新をスキップ: {e}")
+                    logger.debug(f"Dashboard 取得時の Claude 実測コスト更新をスキップ: {e}")
             if app_ctx.session_id and app_ctx.project_root:
                 try:
                     dashboard.save_markdown_dashboard(
@@ -695,19 +708,34 @@ def register_tools(mcp: FastMCP) -> None:
             sync_agents_from_file(app_ctx)
             for agent in app_ctx.agents.values():
                 dashboard.update_agent_summary(agent)
-            admin_agents = [
-                a for a in app_ctx.agents.values()
-                if str(a.role) in (AgentRole.ADMIN.value, "admin")
-            ]
-            for admin_agent in admin_agents:
+            claude_agents = []
+            for candidate in app_ctx.agents.values():
+                role_value = str(candidate.role)
+                if role_value not in (
+                    AgentRole.ADMIN.value,
+                    AgentRole.WORKER.value,
+                    "admin",
+                    "worker",
+                ):
+                    continue
+                cli_value = (
+                    candidate.ai_cli.value
+                    if hasattr(candidate.ai_cli, "value")
+                    else str(candidate.ai_cli or "")
+                )
+                if cli_value == "claude":
+                    claude_agents.append(candidate)
+            for target_agent in claude_agents:
                 try:
                     await capture_claude_actual_cost_for_agent(
                         app_ctx=app_ctx,
-                        agent=admin_agent,
-                        task_id=admin_agent.current_task,
+                        agent=target_agent,
+                        task_id=target_agent.current_task,
                     )
                 except Exception as e:
-                    logger.debug(f"Dashboard summary 取得時の Admin コスト更新をスキップ: {e}")
+                    logger.debug(
+                        f"Dashboard summary 取得時の Claude 実測コスト更新をスキップ: {e}"
+                    )
             if app_ctx.session_id and app_ctx.project_root:
                 try:
                     dashboard.save_markdown_dashboard(

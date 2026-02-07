@@ -14,6 +14,7 @@ from src.tools.model_profile import get_current_profile_settings
 def extract_claude_statusline_cost(output: str) -> tuple[float, str] | None:
     """Claude の statusLine からコスト値を抽出する。"""
     patterns = (
+        r"💰\s*\$\s*([0-9]+(?:\.[0-9]+)?)",
         r"(?:cost|Cost|COST)[^$\n]*\$\s*([0-9]+(?:\.[0-9]+)?)",
         r"\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:cost|Cost|COST)",
     )

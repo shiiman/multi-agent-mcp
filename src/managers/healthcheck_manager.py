@@ -225,7 +225,6 @@ class HealthcheckManager:
                 )
                 if code != 0:
                     return False, f"強制復旧に失敗しました: {stderr}"
-                await self.tmux_manager._run("send-keys", "-t", target, "clear", "Enter")
                 return True, f"エージェント {agent_id} に割り込みを送信しました"
             except Exception as e:
                 return False, f"強制復旧に失敗しました: {e}"

@@ -83,7 +83,23 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
                 content = dashboard_path.read_text(encoding="utf-8")
                 data = self._parse_yaml_front_matter(content)
                 if data:
+                    tasks = data.get("tasks") or []
+                    for task in tasks:
+                        description = task.get("description") or ""
+                        task_file_path = task.get("task_file_path")
+                        if description and not task_file_path:
+                            raise ValueError(
+                                "invalid_legacy_dashboard_format: description body is no longer supported"
+                            )
+                        if description and task_file_path and description != task_file_path:
+                            raise ValueError(
+                                "invalid_legacy_dashboard_format: description and task_file_path mismatch"
+                            )
                     return Dashboard(**data)
+            except ValueError as e:
+                if "invalid_legacy_dashboard_format" in str(e):
+                    raise
+                logger.warning(f"ダッシュボード読み込みエラー: {e}")
             except (yaml.YAMLError, OSError) as e:
                 logger.warning(f"ダッシュボード読み込みエラー: {e}")
 
