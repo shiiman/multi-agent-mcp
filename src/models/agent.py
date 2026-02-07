@@ -63,3 +63,7 @@ class Agent(BaseModel):
         default=None, description="ウィンドウ内のペインインデックス"
     )
     ai_cli: AICli | None = Field(default=None, description="使用するAI CLI（None=デフォルト）")
+    ai_bootstrapped: bool = Field(
+        default=False,
+        description="Worker が AI 起動済みかどうか（初回タスク送信後に True）",
+    )

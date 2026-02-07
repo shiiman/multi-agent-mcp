@@ -27,6 +27,7 @@ def tool_test_ctx(git_repo, settings):
     mock_tmux.send_keys = AsyncMock(return_value=True)
     mock_tmux.send_keys_to_pane = AsyncMock(return_value=True)
     mock_tmux.session_exists = AsyncMock(return_value=True)
+    mock_tmux.get_pane_current_command = AsyncMock(return_value="zsh")
     mock_tmux.set_pane_title = AsyncMock(return_value=True)
     mock_tmux.add_extra_worker_window = AsyncMock(return_value=True)
     mock_tmux._get_window_name = MagicMock(return_value="main")
@@ -691,7 +692,7 @@ class TestSendTaskToWorker:
             "worker_thinking_tokens": 4000,
         }
 
-        success = await _send_task_to_worker(
+        result = await _send_task_to_worker(
             app_ctx=app_ctx,
             agent=worker,
             task_content="テスト実装を進めてください",
@@ -705,7 +706,10 @@ class TestSendTaskToWorker:
             caller_agent_id="admin-001",
         )
 
-        assert success is True
+        assert result["task_sent"] is True
+        assert result["dispatch_mode"] == "bootstrap"
+        assert result["dispatch_error"] is None
+        assert worker.ai_bootstrapped is True
         task_path = (
             Path(git_repo)
             / ".multi-agent-mcp"
@@ -745,7 +749,7 @@ class TestSendTaskToWorker:
             "worker_thinking_tokens": 4000,
         }
 
-        success = await _send_task_to_worker(
+        result = await _send_task_to_worker(
             app_ctx=app_ctx,
             agent=worker,
             task_content="テスト実装を進めてください",
@@ -759,7 +763,109 @@ class TestSendTaskToWorker:
             caller_agent_id="admin-001",
         )
 
-        assert success is False
+        assert result["task_sent"] is False
+        assert result["dispatch_mode"] == "none"
+        assert result["dispatch_error"] == "task_id is required"
+
+    @pytest.mark.asyncio
+    async def test_send_task_to_worker_uses_followup_for_running_ai(self, mock_ctx, git_repo):
+        """ai_bootstrapped=True の Worker では followup モードで指示送信することをテスト。"""
+        from src.tools.agent import _send_task_to_worker
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+
+        worker = Agent(
+            id="worker-003",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.3",
+            session_name="test",
+            window_index=0,
+            pane_index=3,
+            working_dir=str(git_repo),
+            ai_bootstrapped=True,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-003"] = worker
+
+        profile_settings = {
+            "worker_model": "opus",
+            "worker_thinking_tokens": 4000,
+            "worker_reasoning_effort": "none",
+        }
+
+        result = await _send_task_to_worker(
+            app_ctx=app_ctx,
+            agent=worker,
+            task_content="フォローアップタスク",
+            task_id="task-followup",
+            branch="feature/followup",
+            worktree_path=str(git_repo),
+            session_id="issue-followup",
+            worker_index=2,
+            enable_worktree=False,
+            profile_settings=profile_settings,
+            caller_agent_id="admin-001",
+        )
+
+        assert result["task_sent"] is True
+        assert result["dispatch_mode"] == "followup"
+        assert result["dispatch_error"] is None
+        app_ctx.tmux.get_pane_current_command.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_task_to_worker_resets_bootstrap_on_followup_failure(
+        self, mock_ctx, git_repo
+    ):
+        """followup 失敗時に shell 判定なら ai_bootstrapped を False に戻すことをテスト。"""
+        from src.tools.agent import _send_task_to_worker
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        app_ctx.tmux.send_keys_to_pane = AsyncMock(return_value=False)
+        app_ctx.tmux.get_pane_current_command = AsyncMock(return_value="zsh")
+        now = datetime.now()
+
+        worker = Agent(
+            id="worker-004",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.4",
+            session_name="test",
+            window_index=0,
+            pane_index=4,
+            working_dir=str(git_repo),
+            ai_bootstrapped=True,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-004"] = worker
+
+        profile_settings = {
+            "worker_model": "opus",
+            "worker_thinking_tokens": 4000,
+            "worker_reasoning_effort": "none",
+        }
+
+        result = await _send_task_to_worker(
+            app_ctx=app_ctx,
+            agent=worker,
+            task_content="unknown pane command test",
+            task_id="task-unknown",
+            branch="feature/unknown",
+            worktree_path=str(git_repo),
+            session_id="issue-unknown",
+            worker_index=3,
+            enable_worktree=False,
+            profile_settings=profile_settings,
+            caller_agent_id="admin-001",
+        )
+
+        assert result["task_sent"] is False
+        assert result["dispatch_mode"] == "followup"
+        assert "pane_current_command=zsh" in result["dispatch_error"]
+        assert worker.ai_bootstrapped is False
 
 
 class TestAgentHelperFunctions:

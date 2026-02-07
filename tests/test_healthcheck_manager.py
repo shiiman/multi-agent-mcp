@@ -121,6 +121,52 @@ class TestHealthcheckMonitoring:
         assert second["escalated"] == []
 
     @pytest.mark.asyncio
+    async def test_monitor_resets_bootstrap_flag_after_recovery(self, temp_dir, settings):
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=False)
+        tmux.create_session = AsyncMock(return_value=True)
+        tmux.capture_pane_by_index = AsyncMock(return_value="")
+
+        ai_cli = AiCliManager(settings)
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            current_task="task-001",
+            ai_bootstrapped=True,
+            created_at=now,
+            last_activity=now - timedelta(seconds=100),
+        )
+
+        app_ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            agents={worker.id: worker},
+            project_root=str(temp_dir),
+            session_id="test-session",
+        )
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=app_ctx.agents,
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=10,
+            max_recovery_attempts=1,
+        )
+
+        result = await healthcheck.monitor_and_recover_workers(app_ctx)
+
+        assert len(result["recovered"]) == 1
+        assert worker.ai_bootstrapped is False
+
+    @pytest.mark.asyncio
     async def test_monitor_marks_task_failed_after_recovery_limit(self, temp_dir, settings):
         tmux = MagicMock()
         tmux.session_exists = AsyncMock(return_value=False)

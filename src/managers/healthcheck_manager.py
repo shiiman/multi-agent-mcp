@@ -402,6 +402,14 @@ class HealthcheckManager:
             task_key = current_key
             success, message = await self.attempt_recovery(agent_id, force=force_recovery)
             if success:
+                agent.ai_bootstrapped = False
+                if app_ctx is not None:
+                    try:
+                        from src.tools.helpers import save_agent_to_file
+
+                        save_agent_to_file(app_ctx, agent)
+                    except Exception:
+                        pass
                 self._recovery_failures.pop(task_key, None)
                 recovered.append(
                     {
@@ -419,6 +427,16 @@ class HealthcheckManager:
                 full_success, full_message = await self._run_full_recovery(app_ctx, agent_id)
 
             if full_success:
+                if app_ctx is not None:
+                    try:
+                        from src.tools.helpers import save_agent_to_file
+
+                        current_agent = app_ctx.agents.get(agent_id)
+                        if current_agent is not None:
+                            current_agent.ai_bootstrapped = False
+                            save_agent_to_file(app_ctx, current_agent)
+                    except Exception:
+                        pass
                 self._recovery_failures.pop(task_key, None)
                 recovered.append(
                     {

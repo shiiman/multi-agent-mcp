@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config.settings import AICli, Settings
+from src.config.workflow_guides import get_role_template_path
 from src.context import AppContext
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
@@ -25,6 +26,8 @@ from src.tools.helpers import (
 from src.tools.task_templates import generate_7section_task
 
 logger = logging.getLogger(__name__)
+
+_SHELL_COMMANDS = {"zsh", "bash", "sh", "fish"}
 
 
 def _get_next_worker_slot(
@@ -348,8 +351,61 @@ async def _send_task_to_worker(
     enable_worktree: bool,
     profile_settings: dict,
     caller_agent_id: str | None,
-) -> bool:
-    """Worker にタスクを送信する。"""
+) -> dict[str, Any]:
+    """Worker にタスクを送信する。
+
+    Returns:
+        {
+            "task_sent": bool,
+            "dispatch_mode": "bootstrap" | "followup" | "none",
+            "dispatch_error": str | None,
+        }
+    """
+    def _result(
+        task_sent: bool,
+        dispatch_mode: str = "none",
+        dispatch_error: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "task_sent": task_sent,
+            "dispatch_mode": dispatch_mode,
+            "dispatch_error": dispatch_error,
+        }
+
+    async def _reset_bootstrap_state_if_shell() -> str | None:
+        """異常時に pane の実行コマンドを確認し、必要なら bootstrap 状態を戻す。"""
+        if (
+            agent.session_name is None
+            or agent.window_index is None
+            or agent.pane_index is None
+        ):
+            return None
+
+        try:
+            current_command = await tmux.get_pane_current_command(
+                agent.session_name,
+                agent.window_index,
+                agent.pane_index,
+            )
+        except Exception as check_error:
+            logger.debug(
+                "Worker %s pane command の補正判定に失敗: %s",
+                worker_index + 1,
+                check_error,
+            )
+            return None
+
+        command_name = (current_command or "").strip().lower()
+        if command_name in _SHELL_COMMANDS:
+            agent.ai_bootstrapped = False
+            save_agent_to_file(app_ctx, agent)
+            logger.info(
+                "Worker %s の pane が shell (%s) のため ai_bootstrapped を False に戻しました",
+                worker_index + 1,
+                current_command,
+            )
+        return current_command
+
     try:
         project_root = Path(resolve_main_repo_root(worktree_path))
         if not task_id:
@@ -357,7 +413,7 @@ async def _send_task_to_worker(
                 "Worker %s へのタスク送信を中止: task_id が未指定です",
                 worker_index + 1,
             )
-            return False
+            return _result(False, dispatch_error="task_id is required")
         effective_task_id = task_id
 
         # メモリから関連情報を検索
@@ -391,42 +447,87 @@ async def _send_task_to_worker(
 
         tmux = app_ctx.tmux
         agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
+        if (
+            agent.session_name is None
+            or agent.window_index is None
+            or agent.pane_index is None
+        ):
+            return _result(False, dispatch_error="worker pane is not configured")
 
-        if enable_worktree:
-            change_dir = _build_change_directory_command(agent_cli_name, worktree_path)
-            await tmux.send_keys_to_pane(
+        worker_no = resolve_worker_number_from_slot(
+            app_ctx.settings,
+            agent.window_index,
+            agent.pane_index,
+        )
+        worker_model_default = profile_settings.get("worker_model")
+        worker_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
+        thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
+        reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
+
+        should_bootstrap = not bool(getattr(agent, "ai_bootstrapped", False))
+        if should_bootstrap:
+            # 初回: AI CLI を起動し、role template + task file を投入する。
+            bootstrap_command = app_ctx.ai_cli.build_stdin_command(
+                cli=agent_cli_name,
+                task_file_path=str(task_file),
+                worktree_path=worktree_path if enable_worktree else None,
+                project_root=str(project_root),
+                model=worker_model,
+                role="worker",
+                role_template_path=str(get_role_template_path("worker")),
+                thinking_tokens=thinking_tokens,
+                reasoning_effort=reasoning_effort,
+            )
+            success = await tmux.send_keys_to_pane(
                 agent.session_name,
                 agent.window_index,
                 agent.pane_index,
-                change_dir,
+                bootstrap_command,
+            )
+            dispatch_mode = "bootstrap"
+        else:
+            dispatch_mode = "followup"
+            if enable_worktree:
+                change_dir = _build_change_directory_command(agent_cli_name, worktree_path)
+                changed = await tmux.send_keys_to_pane(
+                    agent.session_name,
+                    agent.window_index,
+                    agent.pane_index,
+                    change_dir,
+                )
+                if not changed:
+                    current_command = await _reset_bootstrap_state_if_shell()
+                    return _result(
+                        False,
+                        dispatch_mode=dispatch_mode,
+                        dispatch_error=(
+                            "failed to change directory before followup dispatch"
+                            f" (pane_current_command={current_command or 'unknown'})"
+                        ),
+                    )
+
+            instruction = f"次のタスク指示ファイルを実行してください: {task_file}"
+            success = await tmux.send_keys_to_pane(
+                agent.session_name,
+                agent.window_index,
+                agent.pane_index,
+                instruction,
             )
 
-        instruction = f"次のタスク指示ファイルを実行してください: {task_file}"
-        success = await tmux.send_keys_to_pane(
-            agent.session_name,
-            agent.window_index,
-            agent.pane_index,
-            instruction,
-        )
         if success:
             agent.status = AgentStatus.BUSY
             agent.last_activity = datetime.now()
+            if dispatch_mode == "bootstrap":
+                agent.ai_bootstrapped = True
             save_agent_to_file(app_ctx, agent)
             dashboard.save_markdown_dashboard(project_root, session_id)
 
             # コスト記録（Worker CLI 起動）
             try:
-                worker_model_default = profile_settings.get("worker_model")
-                worker_no = resolve_worker_number_from_slot(
-                    app_ctx.settings,
-                    agent.window_index or 0,
-                    agent.pane_index or 0,
-                )
-                worker_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
                 dashboard.record_api_call(
                     ai_cli=agent_cli_name,
                     model=worker_model,
-                    estimated_tokens=profile_settings.get("worker_thinking_tokens", 4000),
+                    estimated_tokens=thinking_tokens,
                     agent_id=agent.id,
                     task_id=effective_task_id,
                 )
@@ -436,10 +537,20 @@ async def _send_task_to_worker(
             logger.info(
                 f"Worker {worker_index + 1} (ID: {agent.id}) にタスクを送信しました"
             )
-            return True
+            return _result(True, dispatch_mode=dispatch_mode)
         else:
+            correction_info = ""
+            if dispatch_mode == "followup":
+                current_command = await _reset_bootstrap_state_if_shell()
+                correction_info = (
+                    f" (pane_current_command={current_command or 'unknown'})"
+                )
             logger.warning(f"Worker {worker_index + 1}: タスク送信失敗")
-            return False
+            return _result(
+                False,
+                dispatch_mode=dispatch_mode,
+                dispatch_error=f"tmux send_keys_to_pane failed{correction_info}",
+            )
     except Exception as e:
         logger.warning(f"Worker {worker_index + 1}: タスク送信エラー - {e}")
-        return False
+        return _result(False, dispatch_error=str(e))

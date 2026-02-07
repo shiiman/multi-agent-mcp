@@ -54,7 +54,10 @@ class TmuxWorkspaceMixin:
         if await self.session_exists(project_name):
             await self._configure_session_options(session_name)
             await self._normalize_window_indices(session_name)
-            logger.info(f"メインセッション {session_name} は既に存在します（インデックス正規化済み）")
+            logger.info(
+                "メインセッション %s は既に存在します（インデックス正規化済み）",
+                session_name,
+            )
             return True
 
         if not await self._create_main_session_window(session_name, working_dir):
@@ -376,6 +379,33 @@ class TmuxWorkspaceMixin:
             logger.error(f"ペインキャプチャエラー: {stderr}")
             return ""
         return stdout
+
+    async def get_pane_current_command(
+        self, session: str, window: int, pane: int
+    ) -> str | None:
+        """指定ペインで現在実行中のコマンド名を取得する。
+
+        Args:
+            session: セッション名（プレフィックスなし）
+            window: ウィンドウ番号
+            pane: ペインインデックス
+
+        Returns:
+            コマンド名（取得失敗時は None）
+        """
+        target = self._pane_target(session, window, pane)
+        code, stdout, stderr = await self._run(
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{pane_current_command}",
+        )
+        if code != 0:
+            logger.warning(f"pane_current_command 取得エラー: {stderr}")
+            return None
+        command = stdout.strip()
+        return command or None
 
     async def set_pane_title(
         self, session: str, window: int, pane: int, title: str

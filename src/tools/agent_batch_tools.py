@@ -284,13 +284,18 @@ def register_batch_tools(mcp: FastMCP) -> None:
 
                 # 5. タスク送信（task_content が指定されている場合）
                 task_sent = False
+                dispatch_mode = "none"
+                dispatch_error = None
                 task_content = config.get("task_content")
                 if task_content and session_id:
-                    task_sent = await _send_task_to_worker(
+                    send_result = await _send_task_to_worker(
                         app_ctx, agent, task_content, task_id, branch, worktree_path,
                         session_id, worker_index, enable_worktree,
                         profile_settings, caller_agent_id,
                     )
+                    task_sent = bool(send_result.get("task_sent"))
+                    dispatch_mode = str(send_result.get("dispatch_mode", "none"))
+                    dispatch_error = send_result.get("dispatch_error")
 
                 return {
                     "success": True,
@@ -305,6 +310,8 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     "dashboard_updated": post_result["dashboard_updated"],
                     "task_assigned": task_assigned,
                     "task_sent": task_sent,
+                    "dispatch_mode": dispatch_mode,
+                    "dispatch_error": dispatch_error,
                 }
 
             except Exception as e:
@@ -380,9 +387,11 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     logger.warning(f"再利用Workerへのタスク割り当てエラー: {e}")
 
             task_sent = False
+            dispatch_mode = "none"
+            dispatch_error = None
             task_content = config.get("task_content")
             if task_content and session_id:
-                task_sent = await _send_task_to_worker(
+                send_result = await _send_task_to_worker(
                     app_ctx,
                     worker,
                     task_content,
@@ -395,6 +404,9 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     profile_settings,
                     caller_agent_id,
                 )
+                task_sent = bool(send_result.get("task_sent"))
+                dispatch_mode = str(send_result.get("dispatch_mode", "none"))
+                dispatch_error = send_result.get("dispatch_error")
 
             worker.last_activity = datetime.now()
             save_agent_to_file(app_ctx, worker)
@@ -410,6 +422,8 @@ def register_batch_tools(mcp: FastMCP) -> None:
                 "reused": True,
                 "task_assigned": task_assigned,
                 "task_sent": task_sent,
+                "dispatch_mode": dispatch_mode,
+                "dispatch_error": dispatch_error,
             }
 
         # 再利用 Worker と新規 Worker を並列処理

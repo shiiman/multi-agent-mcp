@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 
-from src.managers.tmux_manager import get_project_name
+from src.managers.tmux_manager import TmuxManager, get_project_name
 
 # tmuxが利用可能かチェック
 HAS_TMUX = shutil.which("tmux") is not None
@@ -30,6 +30,36 @@ class TestGetProjectName:
         result = get_project_name(str(git_repo))
         # git_repo フィクスチャは temp_dir/repo を作成
         assert result == "repo"
+
+
+class TestTmuxWorkspaceMixinUnit:
+    """TmuxWorkspaceMixin の単体テスト。"""
+
+    @pytest.mark.asyncio
+    async def test_get_pane_current_command_success(self, settings):
+        """pane_current_command を取得できることをテスト。"""
+        manager = TmuxManager(settings)
+
+        async def mock_run(*_args):
+            return (0, "zsh\n", "")
+
+        manager._run = mock_run  # type: ignore[assignment]
+
+        command = await manager.get_pane_current_command("session", 0, 1)
+        assert command == "zsh"
+
+    @pytest.mark.asyncio
+    async def test_get_pane_current_command_failure(self, settings):
+        """取得失敗時に None を返すことをテスト。"""
+        manager = TmuxManager(settings)
+
+        async def mock_run(*_args):
+            return (1, "", "error")
+
+        manager._run = mock_run  # type: ignore[assignment]
+
+        command = await manager.get_pane_current_command("session", 0, 1)
+        assert command is None
 
 
 @pytest.mark.skipif(not HAS_TMUX, reason="tmux is not installed")

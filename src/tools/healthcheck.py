@@ -119,6 +119,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         last_activity=datetime.now(),
         worktree_path=new_worktree_path,
         ai_cli=old_ai_cli,
+        ai_bootstrapped=False,
         session_name=old_session_name,
         window_index=old_window_index,
         pane_index=old_pane_index,

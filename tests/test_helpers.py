@@ -277,6 +277,22 @@ class TestAgentFilePersistence:
         assert isinstance(agent.created_at, datetime)
         assert isinstance(agent.last_activity, datetime)
 
+    def test_load_agents_defaults_ai_bootstrapped_when_missing(self, persistence_ctx, sample_agent):
+        """ai_bootstrapped 欠落時でも False で読み込めることをテスト。"""
+        save_agent_to_file(persistence_ctx, sample_agent)
+        agents_file = (
+            Path(persistence_ctx.project_root)
+            / ".multi-agent-mcp"
+            / persistence_ctx.session_id
+            / "agents.json"
+        )
+        raw = json.loads(agents_file.read_text(encoding="utf-8"))
+        raw["persist-agent-001"].pop("ai_bootstrapped", None)
+        agents_file.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        agents = load_agents_from_file(persistence_ctx)
+        assert agents["persist-agent-001"].ai_bootstrapped is False
+
     def test_sync_agents_from_file(self, persistence_ctx, sample_agent):
         """ファイルの内容が AppContext に同期されることをテスト。"""
         save_agent_to_file(persistence_ctx, sample_agent)
