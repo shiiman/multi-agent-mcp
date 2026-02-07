@@ -253,8 +253,22 @@ def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
         if agent_id in agents_data:
             del agents_data[agent_id]
 
-            with open(agents_file, "w", encoding="utf-8") as f:
-                json.dump(agents_data, f, ensure_ascii=False, indent=2, default=str)
+            content = json.dumps(
+                agents_data, ensure_ascii=False, indent=2, default=str
+            )
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(agents_file.parent), suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                os.replace(tmp_path, str(agents_file))
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
             logger.debug(f"エージェント {agent_id} を {agents_file} から削除しました")
             return True

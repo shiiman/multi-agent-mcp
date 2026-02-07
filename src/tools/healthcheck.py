@@ -15,11 +15,7 @@ def _mark_healthcheck_event(app_ctx: Any, caller_agent_id: str | None) -> None:
     """Admin のヘルスチェック実行時刻を記録する。"""
     if not caller_agent_id:
         return
-    events = getattr(app_ctx, "_admin_last_healthcheck_at", None)
-    if not isinstance(events, dict):
-        events = {}
-        app_ctx._admin_last_healthcheck_at = events
-    events[caller_agent_id] = datetime.now()
+    app_ctx._admin_last_healthcheck_at[caller_agent_id] = datetime.now()
 
 
 async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
@@ -118,7 +114,11 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         except Exception as e:
             logger.warning(f"worktree 操作に失敗: {e}")
             # 例外時もメインリポジトリにフォールバック
-            new_worktree_path = str(app_ctx.project_root) if app_ctx.project_root else old_worktree_path
+            new_worktree_path = (
+                str(app_ctx.project_root)
+                if app_ctx.project_root
+                else old_worktree_path
+            )
 
     from datetime import datetime
 

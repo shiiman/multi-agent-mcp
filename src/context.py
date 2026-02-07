@@ -2,6 +2,8 @@
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
 
 from src.config.settings import Settings
 from src.managers.ai_cli_manager import AiCliManager
@@ -42,3 +44,9 @@ class AppContext:
     """プロジェクトルート（.multi-agent-mcp/ の親ディレクトリ）"""
     session_id: str | None = None
     """セッションID（タスクディレクトリ名として使用）"""
+    _admin_poll_state: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Admin ごとのポーリングガード状態"""
+    _admin_last_healthcheck_at: dict[str, datetime] = field(
+        default_factory=dict
+    )
+    """Admin ごとの最終ヘルスチェック実行時刻"""

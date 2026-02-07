@@ -53,7 +53,7 @@ def _should_auto_stop(app_ctx) -> bool:
         summary = dashboard.get_summary()
         in_progress_tasks = int(summary.get("in_progress_tasks", 0))
         pending_tasks = int(summary.get("pending_tasks", 0))
-    except Exception:
+    except (OSError, ValueError, KeyError):
         in_progress_tasks = sum(
             1
             for worker in workers

@@ -1,6 +1,7 @@
 """IPC/メッセージング管理ツール。"""
 
 import logging
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import (
     ensure_ipc_manager,
     find_agents_by_role,
+    get_admin_poll_state,
     notify_agent_via_tmux,
     require_permission,
     save_agent_to_file,
@@ -26,30 +28,13 @@ _ADMIN_DASHBOARD_GRANT_SECONDS = 90
 _POLLING_BLOCKED_GRACE_SECONDS = 30
 
 
-def _get_admin_poll_state(app_ctx: Any, admin_id: str) -> dict[str, Any]:
-    """Admin ごとのポーリングガード状態を取得する。"""
-    state_map = getattr(app_ctx, "_admin_poll_state", None)
-    if not isinstance(state_map, dict):
-        state_map = {}
-        app_ctx._admin_poll_state = state_map
-    state = state_map.get(admin_id)
-    if not isinstance(state, dict):
-        state = {
-            "waiting_for_ipc": False,
-            "allow_dashboard_until": None,
-            "last_poll_blocked_at": None,
-        }
-        state_map[admin_id] = state
-    return state
-
-
 def _mark_admin_waiting_for_ipc(app_ctx: Any, admin_id: str) -> None:
-    state = _get_admin_poll_state(app_ctx, admin_id)
+    state = get_admin_poll_state(app_ctx, admin_id)
     state["waiting_for_ipc"] = True
 
 
 def _mark_admin_ipc_consumed(app_ctx: Any, admin_id: str) -> None:
-    state = _get_admin_poll_state(app_ctx, admin_id)
+    state = get_admin_poll_state(app_ctx, admin_id)
     state["waiting_for_ipc"] = False
     state["allow_dashboard_until"] = datetime.now() + timedelta(
         seconds=_ADMIN_DASHBOARD_GRANT_SECONDS
@@ -455,7 +440,8 @@ def register_tools(mcp: FastMCP) -> None:
                         notification_sent = True
                         notification_method = "tmux"
                     else:
-                        # tmux 全リトライ失敗後、macOS フォールバックは notify_agent_via_tmux 内で実行済み
+                        # tmux リトライ全失敗後、macOS フォールバックは
+                        # notify_agent_via_tmux 内で実行済み
                         notification_sent = True
                         notification_method = "macos_fallback"
                 else:
@@ -550,7 +536,7 @@ def register_tools(mcp: FastMCP) -> None:
         if is_admin_caller:
             unread_count = ipc.get_unread_count(agent_id)
             if unread_only and unread_count == 0:
-                poll_state = _get_admin_poll_state(app_ctx, caller_agent_id or agent_id)
+                poll_state = get_admin_poll_state(app_ctx, caller_agent_id or agent_id)
                 last_blocked = poll_state.get("last_poll_blocked_at")
                 now = datetime.now()
                 if last_blocked is None:

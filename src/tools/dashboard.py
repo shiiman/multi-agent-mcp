@@ -15,6 +15,7 @@ from src.tools.helpers import (
     ensure_ipc_manager,
     ensure_memory_manager,
     find_agents_by_role,
+    get_admin_poll_state,
     notify_agent_via_tmux,
     require_permission,
     save_agent_to_file,
@@ -25,27 +26,8 @@ logger = logging.getLogger(__name__)
 _ADMIN_DASHBOARD_GRANT_SECONDS = 90
 
 
-def _get_admin_poll_state(app_ctx: Any, admin_id: str) -> dict[str, Any]:
-    """Admin ごとのポーリングガード状態を取得する。"""
-    state_map = getattr(app_ctx, "_admin_poll_state", None)
-    if not isinstance(state_map, dict):
-        state_map = {}
-        app_ctx._admin_poll_state = state_map
-    state = state_map.get(admin_id)
-    if not isinstance(state, dict):
-        state = {
-            "waiting_for_ipc": False,
-            "allow_dashboard_until": None,
-        }
-        state_map[admin_id] = state
-    return state
-
-
 def _has_recent_healthcheck_event(app_ctx: Any, admin_id: str) -> bool:
-    events = getattr(app_ctx, "_admin_last_healthcheck_at", None)
-    if not isinstance(events, dict):
-        return False
-    at = events.get(admin_id)
+    at = app_ctx._admin_last_healthcheck_at.get(admin_id)
     if not isinstance(at, datetime):
         return False
     window = max(
@@ -56,7 +38,7 @@ def _has_recent_healthcheck_event(app_ctx: Any, admin_id: str) -> bool:
 
 
 def _should_block_admin_dashboard_polling(app_ctx: Any, admin_id: str) -> bool:
-    state = _get_admin_poll_state(app_ctx, admin_id)
+    state = get_admin_poll_state(app_ctx, admin_id)
     if not bool(state.get("waiting_for_ipc")):
         return False
 

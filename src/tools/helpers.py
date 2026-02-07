@@ -423,6 +423,35 @@ async def notify_agent_via_tmux(
     return False
 
 
+# ========== Admin ポーリングガード ==========
+
+
+def get_admin_poll_state(
+    app_ctx: AppContext, admin_id: str
+) -> dict[str, Any]:
+    """Admin ごとのポーリングガード状態を取得する。
+
+    AppContext._admin_poll_state に状態を保持し、未初期化なら
+    デフォルト dict を作成して返す。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        admin_id: Admin エージェントID
+
+    Returns:
+        ポーリングガード状態辞書
+    """
+    state = app_ctx._admin_poll_state.get(admin_id)
+    if not isinstance(state, dict):
+        state = {
+            "waiting_for_ipc": False,
+            "allow_dashboard_until": None,
+            "last_poll_blocked_at": None,
+        }
+        app_ctx._admin_poll_state[admin_id] = state
+    return state
+
+
 # ========== サブモジュールからの re-export ==========
 # 全ての既存 import パスを維持するため
 
