@@ -228,6 +228,7 @@ class TestBuildCliArgsWithPrompt:
             AICli.CLAUDE, "/tmp/test", "テストプロンプト"
         )
         assert "--prompt" not in args
+        assert "--dangerously-skip-permissions" in args
         assert args[-1] == "テストプロンプト"
 
     def test_codex_with_prompt(self, ai_cli_manager):
@@ -236,6 +237,7 @@ class TestBuildCliArgsWithPrompt:
             AICli.CODEX, "/tmp/test", "テストプロンプト"
         )
         assert "--message" not in args
+        assert "--dangerously-bypass-approvals-and-sandbox" in args
         assert args[-1] == "テストプロンプト"
 
     def test_gemini_with_prompt(self, ai_cli_manager):
@@ -243,6 +245,7 @@ class TestBuildCliArgsWithPrompt:
         args = ai_cli_manager._build_cli_args(
             AICli.GEMINI, "/tmp/test", "テストプロンプト"
         )
+        assert "--yolo" in args
         assert "--prompt" in args
         assert "テストプロンプト" in args
 
@@ -250,6 +253,17 @@ class TestBuildCliArgsWithPrompt:
         """プロンプトなしの場合 --prompt オプションが含まれないことをテスト。"""
         args = ai_cli_manager._build_cli_args(AICli.CLAUDE, "/tmp/test", None)
         assert "--prompt" not in args
+        assert "--dangerously-skip-permissions" in args
+
+    def test_codex_without_prompt_has_bypass_flag(self, ai_cli_manager):
+        """Codex CLI でプロンプトなしでも bypass フラグが含まれることをテスト。"""
+        args = ai_cli_manager._build_cli_args(AICli.CODEX, "/tmp/test", None)
+        assert "--dangerously-bypass-approvals-and-sandbox" in args
+
+    def test_gemini_without_prompt_has_yolo_flag(self, ai_cli_manager):
+        """Gemini CLI でプロンプトなしでも --yolo フラグが含まれることをテスト。"""
+        args = ai_cli_manager._build_cli_args(AICli.GEMINI, "/tmp/test", None)
+        assert "--yolo" in args
 
 
 class TestInitializeAgentIntegration:

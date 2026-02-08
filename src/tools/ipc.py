@@ -420,32 +420,42 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # イベント駆動通知: 受信者の状態に応じて通知方法を選択
-        # notify_agent_via_tmux はリトライ + macOS フォールバックを内包する
+        # macOS 通知は admin→owner の task_complete のみに制限
         notification_sent = False
         notification_method = None
         if receiver_id:
             sync_agents_from_file(app_ctx)
             receiver_agent = app_ctx.agents.get(receiver_id)
+            sender_agent = app_ctx.agents.get(sender_id)
+            # macOS 通知条件: admin→owner の task_complete のみ
+            is_admin_to_owner_complete = (
+                sender_agent
+                and receiver_agent
+                and str(getattr(sender_agent, "role", "")) == AgentRole.ADMIN.value
+                and str(getattr(receiver_agent, "role", "")) == AgentRole.OWNER.value
+                and msg_type == MessageType.TASK_COMPLETE
+            )
             if receiver_agent:
                 has_tmux_pane = (
                     receiver_agent.session_name
                     and receiver_agent.pane_index is not None
                 )
                 if has_tmux_pane:
-                    # tmux ペインがある場合: リトライ付き tmux 通知（失敗時は macOS フォールバック）
+                    # tmux ペインがある場合: リトライ付き tmux 通知
                     tmux_ok = await notify_agent_via_tmux(
-                        app_ctx, receiver_agent, msg_type.value, sender_id
+                        app_ctx, receiver_agent, msg_type.value, sender_id,
+                        allow_macos_fallback=is_admin_to_owner_complete,
                     )
                     if tmux_ok:
                         notification_sent = True
                         notification_method = "tmux"
                     else:
-                        # tmux リトライ全失敗後、macOS フォールバックは
-                        # notify_agent_via_tmux 内で実行済み
-                        notification_sent = True
-                        notification_method = "macos_fallback"
-                else:
-                    # tmux ペインがない場合（Owner など）は直接 macOS 通知
+                        notification_sent = is_admin_to_owner_complete
+                        notification_method = (
+                            "macos_fallback" if is_admin_to_owner_complete else None
+                        )
+                elif is_admin_to_owner_complete:
+                    # tmux ペインがない Owner への admin 完了通知のみ macOS 通知
                     from src.tools.helpers import _send_macos_notification
 
                     macos_ok = await _send_macos_notification(

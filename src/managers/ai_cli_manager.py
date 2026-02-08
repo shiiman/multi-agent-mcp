@@ -245,12 +245,20 @@ class AiCliManager:
         cmd = self.get_command(cli)
         args = [cmd]
 
-        # CLI固有のオプション（worktree_path は呼び出し側で cwd として使用）
-        if cli == AICli.CLAUDE or cli == AICli.CODEX:
+        if cli == AICli.CLAUDE:
+            # 許可プロンプトを抑止（tmux ペイン内でスタックするのを防止）
+            args.append("--dangerously-skip-permissions")
             if prompt:
                 args.append(prompt)
-        elif cli == AICli.GEMINI and prompt:
-            args.extend(["--prompt", prompt])
+        elif cli == AICli.CODEX:
+            # 許可プロンプトを抑止（tmux ペイン内でスタックするのを防止）
+            args.append("--dangerously-bypass-approvals-and-sandbox")
+            if prompt:
+                args.append(prompt)
+        elif cli == AICli.GEMINI:
+            args.append("--yolo")
+            if prompt:
+                args.extend(["--prompt", prompt])
 
         return args
 

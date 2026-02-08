@@ -333,6 +333,7 @@ class TmuxWorkspaceMixin:
         command: str,
         literal: bool = True,
         clear_input: bool = True,
+        enter_delay_ms: int = 0,
     ) -> bool:
         """指定したウィンドウ・ペインにキー入力を送信する。
 
@@ -344,6 +345,9 @@ class TmuxWorkspaceMixin:
             literal: Trueの場合、特殊文字をリテラルとして送信
             clear_input: Trueの場合、送信前に C-c/C-u で入力バッファをクリア。
                          通知送信時は False にすること（Claude Code の処理を中断させないため）
+            enter_delay_ms: テキスト送信後 Enter 送信前の待機時間（ミリ秒）。
+                            Codex 等の TUI アプリはテキストバッファリングに時間がかかるため、
+                            Enter が先に処理されてテキストが滞留する問題を防ぐ。
 
         Returns:
             成功した場合True
@@ -366,6 +370,10 @@ class TmuxWorkspaceMixin:
             logger.error(f"ペインへのキー送信エラー: {stderr}")
             return False
 
+        # TUI アプリ向けの Enter 送信前遅延
+        if enter_delay_ms > 0:
+            await asyncio.sleep(enter_delay_ms / 1000)
+
         # Enter キーを別途送信
         return await self._send_enter_key(target)
 
@@ -375,6 +383,14 @@ class TmuxWorkspaceMixin:
         expected = command.strip()
         if not expected:
             return False
+
+        output_lower = output.lower()
+
+        # Codex 固有の入力ヒントが出ている場合は未確定と判定する。
+        # "tab to queue message" が表示されている＝入力プロンプトに何かが残っている。
+        # この判定を先に行うことで、pending_line が空でも検出できる。
+        if "tab to queue message" in output_lower:
+            return True
 
         def _normalize(text: str) -> str:
             return re.sub(r"\s+", " ", text.strip().lower())
@@ -414,8 +430,7 @@ class TmuxWorkspaceMixin:
             if overlap >= 0.4:
                 return True
 
-        # Codex 固有の入力ヒントが出ており、入力行が残っていれば未確定
-        return "tab to queue message" in output.lower()
+        return False
 
     async def send_and_confirm_to_pane(
         self,
@@ -429,6 +444,10 @@ class TmuxWorkspaceMixin:
         confirm_codex_prompt: bool = False,
     ) -> bool:
         """ペイン送信後に必要なら Enter 再送で確定を保証する。"""
+        # Codex TUI はテキストバッファリングに時間がかかるため、
+        # テキスト送信と Enter 送信の間に遅延を入れる。
+        # これにより Enter が「空のEnter」として処理されてテキストが滞留する問題を防ぐ。
+        codex_delay = 150 if confirm_codex_prompt else 0
         sent = await self.send_keys_to_pane(
             session=session,
             window=window,
@@ -436,19 +455,26 @@ class TmuxWorkspaceMixin:
             command=command,
             literal=literal,
             clear_input=clear_input,
+            enter_delay_ms=codex_delay,
         )
         if not sent or not confirm_codex_prompt:
             return sent
 
         retries = max(0, int(getattr(self.settings, "codex_enter_retry_max", 3)))
         interval_ms = max(0, int(getattr(self.settings, "codex_enter_retry_interval_ms", 250)))
+        # Codex TUI の描画には初回キャプチャ前に十分な待機が必要
+        initial_wait_ms = max(interval_ms, 500)
         target = self._pane_target(session, window, pane)
+
+        # Codex の TUI 描画完了を待ってからキャプチャする
+        await asyncio.sleep(initial_wait_ms / 1000)
 
         for _ in range(retries):
             # Codex の画面出力は行数が増えやすいため広めに取得する
             output = await self.capture_pane_by_index(session, window, pane, lines=120)
             if not self._is_pending_codex_prompt(output, command):
                 return True
+            logger.debug("Codex プロンプトに未確定入力を検出、Enter を再送します")
             if not await self._send_enter_key(target):
                 logger.error("Codex Enter再送エラー")
                 return False
