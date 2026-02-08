@@ -117,6 +117,7 @@ def _pre_assign_pane_slots(
     for agent in agents.values():
         if (
             agent.role == AgentRole.WORKER
+            and agent.status != AgentStatus.TERMINATED
             and agent.session_name == project_name
             and agent.window_index is not None
             and agent.pane_index is not None
@@ -395,7 +396,10 @@ def _validate_batch_capacity(
     Returns:
         (reusable_workers, reuse_count, error_or_None)
     """
-    current_worker_count = sum(1 for a in agents.values() if a.role == AgentRole.WORKER)
+    current_worker_count = sum(
+        1 for a in agents.values()
+        if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
+    )
     requested_count = len(worker_configs)
     reusable_workers: list[Agent] = []
     if reuse_idle_workers:

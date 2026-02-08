@@ -476,6 +476,7 @@ from src.tools.helpers_managers import (  # noqa: E402, F401
 )
 from src.tools.helpers_persistence import (  # noqa: E402, F401
     _get_agents_file_path,
+    delete_agents_file,
     load_agents_from_file,
     remove_agent_from_file,
     save_agent_to_file,

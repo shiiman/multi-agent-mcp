@@ -218,6 +218,34 @@ def sync_agents_from_file(app_ctx: AppContext, force: bool = False) -> int:
     return added
 
 
+def delete_agents_file(app_ctx: AppContext) -> bool:
+    """agents.json ファイルを削除する。
+
+    セッション終了時に呼び出され、古いエージェント情報の残存を防ぐ。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+
+    Returns:
+        削除成功時 True、ファイル未存在や失敗時 False
+    """
+    project_root = app_ctx.project_root
+    if not project_root:
+        project_root = get_project_root_from_config()
+    if project_root:
+        project_root = resolve_main_repo_root(project_root)
+    session_id = ensure_session_id(app_ctx)
+    agents_file = _get_agents_file_path(project_root, session_id)
+    if agents_file and agents_file.exists():
+        try:
+            agents_file.unlink()
+            logger.info(f"agents.json を削除しました: {agents_file}")
+            return True
+        except OSError as e:
+            logger.warning(f"agents.json 削除に失敗: {e}")
+    return False
+
+
 def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
     """ファイルからエージェント情報を削除する。
 

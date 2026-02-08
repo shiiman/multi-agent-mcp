@@ -16,8 +16,7 @@ from src.tools.helpers import (
 from src.tools.session_env import _setup_mcp_directories
 from src.tools.session_state import (
     _check_completion_status,
-    _collect_session_names,
-    _reset_app_context,
+    cleanup_session_resources,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,32 +45,16 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
-        tmux = app_ctx.tmux
-        agents = app_ctx.agents
-
-        session_names = _collect_session_names(agents)
-        terminated_count = await tmux.cleanup_sessions(session_names)
-        agent_count = len(agents)
-        agents.clear()
-
-        # 常駐 healthcheck daemon を停止
-        try:
-            from src.managers.healthcheck_daemon import stop_healthcheck_daemon
-
-            await stop_healthcheck_daemon(app_ctx)
-        except Exception as e:
-            logger.warning(f"healthcheck daemon 停止に失敗: {e}")
-
-        # インメモリ状態をリセット（次のセッションで古い値が使われることを防ぐ）
-        _reset_app_context(app_ctx)
+        results = await cleanup_session_resources(
+            app_ctx, remove_worktrees=False
+        )
 
         return {
             "success": True,
-            "terminated_sessions": terminated_count,
-            "cleared_agents": agent_count,
+            **results,
             "message": (
-                f"{terminated_count} セッションを終了、"
-                f"{agent_count} エージェント情報をクリアしました"
+                f"{results['terminated_sessions']} セッションを終了、"
+                f"{results['cleared_agents']} エージェント情報をクリアしました"
             ),
         }
 
@@ -160,98 +143,23 @@ def register_tools(mcp: FastMCP) -> None:
                 **status,
             }
 
-        # クリーンアップ実行
-        tmux = app_ctx.tmux
-        agents = app_ctx.agents
-
-        session_names = _collect_session_names(agents)
-        terminated_count = await tmux.cleanup_sessions(session_names)
-        agent_count = len(agents)
-
-        # グローバルレジストリからエージェント情報を削除
-        from src.models.agent import AgentRole
-        from src.tools.helpers import remove_agents_by_owner
-
-        owner_agent = next(
-            (a for a in agents.values() if a.role == AgentRole.OWNER),
-            None,
+        # 統一クリーンアップ実行
+        results = await cleanup_session_resources(
+            app_ctx, remove_worktrees=True, repo_path=repo_path
         )
-        registry_removed = 0
-        if owner_agent:
-            registry_removed = remove_agents_by_owner(owner_agent.id)
-            logger.info(f"レジストリから {registry_removed} エージェントを削除しました")
-
-        agents.clear()
-
-        # 常駐 healthcheck daemon を停止
-        try:
-            from src.managers.healthcheck_daemon import stop_healthcheck_daemon
-
-            await stop_healthcheck_daemon(app_ctx)
-        except Exception as e:
-            logger.warning(f"healthcheck daemon 停止に失敗: {e}")
-
-        # worktree を削除（git worktree list から取得）
-        removed_worktrees = 0
-        worktree_errors = []
-
-        # repo_path が指定されていない場合は project_root を使用
-        main_repo_path = repo_path or app_ctx.project_root
-
-        if main_repo_path:
-            try:
-                worktree_manager = get_worktree_manager(app_ctx, main_repo_path)
-                worktrees = await worktree_manager.list_worktrees()
-
-                # メインリポジトリ以外の worktree を削除
-                for wt in worktrees:
-                    # メインリポジトリ自体はスキップ
-                    if wt.path == main_repo_path:
-                        continue
-
-                    # worktree ディレクトリ名に "worker" が含まれるものを削除
-                    # または -worktrees/ 配下のものを削除
-                    if "worker" in wt.path.lower() or "-worktrees/" in wt.path:
-                        try:
-                            success, msg = await worktree_manager.remove_worktree(
-                                wt.path, force=True
-                            )
-                            if success:
-                                removed_worktrees += 1
-                                logger.info(f"worktree を削除しました: {wt.path}")
-                            else:
-                                worktree_errors.append(f"{wt.path}: {msg}")
-                        except Exception as e:
-                            worktree_errors.append(f"{wt.path}: {e}")
-                            logger.warning(f"worktree 削除失敗: {wt.path} - {e}")
-            except Exception as e:
-                logger.warning(f"WorktreeManager の初期化に失敗: {e}")
-                worktree_errors.append(f"初期化エラー: {e}")
-
-        # ブランチ削除は WorktreeManager.remove_worktree が自動で行う
-        # (gtr rm または native 実装で worker- ブランチを削除)
-
-        # インメモリ状態をリセット（次のセッションで古い値が使われることを防ぐ）
-        _reset_app_context(app_ctx)
 
         result = {
             "success": True,
-            "terminated_sessions": terminated_count,
-            "cleared_agents": agent_count,
-            "removed_worktrees": removed_worktrees,
-            "registry_removed": registry_removed,
+            **results,
             "was_forced": force and not status["is_all_completed"],
             **status,
             "message": (
-                f"クリーンアップ完了: {terminated_count}セッション終了, "
-                f"{agent_count}エージェントクリア, "
-                f"{removed_worktrees}worktree削除, "
-                f"{registry_removed}レジストリ削除"
+                f"クリーンアップ完了: {results['terminated_sessions']}セッション終了, "
+                f"{results['cleared_agents']}エージェントクリア, "
+                f"{results['removed_worktrees']}worktree削除, "
+                f"{results['registry_removed']}レジストリ削除"
             ),
         }
-
-        if worktree_errors:
-            result["worktree_errors"] = worktree_errors
 
         return result
 
@@ -301,13 +209,23 @@ def register_tools(mcp: FastMCP) -> None:
         project_name = get_project_name(working_dir)
         session_exists = await tmux.session_exists(project_name)
         if session_exists:
-            return {
-                "success": False,
-                "error": (
-                    f"tmux セッション '{project_name}' は既に存在します。"
-                    "重複初期化は許可されていません。"
-                ),
-            }
+            # 既存セッションのリカバリ: 古いリソースをクリーンアップして再初期化
+            logger.warning(
+                f"既存の tmux セッション '{project_name}' を検出。"
+                "古いリソースをクリーンアップして再初期化します。"
+            )
+            await cleanup_session_resources(app_ctx, remove_worktrees=False)
+            # tmux セッションを明示的に kill
+            await tmux.kill_session(project_name)
+            # 再チェック: kill できなかった場合はエラー
+            if await tmux.session_exists(project_name):
+                return {
+                    "success": False,
+                    "error": (
+                        f"既存の tmux セッション '{project_name}' の削除に失敗しました。"
+                        "手動で `tmux kill-session` を実行してください。"
+                    ),
+                }
 
         # session_id を設定（後続の create_agent 等で使用）
         if session_id:

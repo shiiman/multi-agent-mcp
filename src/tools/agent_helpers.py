@@ -56,18 +56,22 @@ def _get_next_worker_slot(
     # プロファイル設定の max_workers を優先
     effective_max_workers = max_workers if max_workers is not None else settings.max_workers
 
-    # 最大Worker数チェック
+    # 最大Worker数チェック（TERMINATED Worker を除外）
     total_workers = len(
-        [a for a in agents.values() if a.role == AgentRole.WORKER]
+        [
+            a for a in agents.values()
+            if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
+        ]
     )
     if total_workers >= effective_max_workers:
         return None
 
-    # 現在のWorkerペイン割り当て状況を取得
+    # 現在のWorkerペイン割り当て状況を取得（TERMINATED Worker を除外）
     used_slots: set[tuple[int, int]] = set()
     for agent in agents.values():
         if (
             agent.role == AgentRole.WORKER
+            and agent.status != AgentStatus.TERMINATED
             and agent.session_name == session_name
             and agent.window_index is not None
             and agent.pane_index is not None
@@ -174,7 +178,10 @@ def _validate_agent_creation(
             }
 
     if agent_role == AgentRole.WORKER:
-        worker_count = sum(1 for a in agents.values() if a.role == AgentRole.WORKER)
+        worker_count = sum(
+            1 for a in agents.values()
+            if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
+        )
         if worker_count >= profile_max_workers:
             return None, None, {
                 "success": False,
