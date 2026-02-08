@@ -210,6 +210,35 @@ class TestGetNextWorkerSlot:
         slot = _get_next_worker_slot(agents, settings, "project")
         assert slot is None
 
+    def test_skips_terminated_workers_in_slot_allocation(self, settings):
+        """T17: TERMINATED Worker のスロットが空きとして扱われる。"""
+        agents = {}
+        # Worker 1: TERMINATED（pane 1 は再利用可能）
+        agents["w-1"] = _make_worker_agent("w-1", session_name="project", pane_index=1)
+        agents["w-1"].status = AgentStatus.TERMINATED
+        # Worker 2: IDLE（pane 2 は使用中）
+        agents["w-2"] = _make_worker_agent("w-2", session_name="project", pane_index=2)
+        agents["w-2"].status = AgentStatus.IDLE
+
+        slot = _get_next_worker_slot(agents, settings, "project")
+        # pane 1 が TERMINATED なので再利用可能
+        assert slot == (0, 1)
+
+    def test_counts_active_workers_only(self, settings):
+        """T18: TERMINATED Worker が上限カウントに含まれない。"""
+        agents = {}
+        # 2 IDLE Workers
+        agents["w-1"] = _make_worker_agent("w-1", session_name="project", pane_index=1)
+        agents["w-2"] = _make_worker_agent("w-2", session_name="project", pane_index=2)
+        # 1 TERMINATED Worker（カウント対象外）
+        agents["w-3"] = _make_worker_agent("w-3", session_name="project", pane_index=3)
+        agents["w-3"].status = AgentStatus.TERMINATED
+
+        # settings.max_workers=3 だが、実質 IDLE は 2 なので新規作成可能
+        # TERMINATED の pane 3 が空きとして再利用される
+        slot = _get_next_worker_slot(agents, settings, "project", max_workers=3)
+        assert slot == (0, 3)
+
 
 class TestPostCreateAgent:
     """_post_create_agent のテスト。"""
