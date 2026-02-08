@@ -348,16 +348,20 @@ async def notify_agent_via_tmux(
     agent: Any,
     msg_type_value: str,
     sender_id: str,
+    *,
+    allow_macos_fallback: bool = False,
 ) -> bool:
     """エージェントに tmux 経由で IPC 通知を送信する。
 
-    最大3回リトライし、全て失敗した場合は macOS 通知にフォールバックする。
+    最大3回リトライし、全て失敗かつ allow_macos_fallback=True の場合のみ
+    macOS 通知にフォールバックする。
 
     Args:
         app_ctx: アプリケーションコンテキスト
         agent: 通知対象のエージェント
         msg_type_value: メッセージタイプの値文字列
         sender_id: 送信元エージェントID
+        allow_macos_fallback: macOS フォールバック通知を許可するか
 
     Returns:
         送信成功時は True、失敗時は False
@@ -408,18 +412,19 @@ async def notify_agent_via_tmux(
         if attempt < _TMUX_NOTIFY_MAX_RETRIES - 1:
             await asyncio.sleep(_TMUX_NOTIFY_RETRY_INTERVAL)
 
-    # 全リトライ失敗: macOS 通知にフォールバック
+    # 全リトライ失敗
     logger.warning(
-        "tmux 通知が %d 回失敗。macOS 通知にフォールバック: %s",
+        "tmux 通知が %d 回失敗: %s",
         _TMUX_NOTIFY_MAX_RETRIES,
         getattr(agent, "id", "unknown"),
     )
-    fallback_ok = await _send_macos_notification(msg_type_value, sender_id)
-    if fallback_ok:
-        logger.info(
-            "macOS フォールバック通知を送信: %s",
-            getattr(agent, "id", "unknown"),
-        )
+    if allow_macos_fallback:
+        fallback_ok = await _send_macos_notification(msg_type_value, sender_id)
+        if fallback_ok:
+            logger.info(
+                "macOS フォールバック通知を送信: %s",
+                getattr(agent, "id", "unknown"),
+            )
     return False
 
 

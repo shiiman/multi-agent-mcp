@@ -528,13 +528,27 @@ class TestCodexPromptDetection:
 
         assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is True
 
-    def test_pending_codex_prompt_returns_false_after_confirmed(self):
+    def test_pending_codex_prompt_returns_true_with_tab_hint(self):
+        """'tab to queue message' ヒントが表示中は未確定と判定する。"""
         from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
 
         output = "\n".join([
             "processed",
             "›",
             "tab to queue message",
+        ])
+        command = "[IPC] 新しいメッセージ: task_progress from worker-001"
+
+        # "tab to queue message" はCodexが入力バッファにテキストがある状態を示す
+        assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is True
+
+    def test_pending_codex_prompt_returns_false_after_confirmed(self):
+        """入力確定後（プロンプト復帰・ヒントなし）は False を返す。"""
+        from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
+
+        output = "\n".join([
+            "processed",
+            "›",
         ])
         command = "[IPC] 新しいメッセージ: task_progress from worker-001"
 

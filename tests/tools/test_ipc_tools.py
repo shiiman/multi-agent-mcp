@@ -1,7 +1,7 @@
 """IPC/メッセージングツールのテスト。"""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -455,3 +455,173 @@ class TestRegisterAgentToIpc:
 
         assert result["success"] is True
         assert result["agent_id"] == "new-agent-001"
+
+
+class TestMacOSNotificationRestriction:
+    """macOS 通知が admin→owner の task_complete のみに制限されることをテスト。"""
+
+    @pytest.fixture
+    def _setup_agents(self, ipc_mock_ctx, git_repo):
+        """テスト用エージェントをセットアップする。"""
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        # Owner（tmux ペインなし）
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        # Admin
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        # Worker
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        # 品質ゲートを緩和して task_complete を通す
+        app_ctx.settings.quality_gate_strict = False
+        return app_ctx
+
+    def _get_send_message(self):
+        """send_message ツール関数を取得する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                return tool.fn
+        raise RuntimeError("send_message ツールが見つかりません")
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_setup_agents")
+    async def test_admin_to_owner_task_complete_sends_macos_notification(
+        self, ipc_mock_ctx
+    ):
+        """admin→owner の task_complete で macOS 通知が送信されることをテスト。"""
+        send_message = self._get_send_message()
+
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_notify:
+            result = await send_message(
+                sender_id="admin-001",
+                receiver_id="owner-001",
+                message_type="task_complete",
+                content="全タスク完了しました",
+                caller_agent_id="admin-001",
+                ctx=ipc_mock_ctx,
+            )
+
+            assert result["success"] is True
+            assert result["notification_method"] == "macos"
+            mock_notify.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_setup_agents")
+    async def test_worker_to_owner_does_not_send_macos_notification(
+        self, ipc_mock_ctx
+    ):
+        """worker→owner のメッセージで macOS 通知が送信されないことをテスト。"""
+        send_message = self._get_send_message()
+
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_notify:
+            result = await send_message(
+                sender_id="worker-001",
+                receiver_id="owner-001",
+                message_type="task_complete",
+                content="タスク完了しました",
+                caller_agent_id="worker-001",
+                ctx=ipc_mock_ctx,
+            )
+
+            assert result["success"] is True
+            assert result["notification_method"] is None
+            mock_notify.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_setup_agents")
+    async def test_admin_to_owner_non_complete_does_not_send_macos_notification(
+        self, ipc_mock_ctx
+    ):
+        """admin→owner の task_complete 以外で macOS 通知が送信されないことをテスト。"""
+        send_message = self._get_send_message()
+
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_notify:
+            result = await send_message(
+                sender_id="admin-001",
+                receiver_id="owner-001",
+                message_type="system",
+                content="システムメッセージ",
+                caller_agent_id="admin-001",
+                ctx=ipc_mock_ctx,
+            )
+
+            assert result["success"] is True
+            assert result["notification_method"] is None
+            mock_notify.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_setup_agents")
+    async def test_worker_to_admin_tmux_fallback_does_not_send_macos(
+        self, ipc_mock_ctx
+    ):
+        """worker→admin の tmux 失敗時に macOS フォールバックが発火しないことをテスト。"""
+        send_message = self._get_send_message()
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        # tmux 送信を常に失敗させる
+        app_ctx.tmux.send_with_rate_limit_to_pane = AsyncMock(return_value=False)
+
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_notify:
+            result = await send_message(
+                sender_id="worker-001",
+                receiver_id="admin-001",
+                message_type="task_complete",
+                content="タスク完了",
+                caller_agent_id="worker-001",
+                ctx=ipc_mock_ctx,
+            )
+
+            assert result["success"] is True
+            # tmux 失敗しても macOS フォールバックは発火しない（admin→owner 以外）
+            mock_notify.assert_not_called()
