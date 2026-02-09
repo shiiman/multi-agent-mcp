@@ -12,9 +12,11 @@ from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus, normalize_task_id
 from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import (
+    clear_owner_wait_state,
     ensure_ipc_manager,
     find_agents_by_role,
     get_admin_poll_state,
+    get_owner_wait_state,
     notify_agent_via_tmux,
     require_permission,
     save_agent_to_file,
@@ -528,6 +530,30 @@ def register_tools(mcp: FastMCP) -> None:
         if agent_id not in ipc.get_all_agent_ids():
             ipc.register_agent(agent_id)
 
+        sync_agents_from_file(app_ctx)
+        caller = app_ctx.agents.get(caller_agent_id)
+        caller_role = getattr(caller, "role", None)
+        is_admin_caller = caller_role in (AgentRole.ADMIN.value, "admin")
+        is_owner_caller = caller_role in (AgentRole.OWNER.value, "owner")
+
+        owner_wait_state: dict[str, Any] | None = None
+        if is_owner_caller and caller_agent_id:
+            owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
+            if (
+                owner_wait_state.get("waiting_for_admin")
+                and unread_only
+                and ipc.get_unread_count(agent_id) == 0
+            ):
+                return {
+                    "success": False,
+                    "error": (
+                        "polling_blocked: Owner は Admin からの通知待機中のため、"
+                        "unread=0 の連続 read_messages はできません"
+                    ),
+                    "next_action": "wait_for_ipc_notification_or_unlock_owner_wait",
+                    "waiting_for_admin_id": owner_wait_state.get("admin_id"),
+                }
+
         messages = ipc.read_messages(
             agent_id=agent_id,
             unread_only=unread_only,
@@ -539,10 +565,6 @@ def register_tools(mcp: FastMCP) -> None:
         dashboard_updated = False
         dashboard_updates_applied = 0
         dashboard_updates_skipped_reason: list[str] = []
-        sync_agents_from_file(app_ctx)
-        caller = app_ctx.agents.get(caller_agent_id)
-        caller_role = getattr(caller, "role", None)
-        is_admin_caller = caller_role in (AgentRole.ADMIN.value, "admin")
         if is_admin_caller:
             unread_count = ipc.get_unread_count(agent_id)
             if unread_only and unread_count == 0:
@@ -569,6 +591,29 @@ def register_tools(mcp: FastMCP) -> None:
                         "next_action": "wait_for_ipc_notification",
                     }
 
+        owner_wait_unlocked = False
+        if is_owner_caller and caller_agent_id and owner_wait_state:
+            waiting_for_admin = bool(owner_wait_state.get("waiting_for_admin"))
+            expected_admin_id = owner_wait_state.get("admin_id")
+            has_admin_notification = any(
+                (
+                    (msg.sender_id == expected_admin_id)
+                    if expected_admin_id
+                    else (
+                        (
+                            getattr(app_ctx.agents.get(msg.sender_id), "role", None)
+                            in (AgentRole.ADMIN.value, "admin")
+                        )
+                    )
+                )
+                for msg in messages
+            )
+            if waiting_for_admin and has_admin_notification:
+                clear_owner_wait_state(
+                    app_ctx, caller_agent_id, reason="admin_notification_consumed"
+                )
+                owner_wait_unlocked = True
+
         if is_admin_caller:
             (
                 dashboard_updated,
@@ -589,6 +634,7 @@ def register_tools(mcp: FastMCP) -> None:
             "dashboard_updated": dashboard_updated,
             "dashboard_updates_applied": dashboard_updates_applied,
             "dashboard_updates_skipped_reason": dashboard_updates_skipped_reason,
+            "owner_wait_unlocked": owner_wait_unlocked,
         }
 
     @mcp.tool()
@@ -621,6 +667,45 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "agent_id": agent_id,
             "unread_count": count,
+        }
+
+    @mcp.tool()
+    async def unlock_owner_wait(
+        reason: str = "manual_unlock",
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """Owner の待機ロックを手動解除する。
+
+        Args:
+            reason: 解除理由
+            caller_agent_id: 呼び出し元エージェントID（必須）
+            ctx: MCP Context
+
+        Returns:
+            解除結果
+        """
+        app_ctx, role_error = require_permission(ctx, "unlock_owner_wait", caller_agent_id)
+        if role_error:
+            return role_error
+
+        if not caller_agent_id:
+            return {
+                "success": False,
+                "error": "caller_agent_id が必要です",
+            }
+
+        state = get_owner_wait_state(app_ctx, caller_agent_id)
+        waiting_before = bool(state.get("waiting_for_admin"))
+        clear_owner_wait_state(app_ctx, caller_agent_id, reason=reason or "manual_unlock")
+
+        return {
+            "success": True,
+            "owner_id": caller_agent_id,
+            "waiting_before": waiting_before,
+            "waiting_after": False,
+            "unlock_reason": reason or "manual_unlock",
+            "message": "Owner 待機ロックを解除しました",
         }
 
     @mcp.tool()

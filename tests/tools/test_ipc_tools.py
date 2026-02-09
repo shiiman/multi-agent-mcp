@@ -372,6 +372,137 @@ class TestReadMessages:
         assert second["success"] is False
         assert "polling_blocked" in second["error"]
 
+    @pytest.mark.asyncio
+    async def test_read_messages_blocks_owner_polling_while_waiting(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Owner が待機ロック中に unread=0 を連続確認するとブロックされることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = await read_messages(
+            agent_id="owner-001",
+            unread_only=True,
+            caller_agent_id="owner-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "polling_blocked" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_read_messages_owner_unlocked_after_admin_message(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """待機中 Owner が Admin メッセージを読むと待機ロック解除されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+        app_ctx.ipc_manager.send_message(
+            sender_id="admin-001",
+            receiver_id="owner-001",
+            message_type=MessageType.SYSTEM,
+            content="進捗報告です",
+        )
+
+        result = await read_messages(
+            agent_id="owner-001",
+            unread_only=True,
+            caller_agent_id="owner-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["owner_wait_unlocked"] is True
+        state = app_ctx._owner_wait_state["owner-001"]
+        assert state["waiting_for_admin"] is False
+        assert state["unlock_reason"] == "admin_notification_consumed"
+
 
 class TestGetUnreadCount:
     """get_unread_count ツールのテスト。"""
@@ -413,6 +544,64 @@ class TestGetUnreadCount:
 
         assert result["success"] is True
         assert "unread_count" in result
+
+
+class TestUnlockOwnerWait:
+    """unlock_owner_wait ツールのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_unlock_owner_wait_idempotent(self, ipc_mock_ctx, git_repo):
+        """unlock_owner_wait が冪等に動作することをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        unlock_owner_wait = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "unlock_owner_wait":
+                unlock_owner_wait = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        first = await unlock_owner_wait(
+            reason="manual_recovery",
+            caller_agent_id="owner-001",
+            ctx=ipc_mock_ctx,
+        )
+        second = await unlock_owner_wait(
+            reason="manual_recovery_again",
+            caller_agent_id="owner-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert first["success"] is True
+        assert first["waiting_before"] is True
+        assert first["waiting_after"] is False
+        assert second["success"] is True
+        assert second["waiting_before"] is False
+        assert second["waiting_after"] is False
 
 
 class TestRegisterAgentToIpc:

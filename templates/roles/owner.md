@@ -96,6 +96,12 @@ Owner は **目的と期待する成果** を伝えますが、**実行方法** 
 計画書を `send_task` で Admin に送信したら、Owner は即座に待機状態に入ります。
 これにより、ユーザーは Owner に追加の指示を出せる状態が維持されます。
 
+**実装上の強制ルール**:
+- `send_task`（Owner→Admin）成功後、Owner は待機ロック状態になります
+- 待機ロック中は `read_messages` / `get_unread_count` / `unlock_owner_wait` 以外のツールは実行できません
+- `read_messages` で Admin 由来メッセージを読んだ時点で待機ロックが解除されます
+- 障害時のみ `unlock_owner_wait` で手動解除してください
+
 ```
 # ワークフロー
 1. ユーザーから指示を受ける
@@ -178,7 +184,8 @@ get_dashboard_summary(caller_agent_id=owner_id)
 | ツール | 用途 |
 |--------|------|
 | `read_messages` | Admin からの報告を待機（完了報告・コスト警告等） |
-| `get_dashboard_summary` | 進捗確認（必要な場合のみ、積極的な監視は不要） |
+| `get_unread_count` | 未読メッセージ数の確認 |
+| `unlock_owner_wait` | 障害時の手動待機解除（非常時のみ） |
 
 #### 完了フェーズ
 
@@ -209,9 +216,9 @@ get_dashboard_summary(caller_agent_id=owner_id)
 **Admin に `send_task` で計画書を送信したら、Owner は待機のみ。**
 
 ```
-# 進捗確認
-get_dashboard_summary()
-read_messages()  # Admin からのコスト警告も受信
+# 待機（実装レベルで強制）
+read_messages(unread_only=True)  # Admin からの通知を待機
+get_unread_count()               # 未読確認
 ```
 
 Admin が品質チェックをパスしたら、Owner に完了報告が届きます。

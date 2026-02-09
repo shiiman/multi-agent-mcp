@@ -191,6 +191,97 @@ class TestCheckToolPermission:
         result = check_tool_permission(app_ctx, "list_agents", "test-owner")
         assert result is None
 
+    def test_owner_wait_lock_blocks_non_allowed_tool(self, app_ctx):
+        """Owner が待機ロック中は許可外ツールを拒否する。"""
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = check_tool_permission(app_ctx, "send_task", "owner-001")
+        assert result is not None
+        assert result["success"] is False
+        assert "owner_wait_locked" in result["error"]
+        assert result["waiting_for_admin_id"] == "admin-001"
+
+    def test_owner_wait_lock_allows_read_messages(self, app_ctx):
+        """Owner 待機ロック中でも read_messages は許可される。"""
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = check_tool_permission(app_ctx, "read_messages", "owner-001")
+        assert result is None
+
+    def test_owner_wait_lock_allows_get_unread_count(self, app_ctx):
+        """Owner 待機ロック中でも get_unread_count は許可される。"""
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = check_tool_permission(app_ctx, "get_unread_count", "owner-001")
+        assert result is None
+
+    def test_owner_wait_lock_allows_unlock_tool(self, app_ctx):
+        """Owner 待機ロック中でも unlock_owner_wait は許可される。"""
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = check_tool_permission(app_ctx, "unlock_owner_wait", "owner-001")
+        assert result is None
+
     def test_disallowed_role_returns_error(self, app_ctx):
         """許可ロールに含まれないエージェントはエラーを返す。"""
         now = datetime.now()

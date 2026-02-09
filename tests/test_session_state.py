@@ -2,20 +2,16 @@
 
 import json
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.context import AppContext
-from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.session_state import (
     _clear_config_session_id,
     _reset_app_context,
     cleanup_session_resources,
     detect_stale_sessions,
 )
-
 
 # cleanup_session_resources 内で resolve_main_repo_root が呼ばれるのをモック
 _RESOLVE_PATCH = "src.tools.helpers_persistence.resolve_main_repo_root"
@@ -46,6 +42,19 @@ class TestResetAppContext:
         app_ctx._admin_last_healthcheck_at["admin-001"] = datetime.now()
         _reset_app_context(app_ctx)
         assert len(app_ctx._admin_last_healthcheck_at) == 0
+
+    def test_clears_owner_wait_state(self, app_ctx):
+        """Owner 待機ロック状態がクリアされること。"""
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": datetime.now(),
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+        _reset_app_context(app_ctx)
+        assert len(app_ctx._owner_wait_state) == 0
 
 
 class TestClearConfigSessionId:

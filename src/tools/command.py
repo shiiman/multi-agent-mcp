@@ -21,6 +21,7 @@ from src.tools.helpers import (
     ensure_dashboard_manager,
     get_mcp_tool_prefix_from_config,
     get_worktree_manager,
+    mark_owner_waiting_for_admin,
     require_permission,
     resolve_main_repo_root,
     save_agent_to_file,
@@ -456,10 +457,27 @@ def register_tools(mcp: FastMCP) -> None:
                 project_root, profile_settings["max_workers"],
             )
 
-        return await _send_task_to_admin_via_command(
+        result = await _send_task_to_admin_via_command(
             app_ctx, agent, agent_id, final_task_content, session_id,
             auto_enhance, branch_name, project_root, profile_settings,
         )
+
+        caller = app_ctx.agents.get(caller_agent_id) if caller_agent_id else None
+        caller_role = getattr(caller, "role", None)
+        is_owner_caller = caller_role in (AgentRole.OWNER.value, "owner")
+        if result.get("success") and is_owner_caller and caller_agent_id:
+            mark_owner_waiting_for_admin(
+                app_ctx=app_ctx,
+                owner_id=caller_agent_id,
+                admin_id=agent_id,
+                session_id=session_id,
+            )
+            result["owner_wait_locked"] = True
+            result["waiting_for_admin_id"] = agent_id
+        else:
+            result["owner_wait_locked"] = False
+
+        return result
 
     @mcp.tool()
     async def open_session(

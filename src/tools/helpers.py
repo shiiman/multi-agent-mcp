@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import subprocess
+from datetime import datetime
 from typing import Any
 
 from src.config.settings import load_settings_for_project, resolve_project_env_file
@@ -195,6 +196,7 @@ def get_agent_role(app_ctx: AppContext, agent_id: str) -> AgentRole | None:
 # 初期化フェーズで caller_agent_id なしで呼び出し可能なツール
 # （Owner 作成前に実行する必要があるため）
 BOOTSTRAP_TOOLS = {"init_tmux_workspace", "create_agent"}
+OWNER_WAIT_ALLOWED_TOOLS = {"read_messages", "get_unread_count", "unlock_owner_wait"}
 
 
 def check_tool_permission(
@@ -247,6 +249,22 @@ def check_tool_permission(
             "error": f"エージェント {caller_agent_id} が見つかりません",
         }
 
+    # Owner が待機ロック中の場合、許可ツール以外をブロック
+    if role == AgentRole.OWNER:
+        owner_state = get_owner_wait_state(app_ctx, caller_agent_id)
+        if owner_state.get("waiting_for_admin") and tool_name not in OWNER_WAIT_ALLOWED_TOOLS:
+            waiting_admin_id = owner_state.get("admin_id")
+            return {
+                "success": False,
+                "error": (
+                    "owner_wait_locked: Admin からの通知待機中のため、"
+                    f"`{tool_name}` は実行できません。"
+                ),
+                "next_action": "wait_for_admin_notification_or_unlock_owner_wait",
+                "waiting_for_admin_id": waiting_admin_id,
+                "allowed_tools": sorted(OWNER_WAIT_ALLOWED_TOOLS),
+            }
+
     # 許可ロールを取得
     allowed_roles = get_allowed_roles(tool_name)
 
@@ -280,6 +298,44 @@ def find_agents_by_role(app_ctx: AppContext, role: str) -> list[str]:
         for agent_id, agent in app_ctx.agents.items()
         if agent.role == role
     ]
+
+
+def get_owner_wait_state(app_ctx: AppContext, owner_id: str) -> dict[str, Any]:
+    """Owner ごとの待機ロック状態を取得する。"""
+    state = app_ctx._owner_wait_state.get(owner_id)
+    if not isinstance(state, dict):
+        state = {
+            "waiting_for_admin": False,
+            "admin_id": None,
+            "session_id": None,
+            "locked_at": None,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+        app_ctx._owner_wait_state[owner_id] = state
+    return state
+
+
+def mark_owner_waiting_for_admin(
+    app_ctx: AppContext, owner_id: str, admin_id: str, session_id: str | None
+) -> None:
+    """Owner を Admin 通知待機状態に遷移させる。"""
+    state = get_owner_wait_state(app_ctx, owner_id)
+    state["waiting_for_admin"] = True
+    state["admin_id"] = admin_id
+    state["session_id"] = session_id
+    state["locked_at"] = datetime.now()
+    state["unlocked_at"] = None
+    state["unlock_reason"] = None
+
+
+def clear_owner_wait_state(app_ctx: AppContext, owner_id: str, reason: str) -> None:
+    """Owner の待機ロック状態を解除する。"""
+    state = get_owner_wait_state(app_ctx, owner_id)
+    state["waiting_for_admin"] = False
+    state["admin_id"] = None
+    state["unlocked_at"] = datetime.now()
+    state["unlock_reason"] = reason
 
 
 # ========== MCP ツール用ショートカット ==========

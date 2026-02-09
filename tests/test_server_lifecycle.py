@@ -1,10 +1,6 @@
 """server.py ライフサイクルのテスト（異常終了シナリオ）。"""
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock
-
-import pytest
 
 from src.server import _save_shutdown_state
 

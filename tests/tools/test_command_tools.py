@@ -944,3 +944,123 @@ class TestSendTask:
         assert result["worktree_path"] is None
         mock_create_wt.assert_not_called()
         mock_send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_send_task_owner_to_admin_locks_owner_wait_state(
+        self, command_mock_ctx, git_repo
+    ):
+        """Owner から Admin へ send_task 成功時に待機ロックされることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="test task",
+            session_id="issue-owner-wait",
+            auto_enhance=False,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["owner_wait_locked"] is True
+        state = app_ctx._owner_wait_state["owner-001"]
+        assert state["waiting_for_admin"] is True
+        assert state["admin_id"] == "admin-001"
+        assert state["session_id"] == "issue-owner-wait"
+
+    @pytest.mark.asyncio
+    async def test_send_task_blocked_while_owner_wait_locked(self, command_mock_ctx, git_repo):
+        """Owner 待機ロック中に send_task が拒否されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-owner-wait",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="blocked task",
+            session_id="issue-owner-wait",
+            auto_enhance=False,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "owner_wait_locked" in result["error"]
