@@ -386,7 +386,6 @@ class AiCliManager:
 
         # CLI コマンドを構築
         args = self._build_cli_args(cli, worktree_path, prompt)
-        command = " ".join(shlex.quote(arg) for arg in args)
 
         # ターミナルを検出/選択
         if terminal == TerminalApp.AUTO:
@@ -394,10 +393,12 @@ class AiCliManager:
 
         # ターミナルで開く
         if terminal == TerminalApp.GHOSTTY:
-            return await self._open_in_ghostty(worktree_path, command)
+            return await self._open_in_ghostty(worktree_path, args)
         elif terminal == TerminalApp.ITERM2:
+            command = " ".join(shlex.quote(arg) for arg in args)
             return await self._open_in_iterm2(worktree_path, command)
         elif terminal == TerminalApp.TERMINAL:
+            command = " ".join(shlex.quote(arg) for arg in args)
             return await self._open_in_terminal_app(worktree_path, command)
         else:
             return False, f"未対応のターミナル: {terminal}"
@@ -424,24 +425,27 @@ class AiCliManager:
         return TerminalApp.TERMINAL
 
     async def _open_in_ghostty(
-        self, worktree_path: str, command: str
+        self, worktree_path: str, command_args: list[str]
     ) -> tuple[bool, str]:
         """Ghostty で新しいウィンドウを開いてコマンドを実行する。
 
         Args:
             worktree_path: 作業ディレクトリのパス
-            command: 実行するコマンド
+            command_args: 実行するコマンド引数（argv 形式）
 
         Returns:
             (成功したかどうか, メッセージ) のタプル
         """
         try:
-            # open -na Ghostty.app --args --working-directory={path} -e {command}
+            # NOTE:
+            # Ghostty(macOS) は -e の後ろを argv として受け取るため、
+            # 1つの文字列ではなく引数配列をそのまま渡す必要がある。
             proc = await asyncio.create_subprocess_exec(
                 "open", "-na", "Ghostty.app",
                 "--args",
                 f"--working-directory={worktree_path}",
-                "-e", command,
+                "-e",
+                *command_args,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
