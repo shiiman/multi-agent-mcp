@@ -3,9 +3,10 @@
 import json
 import logging
 import os
+import shutil
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from src.config.settings import get_mcp_dir
 from src.context import AppContext
@@ -136,6 +137,47 @@ def _clear_config_session_id(app_ctx: AppContext) -> bool:
         return False
 
 
+def cleanup_orphan_provisional_sessions(
+    project_root: str | None,
+    mcp_dir_name: str,
+    target_session_ids: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """指定された provisional-* セッションディレクトリのみ削除する。"""
+    result: dict[str, Any] = {
+        "removed_count": 0,
+        "removed_dirs": [],
+        "errors": [],
+    }
+    if not project_root:
+        return result
+
+    mcp_dir = Path(project_root) / mcp_dir_name
+    if not mcp_dir.exists() or not mcp_dir.is_dir():
+        return result
+
+    targets = {
+        session_id
+        for session_id in (target_session_ids or [])
+        if isinstance(session_id, str) and session_id.startswith("provisional-")
+    }
+    if not targets:
+        return result
+
+    for target in sorted(targets):
+        entry = mcp_dir / target
+        if not entry.is_dir():
+            continue
+        try:
+            shutil.rmtree(entry, ignore_errors=False)
+            result["removed_count"] += 1
+            result["removed_dirs"].append(target)
+        except OSError as e:
+            logger.warning("provisional ディレクトリ削除に失敗: %s (%s)", entry, e)
+            result["errors"].append(f"{target}: {e}")
+
+    return result
+
+
 async def cleanup_session_resources(
     app_ctx: AppContext,
     remove_worktrees: bool = False,
@@ -163,6 +205,11 @@ async def cleanup_session_resources(
         "dashboard_cleaned": False,
         "agents_file_deleted": False,
         "config_session_cleared": False,
+        "provisional_cleanup": {
+            "removed_count": 0,
+            "removed_dirs": [],
+            "errors": [],
+        },
     }
 
     tmux = app_ctx.tmux
@@ -256,7 +303,14 @@ async def cleanup_session_resources(
     # ⑧ config.json session_id クリア
     results["config_session_cleared"] = _clear_config_session_id(app_ctx)
 
-    # ⑨ インメモリ状態リセット
+    # ⑨ provisional-* 残骸削除
+    results["provisional_cleanup"] = cleanup_orphan_provisional_sessions(
+        app_ctx.project_root,
+        app_ctx.settings.mcp_dir,
+        target_session_ids=[app_ctx.session_id] if app_ctx.session_id else [],
+    )
+
+    # ⑩ インメモリ状態リセット
     _reset_app_context(app_ctx)
 
     return results

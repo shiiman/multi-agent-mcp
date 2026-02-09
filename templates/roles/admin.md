@@ -104,7 +104,7 @@ for task in tasks:
 │         ↓                                                           │
 │  3. 全 Worker 完了？ ─No→ 2 に戻る                                  │
 │         ↓ Yes                                                       │
-│  4. 全ブランチをベースブランチにマージ                              │
+│  4. merge_completed_tasks で統合差分を展開（no-commit）             │
 │         ↓                                                           │
 │  5. 品質チェック（idle Worker を再利用）                            │
 │         ↓                                                           │

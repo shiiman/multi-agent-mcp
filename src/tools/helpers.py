@@ -156,24 +156,29 @@ def ensure_project_root_from_caller(
             )
             return True
 
-        # project_root が未設定の場合、レジストリから取得
-        if not app_ctx.project_root:
-            project_root = get_project_root_from_registry(caller_agent_id)
-            if not _apply_project_root(project_root):
-                # レジストリに有効な値がない場合、呼び出し元エージェントから補完
-                agent = app_ctx.agents.get(caller_agent_id)
-                if agent:
-                    for candidate in (agent.working_dir, agent.worktree_path):
-                        if _apply_project_root(candidate):
-                            break
+        # レジストリの値が現在の app_ctx と異なる場合は再同期する
+        registry_project_root = get_project_root_from_registry(caller_agent_id)
+        if registry_project_root:
+            if app_ctx.project_root != registry_project_root:
+                _apply_project_root(registry_project_root)
+        elif not app_ctx.project_root:
+            # レジストリに有効な値がない場合、呼び出し元エージェントから補完
+            agent = app_ctx.agents.get(caller_agent_id)
+            if agent:
+                for candidate in (agent.working_dir, agent.worktree_path):
+                    if _apply_project_root(candidate):
+                        break
 
-        # session_id が未設定の場合、レジストリから取得
-        if not app_ctx.session_id:
-            session_id = get_session_id_from_registry(caller_agent_id)
-            if session_id:
-                app_ctx.session_id = session_id
+        registry_session_id = get_session_id_from_registry(caller_agent_id)
+        if registry_session_id:
+            if app_ctx.session_id != registry_session_id:
+                previous_session_id = app_ctx.session_id
+                app_ctx.session_id = registry_session_id
                 logger.debug(
-                    f"caller_agent_id {caller_agent_id} から session_id を設定: {session_id}"
+                    "caller_agent_id %s から session_id を同期: %s -> %s",
+                    caller_agent_id,
+                    previous_session_id,
+                    registry_session_id,
                 )
 
 

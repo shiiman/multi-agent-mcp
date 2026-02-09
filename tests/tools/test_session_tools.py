@@ -213,3 +213,55 @@ class TestSessionHelpers:
         assert result["success"] is True
         app_ctx.tmux.cleanup_sessions.assert_awaited_once_with(["scoped-session"])
         app_ctx.tmux.cleanup_all_sessions.assert_not_awaited()
+
+
+class TestInitTmuxWorkspace:
+    """init_tmux_workspace のテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_init_tmux_workspace_cleans_orphan_provisional_dirs(
+        self, session_mock_ctx, git_repo
+    ):
+        """正式 session_id 設定時に孤立 provisional-* が削除されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        app_ctx = session_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "provisional-old0001"
+        app_ctx.project_root = str(git_repo)
+        app_ctx.tmux.session_exists = AsyncMock(return_value=False)
+        app_ctx.tmux.create_main_session = AsyncMock(return_value=True)
+
+        mcp_dir = git_repo / app_ctx.settings.mcp_dir
+        source = mcp_dir / "provisional-old0001"
+        orphan = mcp_dir / "provisional-orphan9999"
+        source.mkdir(parents=True, exist_ok=True)
+        orphan.mkdir(parents=True, exist_ok=True)
+        (source / "agents.json").write_text("{}", encoding="utf-8")
+        (orphan / "agents.json").write_text("{}", encoding="utf-8")
+
+        result = await init_tmux_workspace(
+            working_dir=str(git_repo),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="issue-123",
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["provisional_migration"]["executed"] is True
+        assert result["provisional_cleanup"]["removed_count"] == 0
+        assert result["provisional_cleanup"]["removed_dirs"] == []
+        assert not source.exists()
+        assert orphan.exists()

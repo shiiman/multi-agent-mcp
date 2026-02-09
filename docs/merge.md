@@ -74,3 +74,15 @@ merge_completed_tasks(
 - 実行後、統合ブランチに **unstaged diff** が残ります。
 - commit / push は自動実行しません。
 - 差分確認後に `git add` / `git commit` を行ってください。
+
+## Owner 完了通知ゲートとの整合
+
+`send_message(message_type="task_complete")` の品質ゲートでは、
+completed タスクの `branch` ごとに次のいずれかを満たす必要があります。
+
+- `branch` がすでに `HEAD` に取り込まれている
+- `branch` の変更ファイル集合が、統合ブランチ作業ツリーの diff
+  （`git diff --name-only` + `git diff --cached --name-only`）に含まれている
+
+つまり、`merge_completed_tasks` による no-commit 展開のままでも、
+変更ファイルが diff に反映されていれば完了通知を送信できます。

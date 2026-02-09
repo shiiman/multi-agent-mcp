@@ -576,6 +576,50 @@ class TestRequirePermission:
         assert error["success"] is False
 
 
+class TestEnsureProjectRootFromCaller:
+    """ensure_project_root_from_caller の再同期挙動テスト。"""
+
+    @patch("src.tools.helpers.refresh_app_settings")
+    @patch("src.tools.helpers.get_session_id_from_registry")
+    @patch("src.tools.helpers.get_project_root_from_registry")
+    def test_syncs_session_id_even_when_already_set(
+        self, mock_project_root, mock_session_id, _mock_refresh, app_ctx
+    ):
+        """session_id が既存値でもレジストリ値へ同期することをテスト。"""
+        from src.tools.helpers import ensure_project_root_from_caller
+
+        mock_project_root.return_value = None
+        mock_session_id.return_value = "new-session"
+        app_ctx.session_id = "old-session"
+
+        ensure_project_root_from_caller(app_ctx, "worker-001")
+
+        assert app_ctx.session_id == "new-session"
+
+    @patch("src.tools.helpers.refresh_app_settings")
+    @patch("src.tools.helpers.get_session_id_from_registry")
+    @patch("src.tools.helpers.get_project_root_from_registry")
+    def test_syncs_project_root_even_when_already_set(
+        self, mock_project_root, mock_session_id, mock_refresh, app_ctx, temp_dir
+    ):
+        """project_root が既存値でもレジストリ値へ同期することをテスト。"""
+        from src.tools.helpers import ensure_project_root_from_caller
+
+        old_root = temp_dir / "old-root"
+        new_root = temp_dir / "new-root"
+        old_root.mkdir(parents=True, exist_ok=True)
+        new_root.mkdir(parents=True, exist_ok=True)
+
+        app_ctx.project_root = str(old_root)
+        mock_project_root.return_value = str(new_root)
+        mock_session_id.return_value = None
+
+        ensure_project_root_from_caller(app_ctx, "worker-001")
+
+        assert app_ctx.project_root == str(new_root)
+        mock_refresh.assert_called_once_with(app_ctx, str(new_root))
+
+
 class TestEnsureDashboardManager:
     """ensure_dashboard_manager のセッション切替挙動テスト。"""
 

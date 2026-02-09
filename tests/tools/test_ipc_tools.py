@@ -1,5 +1,6 @@
 """IPC/メッセージングツールのテスト。"""
 
+import subprocess
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +15,7 @@ from src.managers.persona_manager import PersonaManager
 from src.managers.scheduler_manager import SchedulerManager
 from src.managers.tmux_manager import TmuxManager
 from src.models.agent import Agent, AgentRole, AgentStatus
+from src.models.dashboard import TaskStatus
 
 
 @pytest.fixture
@@ -286,6 +288,269 @@ class TestSendMessage:
         assert result["success"] is False
         assert result["next_action"] == "replan_and_reassign"
         assert result["gate"]["status"] == "needs_replan"
+
+    @pytest.mark.asyncio
+    async def test_admin_task_complete_passes_when_branch_files_covered_by_diff(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """branch の変更ファイルが diff に含まれていれば task_complete が通ることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        feature_branch = "feature/task-impl"
+        target_file = git_repo / "feature_impl.txt"
+        target_file.write_text("base\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(git_repo), "add", "feature_impl.txt"],
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_repo), "commit", "-m", "add base file"],
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_repo), "checkout", "-b", feature_branch],
+            capture_output=True,
+            check=True,
+        )
+        target_file.write_text("feature change\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(git_repo), "commit", "-am", "feature change"],
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_repo), "checkout", "main"],
+            capture_output=True,
+            check=True,
+        )
+        # no-commit preview と同様に統合ブランチへ差分を展開した状態を作る
+        target_file.write_text("preview applied\n", encoding="utf-8")
+
+        impl_task = app_ctx.dashboard_manager.create_task(
+            title="実装タスク",
+            branch=feature_branch,
+        )
+        app_ctx.dashboard_manager.update_task_status(impl_task.id, TaskStatus.COMPLETED)
+        quality_task = app_ctx.dashboard_manager.create_task(
+            title="test smoke",
+            branch=None,
+        )
+        app_ctx.dashboard_manager.update_task_status(quality_task.id, TaskStatus.COMPLETED)
+
+        result = await send_message(
+            sender_id="admin-001",
+            receiver_id="owner-001",
+            message_type="task_complete",
+            content="実装完了しました",
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["gate"]["status"] == "passed"
+
+    @pytest.mark.asyncio
+    async def test_admin_task_complete_fails_when_diff_missing_branch_files(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """branch 変更の一部が diff に無いと task_complete がブロックされることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        feature_branch = "feature/task-partial"
+        first_file = git_repo / "a.txt"
+        second_file = git_repo / "b.txt"
+        first_file.write_text("a-base\n", encoding="utf-8")
+        second_file.write_text("b-base\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(git_repo), "add", "a.txt", "b.txt"],
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_repo), "commit", "-m", "base files"],
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_repo), "checkout", "-b", feature_branch],
+            capture_output=True,
+            check=True,
+        )
+        first_file.write_text("a-feature\n", encoding="utf-8")
+        second_file.write_text("b-feature\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(git_repo), "commit", "-am", "feature update"],
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(git_repo), "checkout", "main"],
+            capture_output=True,
+            check=True,
+        )
+        # 片方のファイルだけ差分化（もう片方は不足）
+        first_file.write_text("a-preview\n", encoding="utf-8")
+
+        impl_task = app_ctx.dashboard_manager.create_task(
+            title="実装修正",
+            branch=feature_branch,
+        )
+        app_ctx.dashboard_manager.update_task_status(impl_task.id, TaskStatus.COMPLETED)
+        quality_task = app_ctx.dashboard_manager.create_task(
+            title="qa test",
+            branch=None,
+        )
+        app_ctx.dashboard_manager.update_task_status(quality_task.id, TaskStatus.COMPLETED)
+
+        result = await send_message(
+            sender_id="admin-001",
+            receiver_id="owner-001",
+            message_type="task_complete",
+            content="実装完了しました",
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert result["gate"]["status"] == "needs_replan"
+        assert "未統合の完了タスクブランチがあります" in " ".join(result["gate"]["reasons"])
+        assert result["gate"]["branch_integration"][0]["missing_files"] == ["b.txt"]
+
+    @pytest.mark.asyncio
+    async def test_admin_task_complete_reports_branch_not_found(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """存在しない branch の completed タスクが branch_not_found で報告されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        missing_task = app_ctx.dashboard_manager.create_task(
+            title="実装タスク",
+            branch="feature/not-found",
+        )
+        app_ctx.dashboard_manager.update_task_status(missing_task.id, TaskStatus.COMPLETED)
+        quality_task = app_ctx.dashboard_manager.create_task(title="test verify")
+        app_ctx.dashboard_manager.update_task_status(quality_task.id, TaskStatus.COMPLETED)
+
+        result = await send_message(
+            sender_id="admin-001",
+            receiver_id="owner-001",
+            message_type="task_complete",
+            content="実装完了しました",
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert result["gate"]["status"] == "needs_replan"
+        assert any("branch_not_found" in reason for reason in result["gate"]["reasons"])
+        assert result["gate"]["branch_integration"][0]["branch_not_found"] is True
 
     @pytest.mark.asyncio
     async def test_worker_request_reroutes_invalid_receiver_to_admin(

@@ -18,6 +18,7 @@ from src.tools.helpers import (
 from src.tools.session_env import _setup_mcp_directories
 from src.tools.session_state import (
     _check_completion_status,
+    cleanup_orphan_provisional_sessions,
     cleanup_session_resources,
 )
 
@@ -283,6 +284,11 @@ def register_tools(mcp: FastMCP) -> None:
             "target_session_id": session_id,
             "source_removed": False,
         }
+        provisional_cleanup_result = {
+            "removed_count": 0,
+            "removed_dirs": [],
+            "errors": [],
+        }
         if session_id:
             migration_result = _migrate_provisional_session_dir(
                 project_root=resolved_project_root,
@@ -314,6 +320,11 @@ def register_tools(mcp: FastMCP) -> None:
                     project_root=resolved_project_root,
                     session_id=session_id,
                 )
+            provisional_cleanup_result = cleanup_orphan_provisional_sessions(
+                resolved_project_root,
+                app_ctx.settings.mcp_dir,
+                target_session_ids=[migration_result.get("source_session_id")],
+            )
 
         # gtr 自動確認・設定
         gtr_status = {
@@ -377,6 +388,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_id": session_id,
                     "gtr_status": gtr_status,
                     "provisional_migration": migration_result,
+                    "provisional_cleanup": provisional_cleanup_result,
                     "message": message,
                 }
             else:
@@ -384,6 +396,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "success": False,
                     "gtr_status": gtr_status,
                     "provisional_migration": migration_result,
+                    "provisional_cleanup": provisional_cleanup_result,
                     "error": message,
                 }
         else:
@@ -396,6 +409,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_id": session_id,
                     "gtr_status": gtr_status,
                     "provisional_migration": migration_result,
+                    "provisional_cleanup": provisional_cleanup_result,
                     "message": "メインセッションをバックグラウンドで作成しました",
                 }
             else:
@@ -403,5 +417,6 @@ def register_tools(mcp: FastMCP) -> None:
                     "success": False,
                     "gtr_status": gtr_status,
                     "provisional_migration": migration_result,
+                    "provisional_cleanup": provisional_cleanup_result,
                     "error": "メインセッションの作成に失敗しました",
                 }

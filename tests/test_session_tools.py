@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.tools.session_state import cleanup_session_resources
+from src.tools.session_state import (
+    cleanup_orphan_provisional_sessions,
+    cleanup_session_resources,
+)
 from src.tools.session_tools import _migrate_provisional_session_dir
 
 # cleanup_session_resources 内で resolve_main_repo_root が呼ばれるのをモック
@@ -165,3 +168,20 @@ class TestProvisionalSessionMigration:
             new_session_id="issue-002",
         )
         assert result["executed"] is False
+
+    def test_cleans_up_orphan_provisional_directories(self, temp_dir):
+        """孤立した provisional-* ディレクトリを削除できることをテスト。"""
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        orphan = mcp_dir / "provisional-old1234"
+        orphan.mkdir(parents=True, exist_ok=True)
+        (orphan / "agents.json").write_text("{}", encoding="utf-8")
+
+        result = cleanup_orphan_provisional_sessions(
+            project_root=str(temp_dir),
+            mcp_dir_name=".multi-agent-mcp",
+            target_session_ids=["provisional-old1234"],
+        )
+
+        assert result["removed_count"] == 1
+        assert result["removed_dirs"] == ["provisional-old1234"]
+        assert not orphan.exists()

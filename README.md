@@ -271,7 +271,7 @@ claude mcp list
 
 ```
 # ターミナルを開いてtmuxワークスペースを構築
-init_tmux_workspace("/path/to/project")
+init_tmux_workspace("/path/to/project", session_id="issue-123")
 
 # Ownerエージェントを作成
 create_agent("owner", "/path/to/project")

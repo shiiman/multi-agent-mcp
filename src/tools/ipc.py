@@ -181,8 +181,175 @@ def _is_ui_related_task(title: str, description: str, metadata: dict | None = No
     return any(keyword in text for keyword in keywords)
 
 
-def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[str]:
-    """現在ブランチに未マージのブランチ一覧を返す。"""
+def _run_git_capture(project_root: str, args: list[str]) -> tuple[bool, str]:
+    """git コマンドを実行し、成否と出力を返す。"""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", project_root, *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as e:
+        return False, str(e)
+    if proc.returncode != 0:
+        return False, (proc.stderr or proc.stdout).strip()
+    return True, (proc.stdout or "").strip()
+
+
+def _branch_exists(project_root: str, branch: str) -> bool:
+    """ブランチが存在するか判定する。"""
+    ok, _ = _run_git_capture(project_root, ["rev-parse", "--verify", branch])
+    return ok
+
+
+def _is_branch_merged_into_head(project_root: str, branch: str) -> bool:
+    """ブランチが HEAD に取り込まれているか判定する。"""
+    ok, _ = _run_git_capture(
+        project_root,
+        ["merge-base", "--is-ancestor", branch, "HEAD"],
+    )
+    return ok
+
+
+def _split_lines(output: str) -> set[str]:
+    """改行区切り出力を重複なしの集合へ変換する。"""
+    return {line.strip() for line in output.splitlines() if line.strip()}
+
+
+def _get_working_tree_diff_files(project_root: str) -> tuple[set[str], str | None]:
+    """作業ツリー差分（staged + unstaged）のファイル集合を返す。"""
+    unstaged_ok, unstaged_out = _run_git_capture(project_root, ["diff", "--name-only"])
+    if not unstaged_ok:
+        return set(), unstaged_out
+    staged_ok, staged_out = _run_git_capture(
+        project_root,
+        ["diff", "--cached", "--name-only"],
+    )
+    if not staged_ok:
+        return set(), staged_out
+    return _split_lines(unstaged_out) | _split_lines(staged_out), None
+
+
+def _get_branch_changed_files(project_root: str, branch: str) -> tuple[set[str], str | None]:
+    """branch が HEAD から変更したファイル集合を返す。"""
+    ok, out = _run_git_capture(
+        project_root,
+        ["diff", "--name-only", f"HEAD...{branch}"],
+    )
+    if not ok:
+        return set(), out
+    return _split_lines(out), None
+
+
+def _is_branch_tree_equal_to_head(
+    project_root: str, branch: str
+) -> tuple[bool, str | None]:
+    """HEAD と branch のツリー内容が同一か判定する。"""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", project_root, "diff", "--quiet", "HEAD", branch],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as e:
+        return False, str(e)
+
+    if proc.returncode == 0:
+        return True, None
+    if proc.returncode == 1:
+        return False, None
+    return False, (proc.stderr or proc.stdout).strip()
+
+
+def _is_branch_changes_already_applied(
+    project_root: str, branch: str
+) -> tuple[bool, str | None]:
+    """branch の変更が patch-id ベースで HEAD に適用済みか判定する。"""
+    ok, out = _run_git_capture(project_root, ["cherry", "HEAD", branch])
+    if not ok:
+        return False, out
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    if not lines:
+        return False, None
+    return all(line.startswith("-") for line in lines), None
+
+
+def _check_branch_integration_state(
+    project_root: str, branches: list[str]
+) -> list[dict[str, Any]]:
+    """完了ブランチが統合済みか（merge/cherry/tree-equal/diff包含）を判定する。"""
+    diff_files, diff_error = _get_working_tree_diff_files(project_root)
+    if diff_error:
+        logger.debug("作業ツリー差分の取得に失敗: %s", diff_error)
+    branch_states: list[dict[str, Any]] = []
+
+    for branch in sorted(set(branches)):
+        if not branch:
+            continue
+        if not _branch_exists(project_root, branch):
+            branch_states.append(
+                {
+                    "branch": branch,
+                    "merged": False,
+                    "tree_equal_to_head": False,
+                    "changes_already_applied": False,
+                    "covered_by_diff": False,
+                    "branch_not_found": True,
+                    "missing_files": [],
+                }
+            )
+            continue
+
+        merged = _is_branch_merged_into_head(project_root, branch)
+        changed_files, branch_error = _get_branch_changed_files(project_root, branch)
+        tree_equal_to_head, tree_equal_error = _is_branch_tree_equal_to_head(
+            project_root, branch
+        )
+        changes_already_applied, cherry_error = _is_branch_changes_already_applied(
+            project_root, branch
+        )
+        integration_error = branch_error or tree_equal_error or cherry_error
+        if tree_equal_error:
+            logger.debug("branch tree 比較に失敗: %s (%s)", branch, tree_equal_error)
+        if cherry_error:
+            logger.debug("branch cherry 判定に失敗: %s (%s)", branch, cherry_error)
+        if branch_error:
+            logger.debug("ブランチ変更ファイルの取得に失敗: %s (%s)", branch, branch_error)
+        if integration_error:
+            branch_states.append(
+                {
+                    "branch": branch,
+                    "merged": merged,
+                    "tree_equal_to_head": tree_equal_to_head,
+                    "changes_already_applied": changes_already_applied,
+                    "covered_by_diff": False,
+                    "branch_not_found": False,
+                    "missing_files": [],
+                    "error": integration_error,
+                }
+            )
+            continue
+
+        missing_files = sorted(changed_files - diff_files)
+        branch_states.append(
+            {
+                "branch": branch,
+                "merged": merged,
+                "tree_equal_to_head": tree_equal_to_head,
+                "changes_already_applied": changes_already_applied,
+                "covered_by_diff": len(missing_files) == 0,
+                "branch_not_found": False,
+                "missing_files": missing_files,
+            }
+        )
+
+    return branch_states
+
+
+def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[dict[str, Any]]:
+    """現在ブランチへの統合状態を返す。"""
     try:
         current_branch = subprocess.check_output(
             ["git", "-C", project_root, "rev-parse", "--abbrev-ref", "HEAD"],
@@ -193,31 +360,8 @@ def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[st
         logger.debug("ブランチマージ状態の確認に失敗: %s", e)
         return []
 
-    unmerged: list[str] = []
-    for branch in sorted(set(branches)):
-        if not branch or branch == current_branch:
-            continue
-        try:
-            exists = subprocess.run(
-                ["git", "-C", project_root, "rev-parse", "--verify", branch],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            if exists.returncode != 0:
-                continue
-            merged = subprocess.run(
-                ["git", "-C", project_root, "merge-base", "--is-ancestor", branch, "HEAD"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            if merged.returncode != 0:
-                unmerged.append(branch)
-        except Exception as e:
-            logger.debug("ブランチ %s のマージ判定に失敗: %s", branch, e)
-            continue
-    return unmerged
+    filtered = [branch for branch in branches if branch and branch != current_branch]
+    return _check_branch_integration_state(project_root, filtered)
 
 
 def _validate_admin_completion_gate(
@@ -285,13 +429,44 @@ def _validate_admin_completion_gate(
 
     branches = [t.branch for t in completed_tasks if t.branch]
     if app_ctx.project_root and branches:
-        unmerged = _check_branch_merge_state(str(app_ctx.project_root), branches)
-        if unmerged:
-            reasons.append(f"未マージの完了タスクブランチがあります: {', '.join(unmerged[:5])}")
-            suggestions.append("未マージブランチを統合後に再度完了通知を送ってください。")
+        integration_states = _check_branch_merge_state(str(app_ctx.project_root), branches)
+        not_integrated = [
+            s
+            for s in integration_states
+            if not (
+                s.get("merged")
+                or s.get("covered_by_diff")
+                or s.get("tree_equal_to_head")
+                or s.get("changes_already_applied")
+            )
+        ]
+        if not_integrated:
+            branch_names = ", ".join([s["branch"] for s in not_integrated[:5]])
+            reasons.append(f"未統合の完了タスクブランチがあります: {branch_names}")
+            detail_lines: list[str] = []
+            for state in not_integrated[:5]:
+                if state.get("branch_not_found"):
+                    detail_lines.append(f"{state['branch']}: branch_not_found")
+                    continue
+                missing_files = state.get("missing_files") or []
+                if missing_files:
+                    sample = ", ".join(missing_files[:3])
+                    if len(missing_files) > 3:
+                        sample = f"{sample}, ..."
+                    detail_lines.append(
+                        f"{state['branch']}: diff に不足 ({len(missing_files)} files: {sample})"
+                    )
+                elif state.get("error"):
+                    detail_lines.append(f"{state['branch']}: 判定エラー ({state['error']})")
+            if detail_lines:
+                reasons.extend(detail_lines)
+            suggestions.append(
+                "merge_completed_tasks で差分を展開し、"
+                "統合ブランチ上の diff を確認後に再通知してください。"
+            )
 
     if reasons:
-        return False, {
+        gate_payload: dict[str, Any] = {
             "status": "needs_replan",
             "reasons": reasons,
             "suggestions": suggestions,
@@ -299,6 +474,11 @@ def _validate_admin_completion_gate(
                 "max_iterations": settings.quality_check_max_iterations,
                 "same_issue_limit": settings.quality_check_same_issue_limit,
             },
+        }
+        if app_ctx.project_root and branches:
+            gate_payload["branch_integration"] = integration_states
+        return False, {
+            **gate_payload,
         }
 
     return True, {"status": "passed"}

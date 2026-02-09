@@ -182,6 +182,29 @@ class TestCleanupSessionResources:
         assert "session_id" not in config
 
     @pytest.mark.asyncio
+    async def test_removes_orphan_provisional_dirs(self, app_ctx, temp_dir, settings):
+        """cleanup 時に孤立 provisional-* ディレクトリが削除されることをテスト。"""
+        mcp_dir = temp_dir / settings.mcp_dir
+        provisional_a = mcp_dir / "provisional-abcd1234"
+        provisional_b = mcp_dir / "provisional-efgh5678"
+        provisional_a.mkdir(parents=True, exist_ok=True)
+        provisional_b.mkdir(parents=True, exist_ok=True)
+        (provisional_a / "agents.json").write_text("{}", encoding="utf-8")
+        (provisional_b / "agents.json").write_text("{}", encoding="utf-8")
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.session_id = "provisional-abcd1234"
+
+        with patch(
+            _HEALTHCHECK_PATCH, new_callable=AsyncMock,
+        ), patch(_RESOLVE_PATCH, return_value=str(temp_dir)):
+            results = await cleanup_session_resources(app_ctx)
+
+        assert results["provisional_cleanup"]["removed_count"] == 1
+        assert results["provisional_cleanup"]["removed_dirs"] == ["provisional-abcd1234"]
+        assert not provisional_a.exists()
+        assert provisional_b.exists()
+
+    @pytest.mark.asyncio
     async def test_removes_registry(self, app_ctx, temp_dir):
         """T8: グローバルレジストリが削除されること。"""
         app_ctx.project_root = str(temp_dir)
