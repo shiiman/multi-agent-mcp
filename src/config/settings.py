@@ -214,6 +214,10 @@ class Settings(BaseSettings):
     """MCP 設定ディレクトリ名（デフォルト: .multi-agent-mcp）"""
 
     # Worktree 設定
+    enable_git: bool = True
+    """git 前提機能を有効にするか（デフォルト: True）。
+    False の場合、git/worktree/gtr 前提の機能は無効化される。"""
+
     enable_worktree: bool = True
     """git worktree を使用するか（デフォルト: True）。
     False にすると Worker は全て同一ディレクトリで作業する。"""
@@ -549,6 +553,10 @@ class Settings(BaseSettings):
         per_worker = getattr(self, f"worker_model_{worker_index}")
         return per_worker or profile_worker_model
 
+    def is_worktree_enabled(self) -> bool:
+        """worktree の実効有効状態を返す。"""
+        return bool(self.enable_git and self.enable_worktree)
+
 
 def get_mcp_dir() -> str:
     """MCP ディレクトリ名を取得する。
@@ -580,3 +588,35 @@ def load_settings_for_project(project_root: str | os.PathLike[str] | None) -> Se
         return Settings(_env_file=env_file)
     # model_config 側の env_file を使わず、環境変数 + デフォルトのみで構築
     return Settings(_env_file=None)
+
+
+def load_effective_settings_for_project(project_root: str | os.PathLike[str] | None) -> Settings:
+    """指定 project_root の有効設定を読み込む。
+
+    .env の設定に加えて、config.json の runtime override（enable_git）を適用する。
+
+    Args:
+        project_root: プロジェクトルートパス
+
+    Returns:
+        runtime override 適用済み Settings
+    """
+    settings = load_settings_for_project(project_root)
+    if not project_root:
+        return settings
+
+    config_file = Path(project_root) / settings.mcp_dir / "config.json"
+    if not config_file.exists():
+        return settings
+
+    try:
+        with open(config_file, encoding="utf-8") as f:
+            config = json.load(f)
+        enable_git = config.get("enable_git")
+        if isinstance(enable_git, bool):
+            settings.enable_git = enable_git
+    except (OSError, ValueError, json.JSONDecodeError):
+        # 設定ファイル破損時は .env 設定を優先して継続
+        pass
+
+    return settings

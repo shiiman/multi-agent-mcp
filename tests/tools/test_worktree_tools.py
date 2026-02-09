@@ -389,6 +389,50 @@ class TestCreateWorktree:
         assert result["success"] is True
         assert result.get("skipped") is True
 
+    @pytest.mark.asyncio
+    async def test_create_worktree_returns_error_when_git_disabled(
+        self, worktree_mock_ctx, git_repo
+    ):
+        """enable_git=false のとき create_worktree がエラーになることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.worktree import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_worktree = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_worktree":
+                create_worktree = tool.fn
+                break
+        assert create_worktree is not None
+
+        app_ctx = worktree_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        app_ctx.settings.enable_git = False
+        app_ctx.settings.enable_worktree = True
+        result = await create_worktree(
+            repo_path=str(git_repo),
+            worktree_path="/tmp/test-worktree",
+            branch="feature/test",
+            caller_agent_id="owner-001",
+            ctx=worktree_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "MCP_ENABLE_GIT=false" in result["error"]
+
 
 class TestRemoveWorktree:
     """remove_worktree ツールのテスト。"""

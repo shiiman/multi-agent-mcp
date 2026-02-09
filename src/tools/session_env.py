@@ -5,7 +5,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from src.config.settings import Settings, load_settings_for_project
+from src.config.settings import (
+    Settings,
+    load_effective_settings_for_project,
+)
 from src.tools.helpers_git import resolve_main_repo_root
 
 logger = logging.getLogger(__name__)
@@ -50,7 +53,7 @@ def generate_env_template(settings: Settings | None = None) -> str:
     Returns:
         .env ファイルの内容
     """
-    s = settings or load_settings_for_project(Path.cwd())
+    s = settings or load_effective_settings_for_project(Path.cwd())
     v = _format_env_value
 
     # 長い変数名の値を事前に取得（E501 対策）
@@ -77,6 +80,10 @@ MCP_MCP_DIR={v(s.mcp_dir)}
 # ========== エージェント設定 ==========
 # Worker エージェントの最大数
 MCP_MAX_WORKERS={v(s.max_workers)}
+
+# ========== Git 設定 ==========
+# git 前提機能を有効にするか（false で非gitディレクトリを許可）
+MCP_ENABLE_GIT={v(s.enable_git)}
 
 # ========== Worktree 設定 ==========
 # git worktree を使用するか（false で Non-Worktree モード）
@@ -194,7 +201,10 @@ MCP_SCREENSHOT_EXTENSIONS={v(s.screenshot_extensions)}
 
 
 def _setup_mcp_directories(
-    working_dir: str, settings: Settings | None = None, session_id: str | None = None
+    working_dir: str,
+    settings: Settings | None = None,
+    session_id: str | None = None,
+    enable_git_override: bool | None = None,
 ) -> dict[str, Any]:
     """MCP ディレクトリと .env ファイルをセットアップする。
 
@@ -202,19 +212,46 @@ def _setup_mcp_directories(
         working_dir: 作業ディレクトリのパス
         settings: MCP 設定（省略時は新規作成）
         session_id: セッションID（Admin/Worker で共有、省略時は None）
+        enable_git_override: git 有効設定の上書き値（省略時は config/.env を使用）
 
     Returns:
         セットアップ結果（created_dirs, env_created, env_path, config_created）
     """
     import json
 
+    working_dir_path = Path(working_dir).expanduser()
+
+    # enable_git_override=False の場合は git ルート解決を行わず working_dir を採用する。
     try:
-        project_root = Path(resolve_main_repo_root(working_dir))
+        if enable_git_override is False:
+            project_root = working_dir_path
+        else:
+            project_root = Path(resolve_main_repo_root(working_dir))
     except ValueError:
-        project_root = Path(working_dir).expanduser()
+        project_root = working_dir_path
 
     if settings is None:
-        settings = load_settings_for_project(project_root)
+        settings = load_effective_settings_for_project(project_root)
+
+    config_file = project_root / settings.mcp_dir / "config.json"
+    existing_enable_git: bool | None = None
+    if config_file.exists():
+        try:
+            with open(config_file, encoding="utf-8") as f:
+                existing = json.load(f)
+            if isinstance(existing.get("enable_git"), bool):
+                existing_enable_git = existing["enable_git"]
+        except Exception as e:
+            logger.warning(f"既存 config.json の読み込みに失敗: {e}")
+
+    effective_enable_git = (
+        enable_git_override
+        if enable_git_override is not None
+        else existing_enable_git
+        if existing_enable_git is not None
+        else settings.enable_git
+    )
+    settings.enable_git = effective_enable_git
 
     mcp_dir = project_root / settings.mcp_dir
     created_dirs = []
@@ -247,6 +284,7 @@ def _setup_mcp_directories(
     mcp_tool_prefix = "mcp__multi-agent-mcp__"
     config_data = {
         "mcp_tool_prefix": mcp_tool_prefix,
+        "enable_git": effective_enable_git,
     }
     # session_id が指定されている場合は保存（必須）
     if session_id:
@@ -269,6 +307,9 @@ def _setup_mcp_directories(
             if existing.get("mcp_tool_prefix") != mcp_tool_prefix:
                 existing["mcp_tool_prefix"] = mcp_tool_prefix
                 updated = True
+            if existing.get("enable_git") != effective_enable_git:
+                existing["enable_git"] = effective_enable_git
+                updated = True
             # session_id が指定されている場合は更新
             if session_id and existing.get("session_id") != session_id:
                 existing["session_id"] = session_id
@@ -287,4 +328,5 @@ def _setup_mcp_directories(
         "config_created": config_created,
         "config_path": str(config_file),
         "project_root": str(project_root),
+        "enable_git": effective_enable_git,
     }

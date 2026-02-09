@@ -6,7 +6,7 @@ Admin および Worker エージェント用のタスク指示テンプレート
 from datetime import datetime
 from pathlib import Path
 
-from src.config.settings import Settings, load_settings_for_project
+from src.config.settings import Settings, load_effective_settings_for_project
 from src.config.template_loader import get_template_loader
 
 
@@ -40,7 +40,7 @@ def generate_admin_task(
         Admin 用のタスク指示（Markdown形式）
     """
     if settings is None:
-        settings = load_settings_for_project(working_dir or Path.cwd())
+        settings = load_effective_settings_for_project(working_dir or Path.cwd())
 
     max_iterations = settings.quality_check_max_iterations
     same_issue_limit = settings.quality_check_same_issue_limit
@@ -51,8 +51,25 @@ def generate_admin_task(
 
     loader = get_template_loader()
 
-    # enable_worktree 設定に応じてテンプレートを切り替え
-    if settings.enable_worktree:
+    # git/worktree 設定に応じてテンプレートを切り替え
+    if not settings.enable_git:
+        return loader.render(
+            "tasks",
+            "admin_task_no_git",
+            session_id=session_id,
+            agent_id=agent_id,
+            plan_content=plan_content,
+            branch_name=branch_name,
+            working_dir=working_dir or ".",
+            worker_count=worker_count,
+            memory_context=memory_context_display,
+            project_name=project_name,
+            mcp_tool_prefix=mcp_tool_prefix,
+            timestamp=timestamp,
+            max_iterations=max_iterations,
+            same_issue_limit=same_issue_limit,
+        )
+    if settings.is_worktree_enabled():
         return loader.render(
             "tasks",
             "admin_task",
@@ -100,6 +117,7 @@ def generate_7section_task(
     branch_name: str | None = None,
     admin_id: str | None = None,
     mcp_tool_prefix: str = "mcp__multi-agent-mcp__",
+    enable_git: bool = True,
 ) -> str:
     """7セクション構造のタスクファイルを生成する。
 
@@ -115,6 +133,7 @@ def generate_7section_task(
         branch_name: 作業ブランチ名（省略可）
         admin_id: Admin エージェントID（省略可）
         mcp_tool_prefix: MCP ツールの完全名プレフィックス
+        enable_git: git 機能を有効化しているか
 
     Returns:
         7セクション構造のMarkdown文字列
@@ -135,9 +154,10 @@ def generate_7section_task(
     memory_context_display = memory_context if memory_context else "（関連情報なし）"
 
     loader = get_template_loader()
+    template_name = "worker_task" if enable_git else "worker_task_no_git"
     return loader.render(
         "tasks",
-        "worker_task",
+        template_name,
         task_id=task_id,
         agent_id=agent_id,
         task_description=task_description,

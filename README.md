@@ -1,10 +1,21 @@
 # Multi-Agent MCP
 
-Claude Code + tmux + git worktree を使用したマルチエージェントワークフローの MCP サーバー。
+Claude Code + tmux + git worktree（または非gitディレクトリ）を使用したマルチエージェントワークフローの MCP サーバー。
 
 ## 概要
 
 このMCPサーバーは、複数のClaude Codeインスタンスを tmux セッションで管理し、並列作業を実現します。
+`MCP_ENABLE_GIT=false` を設定すると、git 管理されていないディレクトリでも実行できます。
+
+### Gitモード
+
+| モード | 設定 | 挙動 |
+|------|------|------|
+| Git有効（デフォルト） | `MCP_ENABLE_GIT=true` | git リポジトリ前提。worktree/gtr 機能を利用可能 |
+| Git無効 | `MCP_ENABLE_GIT=false` | 非gitディレクトリで実行可能。git/worktree/gtr 機能は無効 |
+
+`init_tmux_workspace(enable_git=...)` を指定すると、`.multi-agent-mcp/config.json` に保存され、
+以降の同一プロジェクト実行で参照されます。
 
 ### 階層構造
 
@@ -140,13 +151,13 @@ claude mcp list
 
 | Tool | 説明 |
 |------|------|
-| `create_worktree` | 新しいgit worktreeを作成 |
-| `list_worktrees` | worktree一覧を取得 |
-| `remove_worktree` | worktreeを削除 |
-| `assign_worktree` | エージェントにworktreeを割り当て |
-| `get_worktree_status` | worktreeのgitステータスを取得 |
-| `check_gtr_available` | gtr (git-worktree-runner) の利用可否を確認 |
-| `open_worktree_with_ai` | gtr aiでworktreeをAIツールで開く |
+| `create_worktree` | 新しいgit worktreeを作成（git有効時のみ） |
+| `list_worktrees` | worktree一覧を取得（git有効時のみ） |
+| `remove_worktree` | worktreeを削除（git有効時のみ） |
+| `assign_worktree` | エージェントにworktreeを割り当て（git有効時のみ） |
+| `get_worktree_status` | worktreeのgitステータスを取得（git有効時のみ） |
+| `check_gtr_available` | gtr (git-worktree-runner) の利用可否を確認（git有効時のみ） |
+| `open_worktree_with_ai` | gtr aiでworktreeをAIツールで開く（git有効時のみ） |
 
 ### マージ（1個）
 
@@ -270,8 +281,11 @@ claude mcp list
 ## 使用例
 
 ```
-# ターミナルを開いてtmuxワークスペースを構築
+# ターミナルを開いてtmuxワークスペースを構築（git有効）
 init_tmux_workspace("/path/to/project", session_id="issue-123")
+
+# 非gitディレクトリで実行
+init_tmux_workspace("/path/to/non-git-dir", session_id="issue-123", enable_git=false)
 
 # Ownerエージェントを作成
 create_agent("owner", "/path/to/project")
@@ -316,7 +330,8 @@ cleanup_workspace()
 |------|-----------|------|
 | `MCP_MCP_DIR` | .multi-agent-mcp | MCP設定ディレクトリ名 |
 | `MCP_MAX_WORKERS` | 6 | Workerの最大数 |
-| `MCP_ENABLE_WORKTREE` | true | git worktreeを使用するか |
+| `MCP_ENABLE_GIT` | true | git 前提機能を有効化するか（falseで非gitディレクトリ許可） |
+| `MCP_ENABLE_WORKTREE` | true | worktreeを使用するか（`MCP_ENABLE_GIT=false` の場合は無効） |
 | `MCP_WINDOW_NAME_MAIN` | main | メインウィンドウ名（Admin + Worker 1-6） |
 | `MCP_WINDOW_NAME_WORKER_PREFIX` | workers- | 追加Workerウィンドウ名のプレフィックス |
 | `MCP_EXTRA_WORKER_ROWS` | 2 | 追加ウィンドウの行数 |
@@ -373,6 +388,7 @@ cleanup_workspace()
 ```
 {project_root}/.multi-agent-mcp/
 ├── .env                    # プロジェクト設定（テンプレート付き）
+├── config.json             # 実行時設定（session_id / enable_git など）
 ├── memory/                 # プロジェクトメモリ
 ├── screenshot/             # スクリーンショット保存先
 └── {session_id}/           # セッション別
@@ -389,6 +405,12 @@ cleanup_workspace()
 1. 環境変数（最優先）
 2. `.multi-agent-mcp/.env` ファイル
 3. デフォルト値
+
+`enable_git` のみ、実行時は以下の優先順位で解決されます:
+1. `init_tmux_workspace(enable_git=...)` の引数
+2. `.multi-agent-mcp/config.json` の `enable_git`
+3. 環境変数 / `.env`
+4. デフォルト値（`true`）
 
 ## gitignore 推奨
 

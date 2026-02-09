@@ -52,7 +52,7 @@ class TmuxManager(TmuxWorkspaceMixin):
 
     def _get_project_name(self, working_dir: str) -> str:
         """作業ディレクトリからプロジェクト名を返す。"""
-        return get_project_name(working_dir)
+        return get_project_name(working_dir, enable_git=self.settings.enable_git)
 
     async def create_session(self, name: str, working_dir: str) -> bool:
         session_name = name
@@ -134,7 +134,11 @@ class TmuxManager(TmuxWorkspaceMixin):
             logger.error(f"コマンド実行エラー: {e}")
             return 1, "", str(e)
 
-    async def open_session_in_terminal(self, session: str) -> bool:
+    async def open_session_in_terminal(
+        self,
+        session: str,
+        terminal: TerminalApp | None = None,
+    ) -> bool:
         session_name = session
         attach_cmd = f"tmux attach -t {session_name}"
         openers = {
@@ -142,15 +146,16 @@ class TmuxManager(TmuxWorkspaceMixin):
             TerminalApp.ITERM2: self._open_in_iterm2,
             TerminalApp.TERMINAL: self._open_in_terminal_app,
         }
-        default_terminal = self.settings.default_terminal
-        if default_terminal in openers:
-            return await openers[default_terminal](attach_cmd)
+        selected_terminal = terminal or self.settings.default_terminal
+        if selected_terminal in openers:
+            return await openers[selected_terminal](attach_cmd)
         for opener in (self._open_in_ghostty, self._open_in_iterm2, self._open_in_terminal_app):
             if await opener(attach_cmd):
                 return True
         return False
 
     async def _open_in_ghostty(self, attach_cmd: str) -> bool:
+        import shlex
         import shutil
         from pathlib import Path
 
@@ -161,7 +166,8 @@ class TmuxManager(TmuxWorkspaceMixin):
                 ghostty_path = str(macos_ghostty)
 
         if ghostty_path:
-            code, _, _ = await self._run_exec(ghostty_path, "-e", attach_cmd)
+            attach_args = shlex.split(attach_cmd)
+            code, _, _ = await self._run_exec(ghostty_path, "-e", *attach_args)
             return code == 0
         return False
 
@@ -174,10 +180,19 @@ class TmuxManager(TmuxWorkspaceMixin):
             applescript = f'''
             tell application "iTerm"
                 activate
-                create window with default profile
-                tell current session of current window
-                    write text "{escaped_cmd}"
-                end tell
+                if (count of windows) > 0 then
+                    tell current window
+                        create tab with default profile
+                        tell current session
+                            write text "{escaped_cmd}"
+                        end tell
+                    end tell
+                else
+                    create window with default profile
+                    tell current session of current window
+                        write text "{escaped_cmd}"
+                    end tell
+                end if
             end tell
             '''
             code, _, _ = await self._run_exec("osascript", "-e", applescript)
@@ -189,7 +204,13 @@ class TmuxManager(TmuxWorkspaceMixin):
         applescript = f'''
         tell application "Terminal"
             activate
-            do script "{escaped_cmd}"
+            if (count of windows) > 0 then
+                tell front window
+                    do script "{escaped_cmd}"
+                end tell
+            else
+                do script "{escaped_cmd}"
+            end if
         end tell
         '''
         code, _, _ = await self._run_exec("osascript", "-e", applescript)

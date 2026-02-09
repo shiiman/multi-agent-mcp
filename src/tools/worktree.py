@@ -11,6 +11,17 @@ from src.tools.helpers import get_worktree_manager, require_permission, save_age
 logger = logging.getLogger(__name__)
 
 
+def _git_disabled_error() -> dict[str, Any]:
+    """git 機能無効時の共通エラー。"""
+    return {
+        "success": False,
+        "error": (
+            "MCP_ENABLE_GIT=false のためこのツールは実行できません。"
+            " git を使用する場合は init_tmux_workspace(enable_git=true) で初期化してください。"
+        ),
+    }
+
+
 def register_tools(mcp: FastMCP) -> None:
     """Git worktree管理ツールを登録する。"""
 
@@ -45,7 +56,9 @@ def register_tools(mcp: FastMCP) -> None:
 
         # worktree 無効モードの場合はスキップ
         settings = app_ctx.settings
-        if not settings.enable_worktree:
+        if not settings.enable_git:
+            return _git_disabled_error()
+        if not settings.is_worktree_enabled():
             logger.info(f"worktree が無効のためスキップ: {branch} (MCP_ENABLE_WORKTREE=false)")
             return {
                 "success": True,
@@ -96,6 +109,8 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "list_worktrees", caller_agent_id)
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return _git_disabled_error()
 
         worktree = get_worktree_manager(app_ctx, repo_path)
 
@@ -141,7 +156,9 @@ def register_tools(mcp: FastMCP) -> None:
 
         # worktree 無効モードの場合はスキップ
         settings = app_ctx.settings
-        if not settings.enable_worktree:
+        if not settings.enable_git:
+            return _git_disabled_error()
+        if not settings.is_worktree_enabled():
             logger.info(f"worktree が無効のため削除をスキップ: {worktree_path}")
             return {
                 "success": True,
@@ -244,6 +261,8 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "get_worktree_status", caller_agent_id)
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return _git_disabled_error()
 
         worktree = get_worktree_manager(app_ctx, repo_path)
 
@@ -280,6 +299,8 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "check_gtr_available", caller_agent_id)
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return _git_disabled_error()
 
         worktree = get_worktree_manager(app_ctx, repo_path)
 
@@ -319,6 +340,8 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "open_worktree_with_ai", caller_agent_id)
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return _git_disabled_error()
 
         worktree = get_worktree_manager(app_ctx, repo_path)
 

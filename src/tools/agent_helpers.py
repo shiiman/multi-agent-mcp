@@ -223,7 +223,7 @@ async def _determine_pane_position(
                 "tmux_session", "log_location"}
         失敗時: {"success": False, "error": ...}
     """
-    project_name = get_project_name(working_dir)
+    project_name = get_project_name(working_dir, enable_git=settings.enable_git)
 
     if agent_role == AgentRole.OWNER:
         return {
@@ -464,7 +464,10 @@ def _prepare_worker_task_content(
     Returns:
         (project_root, task_file)
     """
-    project_root = Path(resolve_main_repo_root(worktree_path))
+    if app_ctx.settings.enable_git:
+        project_root = Path(resolve_main_repo_root(worktree_path))
+    else:
+        project_root = Path(worktree_path).expanduser()
 
     # メモリから関連情報を検索
     memory_context = search_memory_context(app_ctx, task_content)
@@ -487,6 +490,7 @@ def _prepare_worker_task_content(
         branch_name=branch,
         admin_id=caller_agent_id,
         mcp_tool_prefix=mcp_prefix,
+        enable_git=app_ctx.settings.enable_git,
     )
 
     # タスクファイル作成
@@ -533,7 +537,9 @@ async def _dispatch_bootstrap_command(
         project_root=str(project_root),
         model=worker_model,
         role="worker",
-        role_template_path=str(get_role_template_path("worker")),
+        role_template_path=str(
+            get_role_template_path("worker", enable_git=app_ctx.settings.enable_git)
+        ),
         thinking_tokens=thinking_tokens,
         reasoning_effort=reasoning_effort,
     )

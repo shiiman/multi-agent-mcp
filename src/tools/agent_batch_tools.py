@@ -461,10 +461,10 @@ def register_batch_tools(mcp: FastMCP) -> None:
         if capacity_error:
             return capacity_error
 
-        enable_wt = settings.enable_worktree
+        enable_wt = settings.is_worktree_enabled()
         reuse_configs = worker_configs[:reuse_count]
         create_configs = worker_configs[reuse_count:]
-        project_name = get_project_name(repo_path)
+        project_name = get_project_name(repo_path, enable_git=settings.enable_git)
         pre_assigned_slots = _pre_assign_pane_slots(agents, project_name, len(create_configs))
         logger.info("Workerバッチ: reuse=%s, create=%s", reuse_count, len(create_configs))
 

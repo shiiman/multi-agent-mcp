@@ -1,6 +1,7 @@
 """エージェント管理ツール実装。"""
 
 import logging
+import shlex
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -71,7 +72,14 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             # Owner 作成時は working_dir から project_root を自動設定
             # （init_tmux_workspace より前に create_agent(owner) が呼ばれるため）
             if not app_ctx.project_root and working_dir:
-                app_ctx.project_root = resolve_main_repo_root(working_dir)
+                if app_ctx.settings.enable_git:
+                    try:
+                        app_ctx.project_root = resolve_main_repo_root(working_dir)
+                    except ValueError:
+                        # init_tmux_workspace(enable_git=false) で上書きされる前提で許容する
+                        app_ctx.project_root = str(Path(working_dir).expanduser())
+                else:
+                    app_ctx.project_root = str(Path(working_dir).expanduser())
                 refresh_app_settings(app_ctx, app_ctx.project_root)
                 logger.info(f"Owner 作成時に project_root を自動設定: {app_ctx.project_root}")
 
@@ -376,9 +384,15 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         if prompt_type == "auto":
             # roles/ テンプレートを自動読み込み
             try:
+                from src.config.workflow_guides import get_role_template_name
+
                 loader = get_template_loader()
-                prompt = loader.load("roles", role_value)
-                prompt_source = f"roles/{role_value}.md"
+                template_name = get_role_template_name(
+                    role_value,
+                    enable_git=app_ctx.settings.enable_git,
+                )
+                prompt = loader.load("roles", template_name)
+                prompt_source = f"roles/{template_name}.md"
             except FileNotFoundError as e:
                 return {
                     "success": False,
@@ -443,18 +457,38 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         else:
             cli = ai_cli_manager.get_default_cli()
 
-        # ターミナルで AI CLI を起動
-        success, message = await ai_cli_manager.open_worktree_in_terminal(
-            worktree_path=working_dir,
-            cli=cli,
-            prompt=prompt,
+        if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
+            return {
+                "success": False,
+                "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
+            }
+
+        # 先に tmux セッションを指定ターミナルで開く（attach）
+        session_opened = await app_ctx.tmux.open_session_in_terminal(
+            agent.session_name,
             terminal=terminal_app,
         )
+        if not session_opened:
+            return {
+                "success": False,
+                "error": "tmux セッションをターミナルで開けませんでした",
+            }
 
+        # AI CLI 起動コマンドを pane に送信
+        cli_command = ai_cli_manager.build_interactive_command(cli=cli, prompt=prompt)
+        start_command = f"cd {shlex.quote(working_dir)} && {cli_command}"
+        success = await app_ctx.tmux.send_with_rate_limit_to_pane(
+            agent.session_name,
+            agent.window_index,
+            agent.pane_index,
+            start_command,
+            clear_input=False,
+            confirm_codex_prompt=cli.value == AICli.CODEX.value,
+        )
         if not success:
             return {
                 "success": False,
-                "error": f"AI CLI の起動に失敗しました: {message}",
+                "error": "tmux ペインへの AI CLI 起動コマンド送信に失敗しました",
             }
 
         # エージェントのステータスを更新
@@ -477,6 +511,9 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             "prompt_source": prompt_source,
             "terminal": terminal_app.value,
             "working_dir": working_dir,
-            "message": f"エージェント {agent_id} を初期化しました（{cli.value} で起動）",
+            "message": (
+                f"エージェント {agent_id} を初期化しました"
+                f"（tmux attach + {cli.value} 起動）"
+            ),
             "file_persisted": file_saved,
         }

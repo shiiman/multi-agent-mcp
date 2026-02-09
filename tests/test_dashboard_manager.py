@@ -485,6 +485,21 @@ class TestMarkdownDashboard:
         assert "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |" not in md_content
         assert "| ID | タイトル | 状態 | 担当 | 進捗 |" in md_content
 
+    def test_task_worktree_column_hidden_when_git_disabled(
+        self, dashboard_manager, temp_dir, monkeypatch
+    ):
+        """MCP_ENABLE_GIT=false のとき worktree 列を表示しないことをテスト。"""
+        monkeypatch.setenv("MCP_ENABLE_GIT", "false")
+        monkeypatch.setenv("MCP_ENABLE_WORKTREE", "true")
+        dashboard_manager.create_task(
+            title="No Git Task",
+            worktree_path=str(temp_dir / "worktrees" / "feature-worker-1"),
+        )
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |" not in md_content
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 |" in md_content
+
     def test_task_assignee_is_rendered_as_agent_label(self, dashboard_manager, temp_dir):
         """タスク担当が agent_id ではなく表示名で描画されることをテスト。"""
         dashboard = dashboard_manager.get_dashboard()

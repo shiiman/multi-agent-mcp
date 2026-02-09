@@ -7,8 +7,10 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from src.config.settings import load_effective_settings_for_project
 from src.managers.tmux_manager import get_project_name
 from src.tools.helpers import (
+    get_enable_git_from_config,
     get_gtrconfig_manager,
     get_worktree_manager,
     refresh_app_settings,
@@ -218,6 +220,7 @@ def register_tools(mcp: FastMCP) -> None:
         open_terminal: bool = True,
         auto_setup_gtr: bool = True,
         session_id: str | None = None,
+        enable_git: bool | None = None,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -243,6 +246,7 @@ def register_tools(mcp: FastMCP) -> None:
                            Falseでバックグラウンド作成
             auto_setup_gtr: gtr利用可能時に自動でgtrconfig設定（デフォルト: True）
             session_id: セッションID（省略時は None、指定時はディレクトリ構造に使用）
+            enable_git: git 機能を有効化するか（省略時は config/.env を使用）
             caller_agent_id: 呼び出し元エージェントID（指定時はロールチェック）
 
         Returns:
@@ -253,10 +257,42 @@ def register_tools(mcp: FastMCP) -> None:
             return role_error
 
         tmux = app_ctx.tmux
-        resolved_project_root = resolve_main_repo_root(working_dir)
+        working_dir_path = str(Path(working_dir).expanduser())
+        try:
+            detected_project_root = resolve_main_repo_root(working_dir_path)
+            is_git_repo = True
+        except ValueError:
+            detected_project_root = working_dir_path
+            is_git_repo = False
+
+        config_enable_git = get_enable_git_from_config(working_dir_path)
+        project_settings = load_effective_settings_for_project(detected_project_root)
+        effective_enable_git = (
+            enable_git
+            if enable_git is not None
+            else config_enable_git
+            if config_enable_git is not None
+            else project_settings.enable_git
+        )
+
+        if effective_enable_git and not is_git_repo:
+            return {
+                "success": False,
+                "error": (
+                    f"git が有効ですが `{working_dir}` は git リポジトリではありません。"
+                    " 非gitディレクトリで実行する場合は enable_git=false を指定してください。"
+                ),
+            }
+
+        resolved_project_root = (
+            detected_project_root if effective_enable_git else working_dir_path
+        )
+        app_ctx.settings.enable_git = effective_enable_git
+        app_ctx.tmux.settings.enable_git = effective_enable_git
+        app_ctx.ai_cli.settings.enable_git = effective_enable_git
 
         # 既存の tmux セッションが存在するかチェック（重複起動防止）
-        project_name = get_project_name(working_dir)
+        project_name = get_project_name(working_dir, enable_git=effective_enable_git)
         session_exists = await tmux.session_exists(project_name)
         if session_exists:
             # 既存セッションのリカバリ: 古いリソースをクリーンアップして再初期化
@@ -333,7 +369,7 @@ def register_tools(mcp: FastMCP) -> None:
             "gtrconfig_generated": False,
         }
 
-        if auto_setup_gtr:
+        if auto_setup_gtr and effective_enable_git:
             try:
                 worktree = get_worktree_manager(app_ctx, working_dir)
                 gtr_available = await worktree.is_gtr_available()
@@ -355,7 +391,12 @@ def register_tools(mcp: FastMCP) -> None:
                 logger.warning(f"gtr 設定確認に失敗: {e}")
 
         # MCP ディレクトリと .env ファイルのセットアップ
-        mcp_setup = _setup_mcp_directories(working_dir, session_id=session_id)
+        mcp_setup = _setup_mcp_directories(
+            working_dir,
+            settings=project_settings,
+            session_id=session_id,
+            enable_git_override=effective_enable_git,
+        )
         logger.info(
             f"MCP ディレクトリをセットアップしました: "
             f"作成={mcp_setup['created_dirs']}, env_created={mcp_setup['env_created']}"
@@ -375,7 +416,7 @@ def register_tools(mcp: FastMCP) -> None:
         dashboard.initialize()
 
         # セッション名を計算（プロジェクト名をそのまま使用）
-        project_name = get_project_name(working_dir)
+        project_name = get_project_name(working_dir, enable_git=effective_enable_git)
         session_name = project_name
 
         if open_terminal:
@@ -387,6 +428,10 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_name": session_name,
                     "session_id": session_id,
                     "gtr_status": gtr_status,
+                    "mode": {
+                        "enable_git": app_ctx.settings.enable_git,
+                        "enable_worktree": app_ctx.settings.is_worktree_enabled(),
+                    },
                     "provisional_migration": migration_result,
                     "provisional_cleanup": provisional_cleanup_result,
                     "message": message,
@@ -395,6 +440,10 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": False,
                     "gtr_status": gtr_status,
+                    "mode": {
+                        "enable_git": app_ctx.settings.enable_git,
+                        "enable_worktree": app_ctx.settings.is_worktree_enabled(),
+                    },
                     "provisional_migration": migration_result,
                     "provisional_cleanup": provisional_cleanup_result,
                     "error": message,
@@ -408,6 +457,10 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_name": session_name,
                     "session_id": session_id,
                     "gtr_status": gtr_status,
+                    "mode": {
+                        "enable_git": app_ctx.settings.enable_git,
+                        "enable_worktree": app_ctx.settings.is_worktree_enabled(),
+                    },
                     "provisional_migration": migration_result,
                     "provisional_cleanup": provisional_cleanup_result,
                     "message": "メインセッションをバックグラウンドで作成しました",
@@ -416,6 +469,10 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": False,
                     "gtr_status": gtr_status,
+                    "mode": {
+                        "enable_git": app_ctx.settings.enable_git,
+                        "enable_worktree": app_ctx.settings.is_worktree_enabled(),
+                    },
                     "provisional_migration": migration_result,
                     "provisional_cleanup": provisional_cleanup_result,
                     "error": "メインセッションの作成に失敗しました",

@@ -438,10 +438,17 @@ class TestAiCliManagerTerminal:
             mock_exec.return_value = mock_proc
 
             success, message = await ai_cli_manager._open_in_ghostty(
-                "/tmp/test", "claude"
+                "/tmp/test", ["claude", "--dangerously-skip-permissions", "hello world"]
             )
             assert success is True
             assert "Ghostty" in message
+            exec_args = mock_exec.call_args.args
+            assert exec_args[:6] == (
+                "open", "-na", "Ghostty.app", "--args", "--working-directory=/tmp/test", "-e"
+            )
+            assert exec_args[6:] == (
+                "claude", "--dangerously-skip-permissions", "hello world"
+            )
 
     @pytest.mark.asyncio
     async def test_open_in_ghostty_failure(self, ai_cli_manager):
@@ -453,7 +460,7 @@ class TestAiCliManagerTerminal:
             mock_exec.return_value = mock_proc
 
             success, message = await ai_cli_manager._open_in_ghostty(
-                "/tmp/test", "claude"
+                "/tmp/test", ["claude"]
             )
             assert success is False
             assert "失敗" in message
@@ -511,7 +518,17 @@ class TestAiCliManagerTerminal:
             mock_open.return_value = (True, "success")
 
             success, message = await ai_cli_manager.open_worktree_in_terminal(
-                "/tmp/test", AICli.CLAUDE, terminal=TerminalApp.GHOSTTY
+                "/tmp/test",
+                AICli.CLAUDE,
+                prompt="prompt with spaces",
+                terminal=TerminalApp.GHOSTTY,
             )
             assert success is True
             mock_open.assert_called_once()
+            called_workdir, called_args = mock_open.call_args.args
+            assert called_workdir == "/tmp/test"
+            assert called_args == [
+                "claude",
+                "--dangerously-skip-permissions",
+                "prompt with spaces",
+            ]

@@ -173,7 +173,7 @@ def get_project_root_from_config(
 # ========== config.json ヘルパー ==========
 
 
-def _get_from_config(key: str, working_dir: str | None = None) -> str | None:
+def _get_from_config(key: str, working_dir: str | None = None) -> object | None:
     """config.json から指定キーの値を取得する。
 
     working_dir → worktree のメインリポジトリ → カレントディレクトリの順で探索する。
@@ -183,15 +183,19 @@ def _get_from_config(key: str, working_dir: str | None = None) -> str | None:
         working_dir: 探索開始ディレクトリ（オプション）
 
     Returns:
-        値が見つかった場合はその文字列、見つからない場合は None
+        値が見つかった場合はその値、見つからない場合は None
     """
     search_dirs: list[Path] = []
 
     if working_dir:
         search_dirs.append(Path(working_dir))
-        main_repo = resolve_main_repo_root(working_dir)
-        if main_repo != working_dir:
-            search_dirs.append(Path(main_repo))
+        try:
+            main_repo = resolve_main_repo_root(working_dir)
+            if main_repo != working_dir:
+                search_dirs.append(Path(main_repo))
+        except ValueError:
+            # 非gitディレクトリの場合は working_dir のみ探索する
+            pass
 
     search_dirs.append(Path.cwd())
 
@@ -202,7 +206,7 @@ def _get_from_config(key: str, working_dir: str | None = None) -> str | None:
                 with open(config_file, encoding="utf-8") as f:
                     config = json.load(f)
                 value = config.get(key)
-                if value:
+                if value is not None:
                     logger.debug(f"config.json から {key} を取得: {value}")
                     return value
             except (OSError, json.JSONDecodeError) as e:
@@ -220,7 +224,10 @@ def get_mcp_tool_prefix_from_config(working_dir: str | None = None) -> str:
     Returns:
         MCP ツールの完全名プレフィックス
     """
-    return _get_from_config("mcp_tool_prefix", working_dir) or "mcp__multi-agent-mcp__"
+    value = _get_from_config("mcp_tool_prefix", working_dir)
+    if isinstance(value, str) and value:
+        return value
+    return "mcp__multi-agent-mcp__"
 
 
 def get_session_id_from_config(working_dir: str | None = None) -> str | None:
@@ -232,7 +239,32 @@ def get_session_id_from_config(working_dir: str | None = None) -> str | None:
     Returns:
         セッションID、見つからない場合は None
     """
-    return _get_from_config("session_id", working_dir)
+    value = _get_from_config("session_id", working_dir)
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def get_enable_git_from_config(working_dir: str | None = None) -> bool | None:
+    """config.json から enable_git を取得する。
+
+    Args:
+        working_dir: 探索開始ディレクトリ（オプション）
+
+    Returns:
+        enable_git の真偽値、未設定時は None
+    """
+    value = _get_from_config("enable_git", working_dir)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    return None
 
 
 def ensure_session_id(app_ctx: AppContext) -> str | None:

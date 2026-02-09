@@ -51,9 +51,20 @@ def _load_template(role: str) -> str | None:
     return None
 
 
-def get_role_template_path(role: str) -> Path:
+def get_role_template_name(role: str, enable_git: bool = True) -> str:
+    """ロールテンプレート名を取得する。"""
+    if not enable_git:
+        candidate = f"{role}_no_git"
+        template_path = _get_templates_dir() / "roles" / f"{candidate}.md"
+        if template_path.exists():
+            return candidate
+    return role
+
+
+def get_role_template_path(role: str, enable_git: bool = True) -> Path:
     """ロールテンプレートファイルのパスを取得する。"""
-    return _get_templates_dir() / "roles" / f"{role}.md"
+    template_name = get_role_template_name(role, enable_git=enable_git)
+    return _get_templates_dir() / "roles" / f"{template_name}.md"
 
 
 # ロール説明
@@ -64,7 +75,7 @@ ROLE_DESCRIPTIONS = {
 }
 
 
-def get_role_guide(role: str) -> RoleGuide | None:
+def get_role_guide(role: str, enable_git: bool = True) -> RoleGuide | None:
     """ロールガイドを名前で取得する。
 
     templates/roles/{role}.md からテンプレートを読み込む。
@@ -75,7 +86,8 @@ def get_role_guide(role: str) -> RoleGuide | None:
     Returns:
         ロールガイド、見つからない場合 None
     """
-    content = _load_template(role)
+    template_name = get_role_template_name(role, enable_git=enable_git)
+    content = _load_template(template_name)
     if content is None:
         return None
 
@@ -100,4 +112,10 @@ def list_role_guides() -> list[str]:
     if not roles_dir.exists():
         return []
 
-    return [f.stem for f in roles_dir.glob("*.md")]
+    roles: set[str] = set()
+    for file in roles_dir.glob("*.md"):
+        name = file.stem
+        if name.endswith("_no_git"):
+            name = name[: -len("_no_git")]
+        roles.add(name)
+    return sorted(roles)
