@@ -29,6 +29,7 @@ class TerminalAppExecutor(TerminalExecutor):
         既存のウィンドウがある場合は新しいタブとして開く。
         """
         try:
+            escaped_script_path = self._escape_applescript_string(script_path)
             # 既存ウィンドウがあればタブ、なければ新規ウィンドウ
             applescript = f'''
 tell application "Terminal"
@@ -36,19 +37,17 @@ tell application "Terminal"
     if (count of windows) > 0 then
         -- 既存ウィンドウに新しいタブを作成
         tell front window
-            set newTab to do script "{script_path}"
+            set newTab to do script "{escaped_script_path}"
         end tell
         return "tab"
     else
         -- 新しいウィンドウを作成
-        do script "{script_path}"
+        do script "{escaped_script_path}"
         return "window"
     end if
 end tell
 '''
-            code, stdout, stderr = await self._run_shell(
-                f"osascript -e '{applescript}'"
-            )
+            code, stdout, stderr = await self._run_osascript(applescript)
 
             if code == 0:
                 if "tab" in stdout.lower():

@@ -46,7 +46,7 @@ class GhosttyExecutor(TerminalExecutor):
         try:
             # 既存の Ghostty プロセスがある場合はタブ追加を試みる
             if await self._is_running():
-                success = await self._open_in_tab(f"exec bash '{script_path}'")
+                success = await self._open_in_tab(f'exec bash "{script_path}"')
                 if success:
                     return True, "Ghostty の新しいタブでワークスペースを開きました"
                 # タブ追加に失敗した場合は新しいウィンドウで開く
@@ -77,10 +77,6 @@ class GhosttyExecutor(TerminalExecutor):
             logger.error(f"Ghostty 起動エラー: {e}")
             return False, f"Ghostty 起動エラー: {e}"
 
-    def _escape_applescript_string(self, value: str) -> str:
-        """AppleScript 文字列用にエスケープする。"""
-        return value.replace("\\", "\\\\").replace('"', '\\"')
-
     async def _is_running(self) -> bool:
         """Ghostty が起動中かを確認する。"""
         applescript = (
@@ -88,7 +84,7 @@ class GhosttyExecutor(TerminalExecutor):
             'else return "false"'
         )
         try:
-            code, stdout, _ = await self._run_shell(f"osascript -e '{applescript}'")
+            code, stdout, _ = await self._run_osascript(applescript)
             return code == 0 and "true" in stdout.lower()
         except Exception as e:
             logger.debug(f"Ghostty 実行チェックをスキップ: {e}")
@@ -119,7 +115,7 @@ tell application "System Events"
 end tell
 '''
         try:
-            code, _, _ = await self._run_shell(f"osascript -e '{applescript}'")
+            code, _, _ = await self._run_osascript(applescript)
             if code == 0:
                 await asyncio.sleep(0.5)
                 return True
@@ -154,6 +150,6 @@ tell application "System Events"
 end tell
 '''
         try:
-            await self._run_shell(f"osascript -e '{applescript}'")
+            await self._run_osascript(applescript)
         except Exception as e:
             logger.warning(f"ウィンドウ最大化に失敗: {e}")

@@ -58,6 +58,35 @@ class TerminalExecutor(ABC):
             logger.error(f"シェルコマンド実行エラー: {e}")
             return 1, "", str(e)
 
+    async def _run_exec(self, *args: str) -> tuple[int, str, str]:
+        """コマンドを引数分離で実行する。
+
+        Args:
+            *args: 実行コマンドと引数
+
+        Returns:
+            (リターンコード, stdout, stderr) のタプル
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            return proc.returncode or 0, stdout.decode(), stderr.decode()
+        except Exception as e:
+            logger.error(f"コマンド実行エラー: {e}")
+            return 1, "", str(e)
+
+    async def _run_osascript(self, script: str) -> tuple[int, str, str]:
+        """AppleScript を安全に実行する。"""
+        return await self._run_exec("osascript", "-e", script)
+
+    def _escape_applescript_string(self, value: str) -> str:
+        """AppleScript 文字列用にエスケープする。"""
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
     def _extract_session_name(self, script: str) -> str:
         """スクリプトからセッション名を抽出する。
 

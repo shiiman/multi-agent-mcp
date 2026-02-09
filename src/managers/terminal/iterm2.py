@@ -16,9 +16,7 @@ class ITerm2Executor(TerminalExecutor):
 
     async def is_available(self) -> bool:
         """iTerm2 が利用可能か確認する。"""
-        code, _, _ = await self._run_shell(
-            "osascript -e 'application \"iTerm\" exists'"
-        )
+        code, _, _ = await self._run_osascript('application "iTerm" exists')
         return code == 0
 
     async def execute_script(
@@ -32,6 +30,7 @@ class ITerm2Executor(TerminalExecutor):
             return False, "iTerm2 が見つかりません"
 
         try:
+            escaped_script_path = self._escape_applescript_string(script_path)
             # 既存ウィンドウがあればタブ、なければ新規ウィンドウ
             applescript = f'''
 tell application "iTerm"
@@ -41,7 +40,7 @@ tell application "iTerm"
         tell current window
             create tab with default profile
             tell current session
-                write text "{script_path}"
+                write text "{escaped_script_path}"
             end tell
         end tell
         return "tab"
@@ -49,15 +48,13 @@ tell application "iTerm"
         -- 新しいウィンドウを作成
         create window with default profile
         tell current session of current window
-            write text "{script_path}"
+            write text "{escaped_script_path}"
         end tell
         return "window"
     end if
 end tell
 '''
-            code, stdout, stderr = await self._run_shell(
-                f"osascript -e '{applescript}'"
-            )
+            code, stdout, stderr = await self._run_osascript(applescript)
 
             if code == 0:
                 if "tab" in stdout.lower():
