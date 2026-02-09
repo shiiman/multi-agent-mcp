@@ -1,10 +1,7 @@
 """helpers_persistence.py のユニットテスト。"""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from src.tools.helpers_persistence import delete_agents_file
 

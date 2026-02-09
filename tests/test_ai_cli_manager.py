@@ -267,8 +267,14 @@ class TestResolveModelForCli:
 
     def test_explicit_model_mismatch_converted_to_cli_default(self):
         """CLI とモデルが不一致なら CLI デフォルトへ置換されることをテスト。"""
-        assert resolve_model_for_cli("codex", "gemini-3-pro", "admin") == ModelDefaults.CODEX_DEFAULT
-        assert resolve_model_for_cli("gemini", "gpt-5.3-codex", "worker") == ModelDefaults.GEMINI_LIGHT
+        assert (
+            resolve_model_for_cli("codex", "gemini-3-pro", "admin")
+            == ModelDefaults.CODEX_DEFAULT
+        )
+        assert (
+            resolve_model_for_cli("gemini", "gpt-5.3-codex", "worker")
+            == ModelDefaults.GEMINI_LIGHT
+        )
         assert resolve_model_for_cli("claude", "gemini-3-pro", "worker") == ModelDefaults.SONNET
 
     def test_none_model_returns_none(self):

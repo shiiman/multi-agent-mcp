@@ -1,7 +1,7 @@
 """Git worktree管理ツールのテスト。"""
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

@@ -70,6 +70,7 @@ def _reset_app_context(app_ctx: AppContext) -> None:
     # セッションスコープのデータもクリア
     app_ctx.agents.clear()
     app_ctx._admin_poll_state.clear()
+    app_ctx._owner_wait_state.clear()
     app_ctx._admin_last_healthcheck_at.clear()
 
 

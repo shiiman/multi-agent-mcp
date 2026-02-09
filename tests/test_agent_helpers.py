@@ -361,8 +361,14 @@ class TestSendTaskToWorker:
 
         with (
             patch("src.tools.agent_helpers.search_memory_context", return_value=[]),
-            patch("src.tools.agent_helpers.ensure_persona_manager", return_value=mock_persona_manager),
-            patch("src.tools.agent_helpers.get_mcp_tool_prefix_from_config", return_value="mcp__x__"),
+            patch(
+                "src.tools.agent_helpers.ensure_persona_manager",
+                return_value=mock_persona_manager,
+            ),
+            patch(
+                "src.tools.agent_helpers.get_mcp_tool_prefix_from_config",
+                return_value="mcp__x__",
+            ),
             patch("src.tools.agent_helpers.generate_7section_task", return_value="task body"),
             patch("src.tools.agent_helpers.ensure_dashboard_manager", return_value=mock_dashboard),
             patch("src.tools.agent_helpers.resolve_main_repo_root", return_value=str(temp_dir)),

@@ -340,7 +340,7 @@ class TestHealthcheckMonitoring:
         )
         app_ctx.healthcheck_manager = healthcheck
 
-        pane_hash = hashlib.sha1("stable-pane-output".encode("utf-8")).hexdigest()
+        pane_hash = hashlib.sha1(b"stable-pane-output").hexdigest()
         healthcheck._pane_hash[worker.id] = pane_hash
         healthcheck._pane_last_changed_at[worker.id] = datetime.now() - timedelta(seconds=120)
 

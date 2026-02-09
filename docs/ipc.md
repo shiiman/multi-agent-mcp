@@ -134,6 +134,7 @@ subprocess.run([
 | `send_message` | メッセージ送信（単一宛先/ブロードキャスト） | Owner, Admin, Worker |
 | `read_messages` | メッセージ読み取り（既読管理つき） | Owner, Admin, Worker |
 | `get_unread_count` | 未読数取得 | Owner, Admin, Worker |
+| `unlock_owner_wait` | Owner 待機ロックの手動解除（非常時のみ） | Owner |
 | `register_agent_to_ipc` | IPC ディレクトリを事前登録 | Owner, Admin |
 
 ### 関連ツール（Dashboard 側）
@@ -158,6 +159,15 @@ subprocess.run([
 ### Admin が覚えておくこと
 
 1. **Worker 完了待ち**: tmux 通知が来たら `read_messages` で内容を確認（イベント駆動、ポーリング不要）
+
+### Owner が覚えておくこと
+
+1. **send_task 後は待機ロック**: Owner→Admin の `send_task` 成功後、Owner は待機ロック状態になります
+2. **待機中の許可ツールは限定**: `read_messages` / `get_unread_count` / `unlock_owner_wait` のみ実行可能
+3. **ポーリング抑止**: 待機中に `read_messages(unread_only=true)` で unread=0 の連続確認をすると
+   `polling_blocked` が返されます
+4. **解除条件**: `read_messages` で Admin 由来メッセージを読んだ時点で待機ロック解除
+5. **非常時のみ手動解除**: 通知異常時は `unlock_owner_wait` を使って解除できます
 
 ## マルチプロセス対応
 

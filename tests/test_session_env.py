@@ -2,12 +2,8 @@
 
 import json
 from enum import Enum
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from src.config.settings import Settings
 from src.tools.session_env import (
     _format_env_value,
     _setup_mcp_directories,
