@@ -13,6 +13,7 @@ from src.managers.tmux_manager import TmuxManager
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.helpers import (
     check_tool_permission,
+    get_enable_git_from_config,
     get_mcp_tool_prefix_from_config,
     get_project_root_from_config,
     load_agents_from_file,
@@ -148,6 +149,30 @@ class TestGetMcpToolPrefixFromConfig:
 
         result = get_mcp_tool_prefix_from_config(working_dir=str(git_repo))
         assert result == "mcp__test-server__"
+
+
+class TestGetEnableGitFromConfig:
+    """get_enable_git_from_config 関数のテスト。"""
+
+    def test_returns_none_when_no_config(self, temp_dir, monkeypatch):
+        """config.json がない場合は None を返す。"""
+        monkeypatch.chdir(temp_dir)
+        result = get_enable_git_from_config()
+        assert result is None
+
+    def test_reads_false_from_config(self, temp_dir, monkeypatch):
+        """config.json の false を正しく取得する。"""
+        monkeypatch.chdir(temp_dir)
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        config_file = mcp_dir / "config.json"
+        config_file.write_text(
+            json.dumps({"mcp_tool_prefix": "mcp__multi-agent-mcp__", "enable_git": False}),
+            encoding="utf-8",
+        )
+
+        result = get_enable_git_from_config()
+        assert result is False
 
 
 class TestCheckToolPermission:

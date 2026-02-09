@@ -71,7 +71,14 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             # Owner 作成時は working_dir から project_root を自動設定
             # （init_tmux_workspace より前に create_agent(owner) が呼ばれるため）
             if not app_ctx.project_root and working_dir:
-                app_ctx.project_root = resolve_main_repo_root(working_dir)
+                if app_ctx.settings.enable_git:
+                    try:
+                        app_ctx.project_root = resolve_main_repo_root(working_dir)
+                    except ValueError:
+                        # init_tmux_workspace(enable_git=false) で上書きされる前提で許容する
+                        app_ctx.project_root = str(Path(working_dir).expanduser())
+                else:
+                    app_ctx.project_root = str(Path(working_dir).expanduser())
                 refresh_app_settings(app_ctx, app_ctx.project_root)
                 logger.info(f"Owner 作成時に project_root を自動設定: {app_ctx.project_root}")
 
@@ -376,9 +383,15 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         if prompt_type == "auto":
             # roles/ テンプレートを自動読み込み
             try:
+                from src.config.workflow_guides import get_role_template_name
+
                 loader = get_template_loader()
-                prompt = loader.load("roles", role_value)
-                prompt_source = f"roles/{role_value}.md"
+                template_name = get_role_template_name(
+                    role_value,
+                    enable_git=app_ctx.settings.enable_git,
+                )
+                prompt = loader.load("roles", template_name)
+                prompt_source = f"roles/{template_name}.md"
             except FileNotFoundError as e:
                 return {
                     "success": False,

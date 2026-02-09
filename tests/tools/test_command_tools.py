@@ -949,6 +949,90 @@ class TestSendTask:
         mock_send.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_send_task_worker_skips_worktree_when_git_disabled(
+        self, command_mock_ctx, git_repo
+    ):
+        """MCP_ENABLE_GIT=false 時は MCP_ENABLE_WORKTREE=true でも worktree 作成しない。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_git = False
+        app_ctx.settings.enable_worktree = True
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        dashboard = app_ctx.dashboard_manager
+        task_info = dashboard.create_task(
+            title="worker task no git",
+            assigned_agent_id="worker-001",
+        )
+        dashboard.assign_task(task_info.id, "worker-001")
+
+        with (
+            patch(
+                "src.tools.command._create_worktree_for_worker",
+                new=AsyncMock(return_value=(str(git_repo / ".worktrees" / "unused"), None)),
+            ) as mock_create_wt,
+            patch(
+                "src.tools.command._send_task_to_worker",
+                new=AsyncMock(
+                    return_value={
+                        "task_sent": True,
+                        "dispatch_mode": "bootstrap",
+                        "dispatch_error": None,
+                        "task_file": "/tmp/task-no-git.md",
+                        "command_sent": "bootstrap command",
+                    }
+                ),
+            ) as mock_send,
+        ):
+            result = await send_task(
+                agent_id="worker-001",
+                task_content="worker task",
+                session_id="task-002b",
+                auto_enhance=False,
+                caller_agent_id="owner-001",
+                ctx=command_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["worktree_path"] is None
+        mock_create_wt.assert_not_called()
+        mock_send.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_send_task_owner_to_admin_locks_owner_wait_state(
         self, command_mock_ctx, git_repo
     ):

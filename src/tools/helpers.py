@@ -9,9 +9,10 @@ import logging
 import os
 import subprocess
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
-from src.config.settings import load_settings_for_project, resolve_project_env_file
+from src.config.settings import load_effective_settings_for_project, resolve_project_env_file
 from src.context import AppContext
 from src.models.agent import AgentRole
 
@@ -30,10 +31,27 @@ def refresh_app_settings(app_ctx: AppContext, project_root: str) -> None:
     """
     from src.tools.helpers_git import resolve_main_repo_root
 
-    main_repo_root = resolve_main_repo_root(project_root)
-    os.environ["MCP_PROJECT_ROOT"] = str(main_repo_root)
-    env_file = resolve_project_env_file(main_repo_root)
-    settings = load_settings_for_project(main_repo_root)
+    normalized_root = str(Path(project_root).expanduser())
+    try:
+        main_repo_root = resolve_main_repo_root(normalized_root)
+    except ValueError:
+        main_repo_root = normalized_root
+
+    settings = load_effective_settings_for_project(main_repo_root)
+    effective_root = main_repo_root
+    if settings.enable_git:
+        try:
+            effective_root = resolve_main_repo_root(main_repo_root)
+        except ValueError:
+            logger.warning(
+                "enable_git=true ですが git ルート解決に失敗したため、"
+                "作業ディレクトリを使用します: %s",
+                main_repo_root,
+            )
+            effective_root = main_repo_root
+
+    os.environ["MCP_PROJECT_ROOT"] = str(effective_root)
+    env_file = resolve_project_env_file(effective_root)
 
     app_ctx.settings = settings
     app_ctx.ai_cli.settings = settings
@@ -57,7 +75,7 @@ def refresh_app_settings(app_ctx: AppContext, project_root: str) -> None:
     else:
         logger.info(
             "project settings をデフォルトで再読み込み（.env なし）: "
-            f"{main_repo_root}/.multi-agent-mcp/.env"
+            f"{effective_root}/.multi-agent-mcp/.env"
         )
 
 
@@ -98,10 +116,16 @@ def resolve_project_root(
         sync_agents_from_file(app_ctx)
         for agent in app_ctx.agents.values():
             if agent.working_dir:
-                project_root = resolve_main_repo_root(agent.working_dir)
+                if app_ctx.settings.enable_git:
+                    project_root = resolve_main_repo_root(agent.working_dir)
+                else:
+                    project_root = agent.working_dir
                 break
             elif agent.worktree_path:
-                project_root = resolve_main_repo_root(agent.worktree_path)
+                if app_ctx.settings.enable_git:
+                    project_root = resolve_main_repo_root(agent.worktree_path)
+                else:
+                    project_root = agent.worktree_path
                 break
 
     # 環境変数 MCP_PROJECT_ROOT からのフォールバック（オプション）
@@ -116,7 +140,7 @@ def resolve_project_root(
         )
 
     # worktree の場合はメインリポジトリのパスを使用
-    if require_worktree_resolution:
+    if require_worktree_resolution and app_ctx.settings.enable_git:
         project_root = resolve_main_repo_root(project_root)
 
     return project_root
@@ -170,16 +194,15 @@ def ensure_project_root_from_caller(
                         break
 
         registry_session_id = get_session_id_from_registry(caller_agent_id)
-        if registry_session_id:
-            if app_ctx.session_id != registry_session_id:
-                previous_session_id = app_ctx.session_id
-                app_ctx.session_id = registry_session_id
-                logger.debug(
-                    "caller_agent_id %s から session_id を同期: %s -> %s",
-                    caller_agent_id,
-                    previous_session_id,
-                    registry_session_id,
-                )
+        if registry_session_id and app_ctx.session_id != registry_session_id:
+            previous_session_id = app_ctx.session_id
+            app_ctx.session_id = registry_session_id
+            logger.debug(
+                "caller_agent_id %s から session_id を同期: %s -> %s",
+                caller_agent_id,
+                previous_session_id,
+                registry_session_id,
+            )
 
 
 def get_agent_role(app_ctx: AppContext, agent_id: str) -> AgentRole | None:
@@ -548,6 +571,7 @@ from src.tools.helpers_registry import (  # noqa: E402, F401
     _get_from_config,
     _get_global_mcp_dir,
     ensure_session_id,
+    get_enable_git_from_config,
     get_mcp_tool_prefix_from_config,
     get_project_root_from_config,
     get_project_root_from_registry,

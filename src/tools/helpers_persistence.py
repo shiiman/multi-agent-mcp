@@ -30,6 +30,18 @@ _SYNC_CACHE_TTL_SECONDS = 2.0
 _last_sync_time: float = 0.0
 
 
+def _normalize_project_root_for_persistence(
+    project_root: str | None,
+    enable_git: bool,
+) -> str | None:
+    """永続化用の project_root を正規化する。"""
+    if not project_root:
+        return None
+    if not enable_git:
+        return project_root
+    return resolve_main_repo_root(project_root)
+
+
 def reset_sync_cache() -> None:
     """sync_agents_from_file のキャッシュをリセットする（テスト用）。"""
     global _last_sync_time
@@ -83,8 +95,9 @@ def save_agent_to_file(app_ctx: AppContext, agent: Agent) -> bool:
         project_root = agent.working_dir
 
     # worktree の場合はメインリポジトリのパスを使用
-    if project_root:
-        project_root = resolve_main_repo_root(project_root)
+    project_root = _normalize_project_root_for_persistence(
+        project_root, app_ctx.settings.enable_git
+    )
 
     # session_id を確保（config.json から読み取り）
     session_id = ensure_session_id(app_ctx)
@@ -148,8 +161,9 @@ def load_agents_from_file(app_ctx: AppContext) -> dict[str, Agent]:
         project_root = get_project_root_from_config()
 
     # worktree の場合はメインリポジトリのパスを使用
-    if project_root:
-        project_root = resolve_main_repo_root(project_root)
+    project_root = _normalize_project_root_for_persistence(
+        project_root, app_ctx.settings.enable_git
+    )
 
     # session_id を確保（config.json から読み取り）
     session_id = ensure_session_id(app_ctx)
@@ -232,8 +246,9 @@ def delete_agents_file(app_ctx: AppContext) -> bool:
     project_root = app_ctx.project_root
     if not project_root:
         project_root = get_project_root_from_config()
-    if project_root:
-        project_root = resolve_main_repo_root(project_root)
+    project_root = _normalize_project_root_for_persistence(
+        project_root, app_ctx.settings.enable_git
+    )
     session_id = ensure_session_id(app_ctx)
     agents_file = _get_agents_file_path(project_root, session_id)
     if agents_file and agents_file.exists():
@@ -264,8 +279,9 @@ def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
         project_root = get_project_root_from_config()
 
     # worktree の場合はメインリポジトリのパスを使用
-    if project_root:
-        project_root = resolve_main_repo_root(project_root)
+    project_root = _normalize_project_root_for_persistence(
+        project_root, app_ctx.settings.enable_git
+    )
 
     # session_id を確保（config.json から読み取り）
     session_id = ensure_session_id(app_ctx)

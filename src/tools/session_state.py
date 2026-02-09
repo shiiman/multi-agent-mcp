@@ -5,8 +5,9 @@ import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from src.config.settings import get_mcp_dir
 from src.context import AppContext
@@ -245,7 +246,7 @@ async def cleanup_session_resources(
             logger.warning(f"Dashboard クリーンアップに失敗: {e}")
 
     # ⑤ worktree 削除 (conditional)
-    if remove_worktrees:
+    if remove_worktrees and app_ctx.settings.enable_git:
         main_repo_path = repo_path or app_ctx.project_root
         if main_repo_path:
             worktree_errors: list[str] = []

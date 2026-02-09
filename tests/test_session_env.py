@@ -55,6 +55,7 @@ class TestGenerateEnvTemplate:
         """Settings を渡すとテンプレートが生成される。"""
         result = generate_env_template(settings=settings)
         assert "MCP_MCP_DIR=" in result
+        assert "MCP_ENABLE_GIT=" in result
         assert "MCP_MAX_WORKERS=" in result
         assert "MCP_ENABLE_WORKTREE=" in result
 
@@ -127,6 +128,48 @@ class TestSetupMcpDirectories:
             config = json.load(f)
         assert config["mcp_tool_prefix"] == "mcp__multi-agent-mcp__"
         assert config["session_id"] == "test-002"
+
+    def test_persists_enable_git_override_to_config(self, temp_dir, settings):
+        """enable_git_override の値が config.json に保存される。"""
+        with patch("src.tools.session_env.resolve_main_repo_root", return_value=str(temp_dir)):
+            _setup_mcp_directories(
+                str(temp_dir),
+                settings=settings,
+                session_id="test-003",
+                enable_git_override=False,
+            )
+
+        config_file = temp_dir / settings.mcp_dir / "config.json"
+        with open(config_file, encoding="utf-8") as f:
+            config = json.load(f)
+        assert config["enable_git"] is False
+
+    def test_keeps_existing_enable_git_when_override_is_none(self, temp_dir, settings):
+        """enable_git_override=None のとき既存 config の値を維持する。"""
+        mcp_dir = temp_dir / settings.mcp_dir
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        config_file = mcp_dir / "config.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "mcp_tool_prefix": "mcp__multi-agent-mcp__",
+                    "enable_git": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("src.tools.session_env.resolve_main_repo_root", return_value=str(temp_dir)):
+            _setup_mcp_directories(
+                str(temp_dir),
+                settings=settings,
+                session_id="test-004",
+                enable_git_override=None,
+            )
+
+        with open(config_file, encoding="utf-8") as f:
+            config = json.load(f)
+        assert config["enable_git"] is False
 
     def test_removes_legacy_project_root_from_config(self, temp_dir, settings):
         """config.json に project_root があれば削除する。"""

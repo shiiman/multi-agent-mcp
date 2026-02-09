@@ -10,6 +10,12 @@ from src.tools.helpers import get_gtrconfig_manager, require_permission
 def register_tools(mcp: FastMCP) -> None:
     """Gtrconfig管理ツールを登録する。"""
 
+    def _git_disabled_error() -> dict[str, Any]:
+        return {
+            "success": False,
+            "error": "MCP_ENABLE_GIT=false のため gtrconfig ツールは実行できません。",
+        }
+
     @mcp.tool()
     async def check_gtrconfig(
         project_path: str,
@@ -30,6 +36,8 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "check_gtrconfig", caller_agent_id)
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return _git_disabled_error()
 
         gtrconfig = get_gtrconfig_manager(app_ctx, project_path)
 
@@ -62,6 +70,8 @@ def register_tools(mcp: FastMCP) -> None:
         )
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return _git_disabled_error()
 
         gtrconfig = get_gtrconfig_manager(app_ctx, project_path)
 
@@ -94,6 +104,8 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "generate_gtrconfig", caller_agent_id)
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return _git_disabled_error()
 
         gtrconfig = get_gtrconfig_manager(app_ctx, project_path)
 

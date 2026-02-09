@@ -70,9 +70,10 @@ class DashboardMarkdownMixin:
     def _is_worktree_enabled(self, workspace_path: str | None = None) -> bool:
         """worktree 表示が有効かを返す。"""
         try:
-            from src.config.settings import load_settings_for_project
+            from src.config.settings import load_effective_settings_for_project
 
-            return bool(load_settings_for_project(workspace_path).enable_worktree)
+            settings = load_effective_settings_for_project(workspace_path)
+            return bool(settings.is_worktree_enabled())
         except Exception as e:
             logger.debug("worktree 有効判定に失敗: %s", e)
             return True

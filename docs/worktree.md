@@ -188,6 +188,20 @@ Worktree を使用しないモードも利用可能です（`MCP_ENABLE_WORKTREE
 | Worktree モード | 各 Worker が独立 | 並列作業が多い場合 |
 | Non-Worktree モード | 全 Worker が同一ディレクトリ | 順次作業、ファイル競合を手動管理 |
 
+### Non-Git モード
+
+`MCP_ENABLE_GIT=false` を設定すると、git 管理されていないディレクトリでも実行できます。
+
+| 項目 | 挙動 |
+| ---- | ---- |
+| `init_tmux_workspace` | `enable_git=false` で非gitディレクトリでも成功 |
+| Worktree 有効判定 | `enable_git && enable_worktree` |
+| git/worktree/gtr ツール | `success=false` で明示エラーを返却 |
+| ロール/タスクテンプレート | `*_no_git.md` を自動選択 |
+
+`init_tmux_workspace(enable_git=...)` を指定した場合、設定は
+`.multi-agent-mcp/config.json` の `enable_git` に保存されます。
+
 ### RACE-001: ファイル競合の防止
 
 ```
@@ -230,7 +244,8 @@ branch refs/heads/feature-a
 
 | 変数 | デフォルト | 説明 |
 | ---- | ---------- | ---- |
-| `MCP_ENABLE_WORKTREE` | true | Worktree を使用するか |
+| `MCP_ENABLE_GIT` | true | git 前提機能を有効にするか（false で非gitディレクトリ対応） |
+| `MCP_ENABLE_WORKTREE` | true | Worktree を使用するか（`MCP_ENABLE_GIT=false` の場合は無効） |
 
 ## トラブルシューティング
 
@@ -242,6 +257,16 @@ which gtr
 
 # インストール
 brew install coderabbitai/tap/git-worktree-runner
+```
+
+### 非gitディレクトリで初期化に失敗する
+
+`MCP_ENABLE_GIT=true` のまま非gitディレクトリで `init_tmux_workspace` を実行すると失敗します。
+
+解決:
+```bash
+# 明示的に no-git モードで初期化
+init_tmux_workspace("/path/to/non-git-dir", session_id="task-1", enable_git=false)
 ```
 
 ### Worktree の削除に失敗

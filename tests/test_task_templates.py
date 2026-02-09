@@ -179,6 +179,27 @@ class TestGenerateAdminTask:
         # 品質イテレーションセクションでは F001 への言及が残っている
         assert "F001 違反" in result
 
+    def test_uses_no_git_admin_template_when_git_disabled(self):
+        """enable_git=false 時は admin_task_no_git を使用することをテスト。"""
+        settings = Settings()
+        settings.enable_git = False
+        settings.enable_worktree = True
+
+        result = generate_admin_task(
+            session_id="123",
+            agent_id="admin-001",
+            plan_content="テスト",
+            branch_name="feature/test",
+            worker_count=2,
+            memory_context="",
+            project_name="test-project",
+            working_dir="/tmp/project",
+            settings=settings,
+        )
+
+        assert "No Git モード" in result
+        assert "create_worktree" in result
+
 
 class TestGenerate7SectionTask:
     """generate_7section_task 関数のテスト。"""
@@ -195,6 +216,21 @@ class TestGenerate7SectionTask:
             project_name="test-project",
         )
         assert "# タスク: TASK-001" in result
+
+    def test_uses_no_git_worker_template_when_git_disabled(self):
+        """enable_git=false 時は worker_task_no_git を使用することをテスト。"""
+        result = generate_7section_task(
+            task_id="TASK-NG-001",
+            agent_id="worker-001",
+            task_description="テストタスク",
+            persona_name="Backend Engineer",
+            persona_prompt="バックエンド開発者として...",
+            memory_context="",
+            project_name="test-project",
+            enable_git=False,
+        )
+        assert "No Git モード" in result
+        assert "git 操作は行わない" in result
 
     def test_includes_what_section(self):
         """Whatセクションにタスク説明が含まれることをテスト。"""

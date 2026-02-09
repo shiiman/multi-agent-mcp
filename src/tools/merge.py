@@ -68,6 +68,13 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "merge_completed_tasks", caller_agent_id)
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return {
+                "success": False,
+                "error": (
+                    "MCP_ENABLE_GIT=false のため merge_completed_tasks は実行できません。"
+                ),
+            }
 
         if strategy not in ("merge", "squash", "rebase"):
             return {

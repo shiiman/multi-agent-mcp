@@ -52,7 +52,7 @@ class TmuxManager(TmuxWorkspaceMixin):
 
     def _get_project_name(self, working_dir: str) -> str:
         """作業ディレクトリからプロジェクト名を返す。"""
-        return get_project_name(working_dir)
+        return get_project_name(working_dir, enable_git=self.settings.enable_git)
 
     async def create_session(self, name: str, working_dir: str) -> bool:
         session_name = name

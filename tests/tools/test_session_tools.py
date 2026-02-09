@@ -265,3 +265,77 @@ class TestInitTmuxWorkspace:
         assert result["provisional_cleanup"]["removed_dirs"] == []
         assert not source.exists()
         assert orphan.exists()
+
+    @pytest.mark.asyncio
+    async def test_init_tmux_workspace_allows_non_git_when_enable_git_false(
+        self, session_mock_ctx, git_repo
+    ):
+        """非gitディレクトリでも enable_git=false なら初期化できることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        non_git_dir = git_repo.parent / "non-git-project"
+        non_git_dir.mkdir(parents=True, exist_ok=True)
+
+        app_ctx = session_mock_ctx.request_context.lifespan_context
+        app_ctx.tmux.session_exists = AsyncMock(return_value=False)
+        app_ctx.tmux.create_main_session = AsyncMock(return_value=True)
+
+        result = await init_tmux_workspace(
+            working_dir=str(non_git_dir),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="issue-456",
+            enable_git=False,
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["mode"]["enable_git"] is False
+        assert result["mode"]["enable_worktree"] is False
+        assert result["session_name"].startswith("non-git-project-")
+
+    @pytest.mark.asyncio
+    async def test_init_tmux_workspace_fails_when_enable_git_true_on_non_git(
+        self, session_mock_ctx, git_repo
+    ):
+        """非gitディレクトリで enable_git=true を指定するとエラーになることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        non_git_dir = git_repo.parent / "plain-dir"
+        non_git_dir.mkdir(parents=True, exist_ok=True)
+
+        result = await init_tmux_workspace(
+            working_dir=str(non_git_dir),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="issue-789",
+            enable_git=True,
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "git リポジトリではありません" in result["error"]

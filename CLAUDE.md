@@ -1,16 +1,20 @@
 # Multi-Agent MCP Server
 
-An MCP (Model Context Protocol) server that enables parallel AI agent workflows using tmux and git worktree.
+An MCP (Model Context Protocol) server that enables parallel AI agent workflows using tmux and git worktree
+(with optional non-git mode support).
 
 ## Project Overview
 
-This project provides an MCP server that allows Claude Code (or other AI CLIs) to manage multiple parallel agents, each running in separate tmux sessions with isolated git worktrees.
+This project provides an MCP server that allows Claude Code (or other AI CLIs) to manage multiple parallel
+agents, each running in separate tmux sessions. In git mode, workers can use isolated git worktrees; in no-git
+mode, the same workflow runs without git/worktree dependencies.
 
 ### Key Features
 
 - **Multi-Agent Management**: Create and manage multiple AI agents with different roles (Owner, Admin, Worker)
 - **Tmux Integration**: Each agent runs in an isolated tmux session
 - **Git Worktree Support**: Parallel development with isolated working directories
+- **Git Mode Switch**: `MCP_ENABLE_GIT` enables git mode by default and allows non-git projects when disabled
 - **AI CLI Selection**: Support for Claude Code, Codex, and Gemini CLI
 - **Task Scheduling**: Priority-based task queue with dependency management
 - **Health Monitoring**: Stall/tmux死活監視 + 自動復旧 + daemon運用
@@ -238,7 +242,8 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 |----------|-------------|---------|
 | `MCP_MCP_DIR` | MCP working directory name | .multi-agent-mcp |
 | `MCP_MAX_WORKERS` | Maximum number of worker agents | 6 |
-| `MCP_ENABLE_WORKTREE` | Enable git worktree for workers | true |
+| `MCP_ENABLE_GIT` | Enable git-dependent features (false allows non-git directories) | true |
+| `MCP_ENABLE_WORKTREE` | Enable git worktree for workers (`enable_git=false` forces disabled) | true |
 | `MCP_WINDOW_NAME_MAIN` | Main tmux window name (Admin + Worker 1-6) | main |
 | `MCP_WINDOW_NAME_WORKER_PREFIX` | Prefix for extra worker windows | workers- |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |

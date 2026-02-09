@@ -265,7 +265,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         dispatch_wt = agent.worktree_path or agent.working_dir or str(project_root)
         dispatch_branch = branch_name or (selected_task.branch if selected_task else "")
-        enable_wt = app_ctx.settings.enable_worktree
+        enable_wt = app_ctx.settings.is_worktree_enabled()
 
         if enable_wt:
             wt_path, wt_error, generated_branch = await _prepare_worker_worktree(
@@ -338,7 +338,9 @@ def register_tools(mcp: FastMCP) -> None:
                 project_root=str(project_root),
                 model=agent_model,
                 role="admin",
-                role_template_path=str(get_role_template_path("admin")),
+                role_template_path=str(
+                    get_role_template_path("admin", enable_git=app_ctx.settings.enable_git)
+                ),
                 thinking_tokens=thinking_tokens,
                 reasoning_effort=reasoning_effort,
             )
@@ -433,9 +435,15 @@ def register_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": f"エージェント {agent_id} が見つかりません"}
 
         if agent.worktree_path:
-            project_root = Path(resolve_main_repo_root(agent.worktree_path))
+            if app_ctx.settings.enable_git:
+                project_root = Path(resolve_main_repo_root(agent.worktree_path))
+            else:
+                project_root = Path(agent.worktree_path).expanduser()
         elif agent.working_dir:
-            project_root = Path(resolve_main_repo_root(agent.working_dir))
+            if app_ctx.settings.enable_git:
+                project_root = Path(resolve_main_repo_root(agent.working_dir))
+            else:
+                project_root = Path(agent.working_dir).expanduser()
         else:
             return {
                 "success": False,

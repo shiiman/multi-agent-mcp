@@ -93,7 +93,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         from src.config.workflow_guides import get_role_guide as _get_role_guide
 
-        guide = _get_role_guide(role)
+        guide = _get_role_guide(role, enable_git=app_ctx.settings.enable_git)
 
         if not guide:
             available_roles = list_role_guides()
