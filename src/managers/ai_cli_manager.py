@@ -262,6 +262,17 @@ class AiCliManager:
 
         return args
 
+    def build_interactive_command(
+        self,
+        cli: AICli | str,
+        prompt: str | None = None,
+    ) -> str:
+        """対話起動用の CLI コマンド文字列を構築する。"""
+        if isinstance(cli, str):
+            cli = AICli(cli)
+        args = self._build_cli_args(cli, "", prompt)
+        return " ".join(shlex.quote(arg) for arg in args)
+
     async def open_worktree(
         self,
         worktree_path: str,
@@ -481,10 +492,19 @@ class AiCliManager:
             applescript = f'''
             tell application "iTerm"
                 activate
-                create window with default profile
-                tell current session of current window
-                    write text "cd {shlex.quote(escaped_path)} && {escaped_command}"
-                end tell
+                if (count of windows) > 0 then
+                    tell current window
+                        create tab with default profile
+                        tell current session
+                            write text "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                        end tell
+                    end tell
+                else
+                    create window with default profile
+                    tell current session of current window
+                        write text "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                    end tell
+                end if
             end tell
             '''
 

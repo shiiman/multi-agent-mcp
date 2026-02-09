@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -26,10 +26,12 @@ def tool_test_ctx(git_repo, settings):
     mock_tmux.create_main_session = AsyncMock(return_value=True)
     mock_tmux.send_keys = AsyncMock(return_value=True)
     mock_tmux.send_keys_to_pane = AsyncMock(return_value=True)
+    mock_tmux.send_with_rate_limit_to_pane = AsyncMock(return_value=True)
     mock_tmux.session_exists = AsyncMock(return_value=True)
     mock_tmux.get_pane_current_command = AsyncMock(return_value="zsh")
     mock_tmux.set_pane_title = AsyncMock(return_value=True)
     mock_tmux.add_extra_worker_window = AsyncMock(return_value=True)
+    mock_tmux.open_session_in_terminal = AsyncMock(return_value=True)
     mock_tmux._get_window_name = MagicMock(return_value="main")
     mock_tmux._run = AsyncMock(return_value="")
     mock_tmux.settings = settings
@@ -1148,3 +1150,132 @@ class TestCreateWorkersBatchBehavior:
         worker = app_ctx.agents["worker-idle"]
         assert worker.current_task == "task-123"
         assert worker.status == AgentStatus.BUSY
+
+
+class TestInitializeAgent:
+    """initialize_agent ツールのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_initialize_agent_uses_tmux_attach_and_pane_dispatch(self, mock_ctx, git_repo):
+        """initialize_agent が tmux attach + pane 送信で起動することをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.config.settings import TerminalApp
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        initialize_agent = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "initialize_agent":
+                initialize_agent = tool.fn
+                break
+        assert initialize_agent is not None
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            ai_cli=AICli.CODEX,
+            created_at=now,
+            last_activity=now,
+        )
+
+        with patch.object(
+            app_ctx.ai_cli, "open_worktree_in_terminal", new_callable=AsyncMock
+        ) as mock_open_terminal:
+            result = await initialize_agent(
+                agent_id="admin-001",
+                prompt_type="custom",
+                custom_prompt="review this task",
+                terminal="iterm2",
+                caller_agent_id="owner-001",
+                ctx=mock_ctx,
+            )
+
+        assert result["success"] is True
+        app_ctx.tmux.open_session_in_terminal.assert_awaited_once_with(
+            "test", terminal=TerminalApp.ITERM2
+        )
+        assert app_ctx.tmux.send_with_rate_limit_to_pane.await_count == 1
+        send_args, send_kwargs = app_ctx.tmux.send_with_rate_limit_to_pane.await_args
+        assert send_args[:3] == ("test", 0, 0)
+        assert "cd " in send_args[3]
+        assert "codex" in send_args[3]
+        assert "--dangerously-bypass-approvals-and-sandbox" in send_args[3]
+        assert send_kwargs["confirm_codex_prompt"] is True
+        mock_open_terminal.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_initialize_agent_fails_when_tmux_attach_fails(self, mock_ctx, git_repo):
+        """tmux attach 失敗時は起動せずエラーを返すことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        initialize_agent = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "initialize_agent":
+                initialize_agent = tool.fn
+                break
+        assert initialize_agent is not None
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        app_ctx.tmux.open_session_in_terminal = AsyncMock(return_value=False)
+
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            ai_cli=AICli.CLAUDE,
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await initialize_agent(
+            agent_id="worker-001",
+            prompt_type="custom",
+            custom_prompt="run",
+            terminal="iterm2",
+            caller_agent_id="owner-001",
+            ctx=mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "tmux セッション" in result["error"]
+        app_ctx.tmux.send_with_rate_limit_to_pane.assert_not_awaited()
