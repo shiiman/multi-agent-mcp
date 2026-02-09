@@ -23,6 +23,19 @@ from src.managers.worktree_manager import WorktreeManager
 from src.models.agent import Agent, AgentRole, AgentStatus
 
 
+@pytest.fixture(autouse=True)
+def disable_macos_notifications(monkeypatch):
+    """テスト中の macOS 通知送信を無効化する。"""
+
+    async def _noop_send_macos_notification(*_args, **_kwargs) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        "src.tools.helpers._send_macos_notification",
+        _noop_send_macos_notification,
+    )
+
+
 @pytest.fixture
 def temp_dir():
     """一時ディレクトリを作成する。"""
