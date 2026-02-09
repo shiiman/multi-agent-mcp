@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src.models.workspace import WorktreeInfo
+
 
 class TestWorktreeManager:
     """WorktreeManagerのテスト。"""
@@ -169,6 +171,90 @@ class TestWorktreeManagerRemoveWorktree:
             success, message = await worktree_manager.remove_worktree("feature/test")
             assert success is True
             assert "gtr" in message
+
+    @pytest.mark.asyncio
+    async def test_remove_worktree_gtr_resolves_branch_from_path(self, worktree_manager):
+        """gtr 有効時に path 指定から branch を解決して削除できることをテスト。"""
+        worktree_manager._force_gtr = True
+        worktree_manager._gtr_available = True
+
+        with (
+            patch.object(
+                worktree_manager,
+                "list_worktrees",
+                new=AsyncMock(
+                    return_value=[
+                        WorktreeInfo(
+                            path="/tmp/repo/.worktrees/feature/add-skill-worker-1-task001",
+                            branch="feature/add-skill-worker-1-task001",
+                            commit="abc123",
+                            is_bare=False,
+                            is_detached=False,
+                            locked=False,
+                            prunable=False,
+                        )
+                    ]
+                ),
+            ),
+            patch.object(
+                worktree_manager, "_run_command", new_callable=AsyncMock
+            ) as mock_run,
+        ):
+            mock_run.return_value = (0, "", "")
+            success, message = await worktree_manager.remove_worktree(
+                "/tmp/repo/.worktrees/feature/add-skill-worker-1-task001"
+            )
+
+            assert success is True
+            assert "feature/add-skill-worker-1-task001" in message
+            mock_run.assert_called_once()
+            assert mock_run.call_args[0][:4] == (
+                "git",
+                "gtr",
+                "rm",
+                "feature/add-skill-worker-1-task001",
+            )
+
+    @pytest.mark.asyncio
+    async def test_remove_worktree_native_deletes_feature_worker_branch(self, worktree_manager):
+        """native 削除時に feature/...-worker-... ブランチも削除することをテスト。"""
+        worktree_manager._force_gtr = False
+        worktree_manager._gtr_available = False
+
+        with patch.object(
+            worktree_manager,
+            "list_worktrees",
+            new=AsyncMock(
+                return_value=[
+                    WorktreeInfo(
+                        path="/tmp/repo/.worktrees/feature/add-skill-worker-1-task001",
+                        branch="feature/add-skill-worker-1-task001",
+                        commit="abc123",
+                        is_bare=False,
+                        is_detached=False,
+                        locked=False,
+                        prunable=False,
+                    )
+                ]
+            ),
+        ), patch.object(
+            worktree_manager, "_run_git", new_callable=AsyncMock
+        ) as mock_run_git:
+            mock_run_git.side_effect = [
+                (0, "", ""),  # worktree remove
+                (0, "", ""),  # branch delete
+            ]
+            success, message = await worktree_manager._remove_worktree_native(
+                "/tmp/repo/.worktrees/feature/add-skill-worker-1-task001"
+            )
+
+            assert success is True
+            assert "ブランチを削除しました" in message
+            assert mock_run_git.await_args_list[1].args == (
+                "branch",
+                "-D",
+                "feature/add-skill-worker-1-task001",
+            )
 
 
 class TestWorktreeManagerGetWorktreePath:

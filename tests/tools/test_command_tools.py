@@ -825,7 +825,7 @@ class TestSendTask:
         dashboard.assign_task(task_info.id, "worker-001")
 
         mock_worktree_manager = MagicMock()
-        mock_worktree_manager.get_current_branch = AsyncMock(return_value="main")
+        mock_worktree_manager.get_current_branch = AsyncMock(return_value="feature/add-skill")
 
         with (
             patch("src.tools.command.get_worktree_manager", return_value=mock_worktree_manager),
@@ -860,6 +860,9 @@ class TestSendTask:
         assert result["task_file"] == "/tmp/task.md"
         mock_create_wt.assert_called_once()
         mock_send.assert_called_once()
+        assert mock_create_wt.call_args.kwargs["branch"].startswith(
+            "feature/add-skill-worker-1-"
+        )
 
     @pytest.mark.asyncio
     async def test_send_task_worker_skips_worktree_when_disabled(

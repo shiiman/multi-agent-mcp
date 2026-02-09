@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 from src.managers.dashboard_manager import DashboardManager
-from src.models.dashboard import AgentSummary, TaskStatus
+from src.models.dashboard import AgentSummary, MessageSummary, TaskStatus
 
 
 class TestDashboardManagerInitialize:
@@ -516,6 +516,57 @@ class TestMarkdownDashboard:
         md_content = dashboard_manager.generate_markdown_dashboard()
         assert "## タスク詳細" not in md_content
 
+    def test_task_details_shows_failed_with_error_message(self, dashboard_manager):
+        """failed かつ補足情報ありのタスクを詳細表示することをテスト。"""
+        task = dashboard_manager.create_task(title="Failed Task")
+        dashboard_manager.update_task_status(
+            task.id,
+            TaskStatus.FAILED,
+            progress=100,
+            error_message="ネットワークエラー",
+        )
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "## タスク詳細" in md_content
+        assert "### Failed Task" in md_content
+        assert "**状態**: `failed`" in md_content
+        assert "**エラー**: ネットワークエラー" in md_content
+
+    def test_task_details_hides_failed_without_supplement(self, dashboard_manager):
+        """failed でも補足情報なしのタスクは詳細表示しないことをテスト。"""
+        task = dashboard_manager.create_task(title="Failed No Detail")
+        dashboard_manager.update_task_status(task.id, TaskStatus.FAILED, progress=100)
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "## タスク詳細" not in md_content
+
+    def test_task_details_mixes_in_progress_and_failed(self, dashboard_manager):
+        """in_progress / failed が同一セクションに表示されることをテスト。"""
+        in_progress_task = dashboard_manager.create_task(title="Doing Task")
+        dashboard_manager.update_task_status(
+            in_progress_task.id, TaskStatus.IN_PROGRESS, progress=55
+        )
+        dashboard_manager.update_task_checklist(
+            in_progress_task.id,
+            [{"text": "実装", "completed": False}],
+            "進捗更新",
+        )
+
+        failed_task = dashboard_manager.create_task(title="Broken Task")
+        dashboard_manager.update_task_status(
+            failed_task.id,
+            TaskStatus.FAILED,
+            progress=80,
+            error_message="テスト失敗",
+        )
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "## タスク詳細" in md_content
+        assert "### Doing Task" in md_content
+        assert "### Broken Task" in md_content
+        assert "**状態**: `in_progress`" in md_content
+        assert "**状態**: `failed`" in md_content
+
     def test_message_history_written_to_messages_md(self, dashboard_manager):
         """メッセージ履歴が messages.md に分離保存されることをテスト。"""
         session_dir = dashboard_manager.dashboard_dir.parent
@@ -580,6 +631,24 @@ class TestMarkdownDashboard:
         assert "<summary>" in messages_content
         assert "<details open>" in messages_content
         assert "詳細本文のテストメッセージです。" in messages_content
+
+    def test_system_actor_is_rendered_without_unknown_prefix(self, dashboard_manager):
+        """system 送信者が unknown(system) にならないことをテスト。"""
+        dashboard = dashboard_manager.get_dashboard()
+        dashboard.messages.append(
+            MessageSummary(
+                sender_id="system",
+                receiver_id=None,
+                message_type="system",
+                subject="",
+                content="system message",
+                created_at=datetime.now(),
+            )
+        )
+
+        messages_md = dashboard_manager._generate_messages_markdown(dashboard)
+        assert "unknown(system)" not in messages_md
+        assert "system → broadcast" in messages_md
 
     def test_cost_section_includes_role_and_agent_breakdown(self, dashboard_manager):
         """コスト情報に role/agent 内訳が表示されることをテスト。"""

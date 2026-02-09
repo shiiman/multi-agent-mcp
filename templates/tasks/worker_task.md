@@ -1,4 +1,4 @@
-# Task: {task_id}
+# タスク: {task_id}
 
 ## What（何をするか）
 
@@ -75,7 +75,7 @@ save_to_memory(
 
 **コミットしないと:**
 - ❌ Admin が変更をマージできない
-- ❌ 他の Worker の作業と統合できない
+- ❌ 他のWorkerの作業と統合できない
 - ❌ 成果物が失われる
 
 ```bash

@@ -211,7 +211,11 @@ async def cleanup_session_resources(
                 for wt in worktrees:
                     if wt.path == main_repo_path:
                         continue
-                    if "worker" in wt.path.lower() or "-worktrees/" in wt.path:
+                    if (
+                        "worker" in wt.path.lower()
+                        or ".worktrees/" in wt.path
+                        or "-worktrees/" in wt.path
+                    ):
                         try:
                             success, msg = await worktree_manager.remove_worktree(
                                 wt.path, force=True

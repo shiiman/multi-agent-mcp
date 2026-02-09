@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.tools.session_state import cleanup_session_resources
+from src.tools.session_tools import _migrate_provisional_session_dir
 
 # cleanup_session_resources 内で resolve_main_repo_root が呼ばれるのをモック
 _RESOLVE_PATCH = "src.tools.helpers_persistence.resolve_main_repo_root"
@@ -130,3 +131,37 @@ class TestCleanupOnCompletionUnified:
         # インメモリ状態がリセットされていること
         assert app_ctx.session_id is None
         assert len(app_ctx.agents) == 0
+
+
+class TestProvisionalSessionMigration:
+    """provisional セッション移行のテスト。"""
+
+    def test_migrates_provisional_directory(self, temp_dir):
+        """provisional-* ディレクトリが正式 session_id へ移行されることをテスト。"""
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        source = mcp_dir / "provisional-abcd1234"
+        source.mkdir(parents=True, exist_ok=True)
+        (source / "agents.json").write_text('{"owner":"owner-001"}', encoding="utf-8")
+
+        result = _migrate_provisional_session_dir(
+            project_root=str(temp_dir),
+            mcp_dir_name=".multi-agent-mcp",
+            previous_session_id="provisional-abcd1234",
+            new_session_id="issue-123",
+        )
+
+        target = mcp_dir / "issue-123"
+        assert result["executed"] is True
+        assert result["source_removed"] is True
+        assert (target / "agents.json").exists()
+        assert not source.exists()
+
+    def test_skips_non_provisional_session(self, temp_dir):
+        """provisional 以外の session_id では移行を行わないことをテスト。"""
+        result = _migrate_provisional_session_dir(
+            project_root=str(temp_dir),
+            mcp_dir_name=".multi-agent-mcp",
+            previous_session_id="issue-001",
+            new_session_id="issue-002",
+        )
+        assert result["executed"] is False

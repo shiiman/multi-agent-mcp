@@ -125,6 +125,14 @@ def _sanitize_branch_part(value: str) -> str:
     return cleaned or "main"
 
 
+def _normalize_worker_base_branch(base_branch: str) -> str:
+    """Worker 用ブランチ名に使う base 部分を正規化する。"""
+    normalized = (base_branch or "").strip()
+    if normalized.startswith("feature/"):
+        normalized = normalized[len("feature/") :]
+    return _sanitize_branch_part(normalized)
+
+
 def _short_task_id(task_id: str) -> str:
     """task_id を 8 桁に短縮する。"""
     alnum = re.sub(r"[^0-9A-Za-z]", "", task_id or "")
@@ -135,7 +143,7 @@ def _short_task_id(task_id: str) -> str:
 
 def build_worker_task_branch(base_branch: str, worker_no: int, task_id: str) -> str:
     """task 単位 worktree 用のブランチ名を生成する。"""
-    base = _sanitize_branch_part(base_branch)
+    base = _normalize_worker_base_branch(base_branch)
     return f"feature/{base}-worker-{worker_no}-{_short_task_id(task_id)}"
 
 
@@ -682,7 +690,7 @@ async def _send_task_to_worker(
     try:
         if not task_id:
             logger.warning("Worker %s へのタスク送信を中止: task_id が未指定です", worker_index + 1)
-            return _make_dispatch_result(False, dispatch_error="task_id is required")
+            return _make_dispatch_result(False, dispatch_error="task_id が必要です")
 
         project_root, task_file = _prepare_worker_task_content(
             app_ctx, agent, task_content, task_id, branch,
@@ -690,7 +698,7 @@ async def _send_task_to_worker(
         )
 
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
-            return _make_dispatch_result(False, dispatch_error="worker pane is not configured")
+            return _make_dispatch_result(False, dispatch_error="Workerペインが未設定です")
 
         agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
         worker_no = resolve_worker_number_from_slot(

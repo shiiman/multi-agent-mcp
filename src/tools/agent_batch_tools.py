@@ -135,7 +135,7 @@ def _pre_assign_pane_slots(
         if slot is None:
             logger.warning(
                 f"Worker {i + 1}: 利用可能な pane がありません"
-                "（Worker の完了を待って再試行してください）"
+                "（Workerの完了を待って再試行してください）"
             )
         pre_assigned.append(slot)
 
@@ -423,7 +423,7 @@ def _validate_batch_capacity(
         return reusable_workers, reuse_count, {
             "success": False,
             "error": (
-                "Worker 数が上限を超えます"
+                "Worker数が上限を超えます"
                 f"（現在: {current_worker_count}, 要求: {requested_count}, "
                 f"再利用可能: {reuse_count}, 新規上限: {new_worker_capacity}, "
                 f"総上限: {profile_max_workers}）"
@@ -466,7 +466,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
         create_configs = worker_configs[reuse_count:]
         project_name = get_project_name(repo_path)
         pre_assigned_slots = _pre_assign_pane_slots(agents, project_name, len(create_configs))
-        logger.info("Worker batch: reuse=%s, create=%s", reuse_count, len(create_configs))
+        logger.info("Workerバッチ: reuse=%s, create=%s", reuse_count, len(create_configs))
 
         reuse_results = await asyncio.gather(*[
             _reuse_single_worker(
@@ -484,8 +484,8 @@ def register_batch_tools(mcp: FastMCP) -> None:
 
         workers, failed_count, errors = _collect_batch_results([*reuse_results, *create_results])
         ok = failed_count == 0
-        msg = (f"{len(workers)} 件の Worker 処理が完了しました" if ok
-               else f"{len(workers)} 件の Worker 処理が完了（{failed_count} 件失敗）")
+        msg = (f"{len(workers)} 件のWorker処理が完了しました" if ok
+               else f"{len(workers)} 件のWorker処理が完了（{failed_count} 件失敗）")
         try:
             from src.managers.healthcheck_daemon import ensure_healthcheck_daemon_started
             await ensure_healthcheck_daemon_started(app_ctx)

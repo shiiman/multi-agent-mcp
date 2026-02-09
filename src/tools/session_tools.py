@@ -1,6 +1,8 @@
 """セッション管理ツール実装。"""
 
 import logging
+import shutil
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -20,6 +22,52 @@ from src.tools.session_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _migrate_provisional_session_dir(
+    project_root: str,
+    mcp_dir_name: str,
+    previous_session_id: str | None,
+    new_session_id: str,
+) -> dict[str, Any]:
+    """provisional セッションディレクトリを正式 session_id 配下へ移行する。"""
+    result: dict[str, Any] = {
+        "executed": False,
+        "source_session_id": previous_session_id,
+        "target_session_id": new_session_id,
+        "source_removed": False,
+    }
+    if (
+        not previous_session_id
+        or previous_session_id == new_session_id
+        or not previous_session_id.startswith("provisional-")
+    ):
+        return result
+
+    base_dir = Path(project_root) / mcp_dir_name
+    source_dir = base_dir / previous_session_id
+    target_dir = base_dir / new_session_id
+    if not source_dir.exists() or not source_dir.is_dir():
+        return result
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for child in source_dir.iterdir():
+        target_child = target_dir / child.name
+        if child.is_dir() and target_child.exists() and target_child.is_dir():
+            shutil.copytree(child, target_child, dirs_exist_ok=True)
+            shutil.rmtree(child, ignore_errors=True)
+            continue
+        if child.is_file() and target_child.exists():
+            shutil.copy2(child, target_child)
+            child.unlink(missing_ok=True)
+            continue
+        shutil.move(str(child), str(target_child))
+
+    shutil.rmtree(source_dir, ignore_errors=True)
+    result["executed"] = True
+    result["source_removed"] = not source_dir.exists()
+    return result
+
 
 def register_tools(mcp: FastMCP) -> None:
     """セッション管理ツールを登録する。"""
@@ -204,6 +252,7 @@ def register_tools(mcp: FastMCP) -> None:
             return role_error
 
         tmux = app_ctx.tmux
+        resolved_project_root = resolve_main_repo_root(working_dir)
 
         # 既存の tmux セッションが存在するかチェック（重複起動防止）
         project_name = get_project_name(working_dir)
@@ -228,16 +277,43 @@ def register_tools(mcp: FastMCP) -> None:
                 }
 
         # session_id を設定（後続の create_agent 等で使用）
+        migration_result = {
+            "executed": False,
+            "source_session_id": app_ctx.session_id,
+            "target_session_id": session_id,
+            "source_removed": False,
+        }
         if session_id:
+            migration_result = _migrate_provisional_session_dir(
+                project_root=resolved_project_root,
+                mcp_dir_name=app_ctx.settings.mcp_dir,
+                previous_session_id=app_ctx.session_id,
+                new_session_id=session_id,
+            )
             app_ctx.session_id = session_id
 
             # session_id 設定後、既存エージェント（Owner 等）をファイルに再保存
             # Owner は init_tmux_workspace の前に作成されるため、
             # session_id 未設定で agents.json への保存に失敗している
+            from src.models.agent import AgentRole
             from src.tools.helpers_persistence import save_agent_to_file as _save_agent
+            from src.tools.helpers_registry import save_agent_to_registry
 
             for agent in app_ctx.agents.values():
                 _save_agent(app_ctx, agent)
+                owner_agent = next(
+                    (a for a in app_ctx.agents.values() if a.role == AgentRole.OWNER),
+                    None,
+                )
+                owner_id = owner_agent.id if owner_agent else agent.id
+                if agent.role == AgentRole.OWNER:
+                    owner_id = agent.id
+                save_agent_to_registry(
+                    agent_id=agent.id,
+                    owner_id=owner_id,
+                    project_root=resolved_project_root,
+                    session_id=session_id,
+                )
 
         # gtr 自動確認・設定
         gtr_status = {
@@ -275,7 +351,7 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # project_root を設定（screenshot 等で使用）
-        app_ctx.project_root = resolve_main_repo_root(working_dir)
+        app_ctx.project_root = resolved_project_root
         refresh_app_settings(app_ctx, app_ctx.project_root)
         logger.info(f"project_root を設定しました: {app_ctx.project_root}")
 
@@ -300,12 +376,14 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_name": session_name,
                     "session_id": session_id,
                     "gtr_status": gtr_status,
+                    "provisional_migration": migration_result,
                     "message": message,
                 }
             else:
                 return {
                     "success": False,
                     "gtr_status": gtr_status,
+                    "provisional_migration": migration_result,
                     "error": message,
                 }
         else:
@@ -317,11 +395,13 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_name": session_name,
                     "session_id": session_id,
                     "gtr_status": gtr_status,
+                    "provisional_migration": migration_result,
                     "message": "メインセッションをバックグラウンドで作成しました",
                 }
             else:
                 return {
                     "success": False,
                     "gtr_status": gtr_status,
+                    "provisional_migration": migration_result,
                     "error": "メインセッションの作成に失敗しました",
                 }

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.models.workspace import WorktreeInfo
 from src.tools.session_state import (
     _clear_config_session_id,
     _reset_app_context,
@@ -213,6 +214,57 @@ class TestCleanupSessionResources:
         assert app_ctx.session_id is None
         assert app_ctx.project_root is None
         assert len(app_ctx.agents) == 0
+
+    @pytest.mark.asyncio
+    async def test_removes_dot_worktrees_path(self, app_ctx, temp_dir):
+        """`.worktrees/` 配下の worktree が削除対象になることをテスト。"""
+        repo_path = temp_dir / "repo"
+        repo_path.mkdir(parents=True, exist_ok=True)
+        app_ctx.project_root = str(repo_path)
+
+        mock_worktree_manager = MagicMock()
+        mock_worktree_manager.list_worktrees = AsyncMock(
+            return_value=[
+                WorktreeInfo(
+                    path=str(repo_path),
+                    branch="main",
+                    commit="aaa111",
+                    is_bare=False,
+                    is_detached=False,
+                    locked=False,
+                    prunable=False,
+                ),
+                WorktreeInfo(
+                    path=str(repo_path / ".worktrees" / "feature/add-worker-task"),
+                    branch="feature/add-worker-task",
+                    commit="bbb222",
+                    is_bare=False,
+                    is_detached=False,
+                    locked=False,
+                    prunable=False,
+                ),
+            ]
+        )
+        mock_worktree_manager.remove_worktree = AsyncMock(
+            return_value=(True, "removed")
+        )
+
+        with patch(
+            _HEALTHCHECK_PATCH, new_callable=AsyncMock
+        ), patch(
+            "src.tools.helpers.get_worktree_manager",
+            return_value=mock_worktree_manager,
+        ), patch(
+            _RESOLVE_PATCH, return_value=str(repo_path)
+        ):
+            results = await cleanup_session_resources(
+                app_ctx,
+                remove_worktrees=True,
+                repo_path=str(repo_path),
+            )
+
+        assert results["removed_worktrees"] == 1
+        mock_worktree_manager.remove_worktree.assert_awaited_once()
 
 
 class TestDetectStaleSessions:

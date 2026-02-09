@@ -194,7 +194,7 @@ class TestGenerate7SectionTask:
             memory_context="",
             project_name="test-project",
         )
-        assert "# Task: TASK-001" in result
+        assert "# タスク: TASK-001" in result
 
     def test_includes_what_section(self):
         """Whatセクションにタスク説明が含まれることをテスト。"""

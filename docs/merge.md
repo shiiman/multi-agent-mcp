@@ -1,18 +1,20 @@
 # Merge ガイド
 
-完了タスクの作業ブランチをまとめて統合する `merge_completed_tasks` の運用ガイドです。
+完了タスクの作業ブランチを統合ブランチへ「commit なし」で展開する
+`merge_completed_tasks` の運用ガイドです。
 
 ## 対象ツール
 
 | ツール | 説明 | 使用者 |
 | ------ | ---- | ------ |
-| `merge_completed_tasks` | 完了タスクの branch を `base_branch` に統合 | Owner, Admin |
+| `merge_completed_tasks` | 完了タスク branch を commit なしで統合ブランチへ展開 | Owner, Admin |
 
 ## 前提
 
 - Dashboard 上で `status=completed` のタスクに `branch` が設定されていること
 - `repo_path` が有効な Git リポジトリであること
-- `base_branch` が存在し checkout 可能であること
+- `base_branch` が存在すること
+- 作業ツリーがクリーンであること（未コミット変更がないこと）
 
 ## 処理フロー
 
@@ -20,33 +22,40 @@
 
 1. `base_branch` を checkout
 2. completed タスクから branch を重複除去して収集
-3. 既に取り込み済みか判定（`git merge-base --is-ancestor`）
-4. 未取り込み branch を戦略に従って統合
-5. Dashboard の messages に結果要約を記録
+3. `base_branch` / 各 branch の存在確認
+4. 既に取り込み済みか判定（`git merge-base --is-ancestor`）
+5. 未取り込み branch を `--no-commit` で適用
+6. 複数 branch を連続適用するため一時コミットを作成
+7. 最後に `git reset --mixed <base_head>` で commit を打ち消し、
+   **統合結果を unstaged diff として残す**
+8. Dashboard の messages に結果要約を記録
 
 返却値には以下が含まれます。
 
+- `preview_merge`（常に `true`）
+- `working_tree_updated`
+- `base_head`
 - `merged`
 - `already_merged`
 - `failed`
 - `conflicts`
+- `strategy_warning`（`strategy=rebase` 指定時のみ）
 
 `failed` と `conflicts` がゼロのとき `success=true` です。
 
-## 統合戦略
+## strategy パラメータ
 
-| `strategy` | 実行コマンド | 用途 |
-| ---------- | ------------ | ---- |
-| `merge` | `git merge --no-ff <branch>` | 履歴を残した通常統合 |
-| `squash` | `git merge --squash <branch>` + `git commit` | 1コミットに圧縮 |
-| `rebase` | `git rebase <branch>` | 履歴整形（利用時は注意） |
+| `strategy` | 実際の適用 |
+| ---------- | ---------- |
+| `merge` | `git merge --no-ff --no-commit <branch>` |
+| `squash` | `git merge --squash <branch>` |
+| `rebase` | no-commit プレビューでは非対応のため `merge` 相当で適用 |
 
-## 衝突時の動作
+## 失敗/衝突時の扱い
 
-- エラーメッセージに `conflict` を含む場合は `conflicts` に記録
-- `git merge --abort` / `git rebase --abort` を試行
-- それ以外の失敗は `failed` に記録
-- どちらかが存在すると `success=false`
+- ブランチが存在しない場合は `failed` に `branch_not_found` を記録
+- 競合時は `conflicts` に記録し `merge --abort` を試行
+- `failed` がある場合は `success=false`
 
 ## 実行例
 
@@ -62,7 +71,6 @@ merge_completed_tasks(
 
 ## 運用上の注意
 
-- `strategy="rebase"` は履歴を書き換えるため、共有ブランチ運用では慎重に使ってください。
-- 実行前に作業ツリーをクリーンにしておくと失敗を減らせます。
-- `conflicts` が返った場合は手動解消後、再度実行してください。
-
+- 実行後、統合ブランチに **unstaged diff** が残ります。
+- commit / push は自動実行しません。
+- 差分確認後に `git add` / `git commit` を行ってください。

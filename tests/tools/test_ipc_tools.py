@@ -167,6 +167,72 @@ class TestSendMessage:
         assert "ブロードキャスト" in result["message"]
 
     @pytest.mark.asyncio
+    async def test_task_approved_triggers_auto_cleanup(self, ipc_mock_ctx, git_repo):
+        """task_approved 送信時に自動クリーンアップが実行されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+        assert send_message is not None
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        cleanup_result = {
+            "terminated_sessions": 1,
+            "cleared_agents": 2,
+            "removed_worktrees": 1,
+            "registry_removed": 2,
+        }
+        with patch(
+            "src.tools.ipc.cleanup_session_resources",
+            new=AsyncMock(return_value=cleanup_result),
+        ) as mock_cleanup:
+            result = await send_message(
+                sender_id="owner-001",
+                receiver_id="admin-001",
+                message_type="task_approved",
+                content="承認します",
+                caller_agent_id="owner-001",
+                ctx=ipc_mock_ctx,
+            )
+
+            assert result["success"] is True
+            assert result["auto_cleanup_executed"] is True
+            assert result["auto_cleanup_result"] == cleanup_result
+            assert result["auto_cleanup_error"] is None
+            mock_cleanup.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_admin_task_complete_is_blocked_when_quality_gate_not_met(
         self, ipc_mock_ctx, git_repo
     ):

@@ -246,14 +246,14 @@ class DashboardMarkdownMixin:
         return lines
 
     def _generate_task_details(self, dashboard: Dashboard) -> list[str]:
-        """進行中タスクの詳細セクションを生成する。"""
-        in_progress_tasks = [
+        """進行中/失敗タスクの詳細セクションを生成する。"""
+        detail_tasks = [
             t
             for t in dashboard.tasks
-            if t.status == TaskStatus.IN_PROGRESS
+            if t.status in (TaskStatus.IN_PROGRESS, TaskStatus.FAILED)
             and (t.checklist or t.logs or t.error_message)
         ]
-        if not in_progress_tasks:
+        if not detail_tasks:
             return []
 
         lines = [
@@ -263,10 +263,12 @@ class DashboardMarkdownMixin:
             "## タスク詳細",
         ]
 
-        for task in in_progress_tasks:
+        for task in detail_tasks:
             lines.extend([
                 "",
                 f"### {task.title}",
+                "",
+                f"**状態**: `{task.status.value}`",
                 "",
                 f"**進捗**: {task.progress}%",
             ])
@@ -324,6 +326,8 @@ class DashboardMarkdownMixin:
             def _format_actor(actor_id: str | None) -> str:
                 if not actor_id:
                     return "unknown"
+                if actor_id == "system":
+                    return "system"
                 label = agent_labels.get(actor_id)
                 if label:
                     return label

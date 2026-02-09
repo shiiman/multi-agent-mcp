@@ -159,6 +159,8 @@ cost:
 
 ### ユーザー認証機能
 
+**状態**: `in_progress`
+
 **進捗**: 50%
 
 **チェックリスト**:
@@ -427,7 +429,8 @@ report_task_completion(
 - `# Multi-Agent Dashboard`
 - `## エージェント状態`（表）
 - `## タスク状態`（表）
-- `## タスク詳細`（進行中タスクに checklist/log/error がある場合のみ）
+- `## タスク詳細`
+  （`in_progress` または `failed` かつ `checklist/log/error_message` のいずれかがある場合のみ）
 - `## 統計`（箇条書き）
 - `## コスト情報`（API 呼び出しがある場合のみ、箇条書き）
 - ステータス絵文字: `⏳` pending / `🔄` in_progress / `✅` completed / `❌` failed / `🚫` blocked / `🗑️` cancelled

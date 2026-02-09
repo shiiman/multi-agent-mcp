@@ -142,6 +142,12 @@ class TestBuildWorkerTaskBranch:
         result = build_worker_task_branch("main", 1, "task-001")
         assert result.startswith("feature/main-worker-1-")
 
+    def test_strips_feature_prefix_from_base_branch(self):
+        """base が feature/ の場合も feature/feature- にならないことをテスト。"""
+        result = build_worker_task_branch("feature/add-skill", 2, "task-001")
+        assert result.startswith("feature/add-skill-worker-2-")
+        assert not result.startswith("feature/feature-")
+
 
 class TestResolveWorkerNumberFromSlot:
     """resolve_worker_number_from_slot のテスト。"""

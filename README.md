@@ -152,7 +152,7 @@ claude mcp list
 
 | Tool | 説明 |
 |------|------|
-| `merge_completed_tasks` | 完了タスクの作業ブランチをbaseブランチへ統合 |
+| `merge_completed_tasks` | 完了タスクの作業ブランチを commit なしで統合ブランチへ展開 |
 
 ### IPC/メッセージング（4個）
 

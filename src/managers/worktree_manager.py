@@ -9,6 +9,7 @@ gtr: https://github.com/coderabbitai/git-worktree-runner
 import asyncio
 import logging
 import os
+import re
 import subprocess
 
 from src.models.workspace import WorktreeInfo
@@ -245,17 +246,18 @@ class WorktreeManager:
             return await self._remove_worktree_native(path_or_branch, force)
 
     async def _remove_worktree_gtr(
-        self, branch: str, force: bool = False
+        self, path_or_branch: str, force: bool = False
     ) -> tuple[bool, str]:
         """gtr を使用してworktreeを削除する。
 
         Args:
-            branch: ブランチ名
+            path_or_branch: worktree パスまたはブランチ名
             force: 強制削除するか
 
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
+        branch = await self._resolve_branch_for_gtr(path_or_branch)
         args = ["git", "gtr", "rm", branch]
         if force:
             args.append("--force")
@@ -266,8 +268,25 @@ class WorktreeManager:
             logger.error(f"gtr worktree削除エラー: {stderr}")
             return False, f"worktree削除に失敗しました: {stderr}"
 
-        logger.info(f"gtr でworktreeを削除しました: {branch}")
+        logger.info(f"gtr でworktreeを削除しました: {branch} (input={path_or_branch})")
         return True, f"worktreeを削除しました (gtr): {branch}"
+
+    async def _resolve_branch_for_gtr(self, path_or_branch: str) -> str:
+        """gtr rm 用に path 指定から branch を解決する。"""
+        normalized = os.path.realpath(path_or_branch)
+        for wt in await self.list_worktrees():
+            if os.path.realpath(wt.path) == normalized:
+                return wt.branch
+        return path_or_branch
+
+    @staticmethod
+    def _is_worker_branch(branch_name: str | None) -> bool:
+        """cleanup 対象となる worker 系ブランチかを判定する。"""
+        if not branch_name:
+            return False
+        if branch_name.startswith("worker-"):
+            return True
+        return bool(re.match(r"^feature/.+-worker-\d+-[0-9a-z]+$", branch_name))
 
     async def _remove_worktree_native(
         self, path: str, force: bool = False
@@ -307,7 +326,7 @@ class WorktreeManager:
 
         # ブランチも削除（gtr と同様の動作）
         branch_deleted = False
-        if branch_name and branch_name.startswith("worker-"):
+        if self._is_worker_branch(branch_name):
             delete_args = ["branch", "-D", branch_name]
             branch_code, _, branch_stderr = await self._run_git(*delete_args)
             if branch_code == 0:

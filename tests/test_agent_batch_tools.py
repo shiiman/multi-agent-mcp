@@ -4,6 +4,7 @@ from datetime import datetime
 
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.agent_batch_tools import _validate_batch_capacity
+from src.tools.agent_helpers import build_worker_task_branch
 
 
 def _make_worker_agent(
@@ -67,3 +68,13 @@ class TestValidateBatchCapacity:
         )
         assert error is not None
         assert "上限を超えます" in error["error"]
+
+
+class TestWorkerBranchNaming:
+    """Worker ブランチ命名のテスト。"""
+
+    def test_feature_prefix_is_not_duplicated(self):
+        """feature/ 起点でも feature/feature- が重複しないことをテスト。"""
+        branch = build_worker_task_branch("feature/add-skill", 3, "task-123")
+        assert branch.startswith("feature/add-skill-worker-3-")
+        assert not branch.startswith("feature/feature-")

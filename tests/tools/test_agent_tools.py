@@ -719,7 +719,7 @@ class TestSendTaskToWorker:
         )
         task_text = task_path.read_text(encoding="utf-8")
         assert "# Multi-Agent MCP - Worker Agent" not in task_text
-        assert "# Task: task-001" in task_text
+        assert "# タスク: task-001" in task_text
         assert 'task_id="task-001"' in task_text
 
     @pytest.mark.asyncio
@@ -765,7 +765,7 @@ class TestSendTaskToWorker:
 
         assert result["task_sent"] is False
         assert result["dispatch_mode"] == "none"
-        assert result["dispatch_error"] == "task_id is required"
+        assert result["dispatch_error"] == "task_id が必要です"
 
     @pytest.mark.asyncio
     async def test_send_task_to_worker_uses_followup_for_running_ai(self, mock_ctx, git_repo):

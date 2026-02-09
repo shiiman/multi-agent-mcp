@@ -23,6 +23,7 @@ from src.tools.helpers import (
     sync_agents_from_file,
 )
 from src.tools.helpers_managers import ensure_dashboard_manager
+from src.tools.session_state import cleanup_session_resources
 
 logger = logging.getLogger(__name__)
 _ADMIN_DASHBOARD_GRANT_SECONDS = 90
@@ -425,6 +426,9 @@ def register_tools(mcp: FastMCP) -> None:
         # macOS 通知は admin→owner の task_complete のみに制限
         notification_sent = False
         notification_method = None
+        auto_cleanup_executed = False
+        auto_cleanup_result: dict[str, Any] | None = None
+        auto_cleanup_error: str | None = None
         if receiver_id:
             sync_agents_from_file(app_ctx)
             receiver_agent = app_ctx.agents.get(receiver_id)
@@ -468,6 +472,18 @@ def register_tools(mcp: FastMCP) -> None:
                         notification_method = "macos"
                         logger.info("IPC通知を送信(macOS): %s", receiver_id)
 
+        if msg_type == MessageType.TASK_APPROVED:
+            auto_cleanup_executed = True
+            try:
+                auto_cleanup_result = await cleanup_session_resources(
+                    app_ctx,
+                    remove_worktrees=True,
+                    repo_path=app_ctx.project_root,
+                )
+            except Exception as e:
+                auto_cleanup_error = str(e)
+                logger.warning("task_approved 後の自動クリーンアップに失敗: %s", e)
+
         return {
             "success": True,
             "message_id": message.id,
@@ -477,6 +493,9 @@ def register_tools(mcp: FastMCP) -> None:
             "receiver_id": receiver_id,
             "rerouted_receiver_id": rerouted_receiver_id,
             "gate": gate_detail if gate_detail else None,
+            "auto_cleanup_executed": auto_cleanup_executed,
+            "auto_cleanup_result": auto_cleanup_result,
+            "auto_cleanup_error": auto_cleanup_error,
             "message": (
                 "ブロードキャストを送信しました"
                 if receiver_id is None
