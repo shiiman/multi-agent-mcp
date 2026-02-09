@@ -438,7 +438,7 @@ class AiCliManager:
     async def _open_in_ghostty(
         self, worktree_path: str, command_args: list[str]
     ) -> tuple[bool, str]:
-        """Ghostty で新しいウィンドウを開いてコマンドを実行する。
+        """Ghostty でターミナルを開いてコマンドを実行する。
 
         Args:
             worktree_path: 作業ディレクトリのパス
@@ -448,6 +448,16 @@ class AiCliManager:
             (成功したかどうか, メッセージ) のタプル
         """
         try:
+            cmd = "cd " + shlex.quote(worktree_path) + " && " + " ".join(
+                shlex.quote(arg) for arg in command_args
+            )
+
+            if await self._is_ghostty_running():
+                tab_opened = await self._open_in_ghostty_tab(cmd)
+                if tab_opened:
+                    return True, "Ghostty の新しいタブでターミナルを開きました"
+                logger.warning("Ghostty タブ追加に失敗したため、新規ウィンドウで再試行します")
+
             # NOTE:
             # Ghostty(macOS) は -e の後ろを argv として受け取るため、
             # 1つの文字列ではなく引数配列をそのまま渡す必要がある。
@@ -471,6 +481,64 @@ class AiCliManager:
         except Exception as e:
             logger.error(f"Ghostty 起動エラー: {e}")
             return False, f"Ghostty 起動エラー: {e}"
+
+    async def _is_ghostty_running(self) -> bool:
+        """Ghostty が起動中かを確認する。"""
+        applescript = (
+            'if application "Ghostty" is running then return "true" '
+            'else return "false"'
+        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "osascript",
+                "-e",
+                applescript,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return False
+            return "true" in stdout.decode().lower()
+        except Exception:
+            return False
+
+    async def _open_in_ghostty_tab(self, command: str) -> bool:
+        """起動中の Ghostty に新しいタブを開いてコマンドを実行する。"""
+        escaped_command = escape_applescript(command)
+        applescript = f'''
+        set the clipboard to "{escaped_command}"
+        tell application "Ghostty"
+            activate
+        end tell
+        tell application "System Events"
+            tell process "Ghostty"
+                keystroke "t" using command down
+                delay 0.5
+                keystroke "v" using command down
+                delay 0.1
+                keystroke return
+            end tell
+        end tell
+        '''
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "osascript",
+                "-e",
+                applescript,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                return True
+            logger.warning(
+                "Ghostty タブ追加失敗: %s",
+                stderr.decode().strip() if stderr else "unknown",
+            )
+            return False
+        except Exception:
+            return False
 
     async def _open_in_iterm2(
         self, worktree_path: str, command: str
@@ -528,7 +596,7 @@ class AiCliManager:
     async def _open_in_terminal_app(
         self, worktree_path: str, command: str
     ) -> tuple[bool, str]:
-        """macOS Terminal.app で新しいウィンドウを開いてコマンドを実行する。
+        """macOS Terminal.app でターミナルを開いてコマンドを実行する。
 
         Args:
             worktree_path: 作業ディレクトリのパス
@@ -545,18 +613,28 @@ class AiCliManager:
             applescript = f'''
             tell application "Terminal"
                 activate
-                do script "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                if (count of windows) > 0 then
+                    tell front window
+                        do script "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                    end tell
+                    return "tab"
+                else
+                    do script "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                    return "window"
+                end if
             end tell
             '''
 
             proc = await asyncio.create_subprocess_exec(
                 "osascript", "-e", applescript,
-                stdout=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await proc.communicate()
+            stdout, stderr = await proc.communicate()
 
             if proc.returncode == 0:
+                if "tab" in stdout.decode().lower():
+                    return True, "Terminal.app の新しいタブでターミナルを開きました"
                 return True, "Terminal.app でターミナルを開きました"
             else:
                 error_msg = stderr.decode().strip() if stderr else "不明なエラー"

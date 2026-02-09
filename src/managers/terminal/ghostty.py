@@ -44,9 +44,9 @@ class GhosttyExecutor(TerminalExecutor):
         session_name = self._extract_session_name(script)
 
         try:
-            # 既存の Ghostty ウィンドウがあるか確認
-            if await self._has_window():
-                success = await self._open_in_tab(script_path, session_name)
+            # 既存の Ghostty プロセスがある場合はタブ追加を試みる
+            if await self._is_running():
+                success = await self._open_in_tab(f"exec bash '{script_path}'")
                 if success:
                     return True, "Ghostty の新しいタブでワークスペースを開きました"
                 # タブ追加に失敗した場合は新しいウィンドウで開く
@@ -77,20 +77,16 @@ class GhosttyExecutor(TerminalExecutor):
             logger.error(f"Ghostty 起動エラー: {e}")
             return False, f"Ghostty 起動エラー: {e}"
 
-    async def _has_window(self) -> bool:
-        """Ghostty ウィンドウが存在するか確認する。"""
-        applescript = '''
-tell application "System Events"
-    if exists process "Ghostty" then
-        tell process "Ghostty"
-            if (count of windows) > 0 then
-                return "true"
-            end if
-        end tell
-    end if
-    return "false"
-end tell
-'''
+    def _escape_applescript_string(self, value: str) -> str:
+        """AppleScript 文字列用にエスケープする。"""
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    async def _is_running(self) -> bool:
+        """Ghostty が起動中かを確認する。"""
+        applescript = (
+            'if application "Ghostty" is running then return "true" '
+            'else return "false"'
+        )
         try:
             code, stdout, _ = await self._run_shell(f"osascript -e '{applescript}'")
             return code == 0 and "true" in stdout.lower()
@@ -98,13 +94,12 @@ end tell
             logger.debug(f"Ghostty 実行チェックをスキップ: {e}")
             return False
 
-    async def _open_in_tab(self, script_path: str, session_path: str) -> bool:
-        """既存の Ghostty ウィンドウに新しいタブとしてスクリプトを実行する。"""
-        # クリップボードを使用して入力（keystroke は日本語入力モードの影響を受けるため）
-        command = f"exec bash '{script_path}'"
+    async def _open_in_tab(self, command: str) -> bool:
+        """既存の Ghostty ウィンドウに新しいタブを開いてコマンドを実行する。"""
+        escaped_command = self._escape_applescript_string(command)
         applescript = f'''
 -- コマンドをクリップボードに設定
-set the clipboard to "{command}"
+set the clipboard to "{escaped_command}"
 
 tell application "Ghostty"
     activate
@@ -112,8 +107,8 @@ end tell
 
 tell application "System Events"
     tell process "Ghostty"
-        -- 新しいタブを開く
-        click menu item "New Tab" of menu "File" of menu bar 1
+        -- locale 非依存で新しいタブを開く
+        keystroke "t" using command down
         delay 0.5
 
         -- クリップボードから貼り付け（Cmd+V）

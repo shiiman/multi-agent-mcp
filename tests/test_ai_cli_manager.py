@@ -466,6 +466,31 @@ class TestAiCliManagerTerminal:
             assert "失敗" in message
 
     @pytest.mark.asyncio
+    async def test_open_in_ghostty_prefers_tab_when_running(self, ai_cli_manager):
+        """Ghostty 起動中は新しいタブを優先することをテスト。"""
+        with (
+            patch.object(
+                ai_cli_manager, "_is_ghostty_running", new_callable=AsyncMock
+            ) as mock_running,
+            patch.object(
+                ai_cli_manager, "_open_in_ghostty_tab", new_callable=AsyncMock
+            ) as mock_open_tab,
+            patch("asyncio.create_subprocess_exec") as mock_exec,
+        ):
+            mock_running.return_value = True
+            mock_open_tab.return_value = True
+
+            success, message = await ai_cli_manager._open_in_ghostty(
+                "/tmp/test", ["claude", "--dangerously-skip-permissions", "hello world"]
+            )
+
+            assert success is True
+            assert "新しいタブ" in message
+            mock_running.assert_awaited_once()
+            mock_open_tab.assert_awaited_once()
+            mock_exec.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_open_in_iterm2_success(self, ai_cli_manager):
         """iTerm2 でターミナルを開くことをテスト。"""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
@@ -494,6 +519,21 @@ class TestAiCliManagerTerminal:
             )
             assert success is True
             assert "Terminal.app" in message
+
+    @pytest.mark.asyncio
+    async def test_open_in_terminal_app_uses_tab_when_window_exists(self, ai_cli_manager):
+        """Terminal.app 既存ウィンドウ時にタブメッセージを返すことをテスト。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"tab\n", b""))
+            mock_exec.return_value = mock_proc
+
+            success, message = await ai_cli_manager._open_in_terminal_app(
+                "/tmp/test", "claude"
+            )
+            assert success is True
+            assert "新しいタブ" in message
 
     @pytest.mark.asyncio
     async def test_open_worktree_in_terminal_cli_not_available(self, ai_cli_manager):

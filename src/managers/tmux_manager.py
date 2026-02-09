@@ -159,14 +159,66 @@ class TmuxManager(TmuxWorkspaceMixin):
         import shutil
         from pathlib import Path
 
+        def _escape_applescript_string(value: str) -> str:
+            return value.replace("\\", "\\\\").replace('"', '\\"')
+
+        async def _is_ghostty_running() -> bool:
+            applescript = (
+                'if application "Ghostty" is running then return "true" '
+                'else return "false"'
+            )
+            code, stdout, _ = await self._run_exec("osascript", "-e", applescript)
+            return code == 0 and "true" in stdout.lower()
+
+        async def _open_tab_in_running_ghostty(command: str) -> bool:
+            escaped_command = _escape_applescript_string(command)
+            applescript = f'''
+            set the clipboard to "{escaped_command}"
+            tell application "Ghostty"
+                activate
+            end tell
+            tell application "System Events"
+                tell process "Ghostty"
+                    keystroke "t" using command down
+                    delay 0.5
+                    keystroke "v" using command down
+                    delay 0.1
+                    keystroke return
+                end tell
+            end tell
+            '''
+            code, _, _ = await self._run_exec("osascript", "-e", applescript)
+            return code == 0
+
         ghostty_path = shutil.which("ghostty")
+        ghostty_app = Path("/Applications/Ghostty.app")
+        has_ghostty_app = ghostty_app.exists()
         if not ghostty_path:
             macos_ghostty = Path("/Applications/Ghostty.app/Contents/MacOS/ghostty")
             if macos_ghostty.exists():
                 ghostty_path = str(macos_ghostty)
 
+        if not ghostty_path and not has_ghostty_app:
+            return False
+
+        if await _is_ghostty_running():
+            if await _open_tab_in_running_ghostty(attach_cmd):
+                return True
+            logger.warning("Ghostty のタブ追加に失敗したため、新規ウィンドウで再試行します")
+
+        attach_args = shlex.split(attach_cmd)
+        if has_ghostty_app:
+            code, _, _ = await self._run_exec(
+                "open",
+                "-a",
+                "Ghostty.app",
+                "--args",
+                "-e",
+                *attach_args,
+            )
+            return code == 0
+
         if ghostty_path:
-            attach_args = shlex.split(attach_cmd)
             code, _, _ = await self._run_exec(ghostty_path, "-e", *attach_args)
             return code == 0
         return False
