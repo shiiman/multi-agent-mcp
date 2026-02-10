@@ -883,8 +883,12 @@ class TestReportTaskProgress:
             working_dir=str(git_repo),
             created_at=now,
             last_activity=now,
-            current_task="task-003",
         )
+        task = app_ctx.dashboard_manager.create_task(
+            title="進捗報告タスク",
+            assigned_agent_id="worker-001",
+        )
+        app_ctx.agents["worker-001"].current_task = task.id
 
         with (
             patch(
@@ -897,7 +901,7 @@ class TestReportTaskProgress:
             ),
         ):
             result = await report_task_progress(
-                task_id="task-003",
+                task_id=task.id,
                 progress=40,
                 message=None,
                 caller_agent_id="worker-001",
@@ -907,6 +911,7 @@ class TestReportTaskProgress:
         assert result["success"] is True
         assert result["progress"] == 40
         assert result["admin_notified"] is True
+        assert result["notification_sent"] is True
 
         messages = app_ctx.ipc_manager.read_messages(
             agent_id="admin-001",
@@ -915,9 +920,160 @@ class TestReportTaskProgress:
         )
         assert len(messages) == 1
         assert messages[0].message_type == MessageType.TASK_PROGRESS
-        assert messages[0].subject == "進捗報告: task-003 (40%)"
-        assert messages[0].content == "タスク task-003 の進捗: 40%"
+        assert messages[0].subject == f"進捗報告: {task.id} (40%)"
+        assert messages[0].content == f"タスク {task.id} の進捗: 40%"
         assert messages[0].metadata["progress"] == 40
+
+    @pytest.mark.asyncio
+    async def test_rejects_progress_for_unassigned_task(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """割り当てられていない Worker からの進捗報告を拒否することをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        report_task_progress = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "report_task_progress":
+                report_task_progress = tool.fn
+                break
+        assert report_task_progress is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-002"] = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.2",
+            session_name="test",
+            window_index=0,
+            pane_index=2,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        task = app_ctx.dashboard_manager.create_task(
+            title="割り当て済みタスク",
+            assigned_agent_id="worker-001",
+        )
+
+        result = await report_task_progress(
+            task_id=task.id,
+            progress=40,
+            caller_agent_id="worker-002",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "割り当て先と caller_agent_id が一致しません" in result["error"]
+        messages = app_ctx.ipc_manager.read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            mark_as_read=False,
+        )
+        assert len(messages) == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_progress_notification_fails(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """tmux 通知失敗時に success=False で返すことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        report_task_progress = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "report_task_progress":
+                report_task_progress = tool.fn
+                break
+        assert report_task_progress is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        task = app_ctx.dashboard_manager.create_task(
+            title="通知失敗テスト",
+            assigned_agent_id="worker-001",
+        )
+        app_ctx.agents["worker-001"].current_task = task.id
+
+        with (
+            patch(
+                "src.tools.dashboard.capture_claude_actual_cost_for_agent",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.tools.dashboard.notify_agent_via_tmux",
+                AsyncMock(return_value=False),
+            ),
+        ):
+            result = await report_task_progress(
+                task_id=task.id,
+                progress=50,
+                caller_agent_id="worker-001",
+                ctx=dashboard_mock_ctx,
+            )
+
+        assert result["success"] is False
+        assert "tmux 通知に失敗しました" in result["error"]
+        assert result["admin_notified"] is True
+        assert result["notification_sent"] is False
 
 
 class TestReportTaskCompletion:
@@ -973,15 +1129,25 @@ class TestReportTaskCompletion:
             working_dir=str(git_repo),
             created_at=now,
             last_activity=now,
-            current_task="task-001",
         )
+        task = app_ctx.dashboard_manager.create_task(
+            title="完了報告タスク",
+            assigned_agent_id="worker-001",
+        )
+        app_ctx.agents["worker-001"].current_task = task.id
 
-        with patch(
-            "src.tools.dashboard.capture_claude_actual_cost_for_agent",
-            AsyncMock(return_value=None),
+        with (
+            patch(
+                "src.tools.dashboard.capture_claude_actual_cost_for_agent",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.tools.dashboard.notify_agent_via_tmux",
+                AsyncMock(return_value=True),
+            ),
         ):
             result = await report_task_completion(
-                task_id="task-001",
+                task_id=task.id,
                 status="completed",
                 message="完了しました",
                 summary="summary text",
@@ -992,7 +1158,7 @@ class TestReportTaskCompletion:
         assert result["success"] is True
         assert result["memory_saved"] is True
 
-        key = "task:task-001:result"
+        key = f"task:{task.id}:result"
         project_memory_dir = git_repo / app_ctx.settings.mcp_dir / "memory"
         project_memory = MemoryManager(str(project_memory_dir))
         entry = project_memory.get(key)
@@ -1059,8 +1225,12 @@ class TestReportTaskCompletion:
             working_dir=str(git_repo),
             created_at=now,
             last_activity=now,
-            current_task="task-002",
         )
+        task = app_ctx.dashboard_manager.create_task(
+            title="失敗報告タスク",
+            assigned_agent_id="worker-001",
+        )
+        app_ctx.agents["worker-001"].current_task = task.id
 
         with (
             patch(
@@ -1073,7 +1243,7 @@ class TestReportTaskCompletion:
             ),
         ):
             result = await report_task_completion(
-                task_id="task-002",
+                task_id=task.id,
                 status="failed",
                 message="失敗しました",
                 caller_agent_id="worker-001",
@@ -1092,6 +1262,160 @@ class TestReportTaskCompletion:
         assert len(messages) == 1
         assert messages[0].message_type == MessageType.TASK_FAILED
         assert "(失敗)" in messages[0].subject
+
+    @pytest.mark.asyncio
+    async def test_rejects_completion_for_unassigned_task(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """割り当てられていない Worker からの完了報告を拒否することをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        report_task_completion = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "report_task_completion":
+                report_task_completion = tool.fn
+                break
+        assert report_task_completion is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-002"] = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.2",
+            session_name="test",
+            window_index=0,
+            pane_index=2,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        task = app_ctx.dashboard_manager.create_task(
+            title="完了偽装テスト",
+            assigned_agent_id="worker-001",
+        )
+
+        result = await report_task_completion(
+            task_id=task.id,
+            status="completed",
+            message="不正完了",
+            caller_agent_id="worker-002",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "割り当て先と caller_agent_id が一致しません" in result["error"]
+        messages = app_ctx.ipc_manager.read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            mark_as_read=False,
+        )
+        assert len(messages) == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_completion_notification_fails(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """完了報告の tmux 通知失敗時に success=False で返すことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        report_task_completion = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "report_task_completion":
+                report_task_completion = tool.fn
+                break
+        assert report_task_completion is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "issue-001"
+        app_ctx.project_root = str(git_repo)
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        task = app_ctx.dashboard_manager.create_task(
+            title="完了通知失敗テスト",
+            assigned_agent_id="worker-001",
+        )
+        app_ctx.agents["worker-001"].current_task = task.id
+
+        with (
+            patch(
+                "src.tools.dashboard.capture_claude_actual_cost_for_agent",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.tools.dashboard.notify_agent_via_tmux",
+                AsyncMock(return_value=False),
+            ),
+        ):
+            result = await report_task_completion(
+                task_id=task.id,
+                status="completed",
+                message="完了しました",
+                caller_agent_id="worker-001",
+                ctx=dashboard_mock_ctx,
+            )
+
+        assert result["success"] is False
+        assert "tmux 通知に失敗しました" in result["error"]
+        assert result["notification_sent"] is False
 
 
 class TestCostTools:

@@ -600,34 +600,39 @@ class HealthcheckManager:
             if dashboard is None:
                 return
 
-            read_dashboard = getattr(dashboard, "_read_dashboard", None)
-            write_dashboard = getattr(dashboard, "_write_dashboard", None)
-            if not callable(read_dashboard) or not callable(write_dashboard):
+            run_transaction = getattr(dashboard, "run_dashboard_transaction", None)
+            if not callable(run_transaction):
                 return
 
-            dashboard_data = read_dashboard()
-            updated = False
+            def _mutate_dashboard(dashboard_data: Any) -> None:
+                updated = False
 
-            task = dashboard_data.get_task(task_id)
-            if task is not None:
-                metadata = dict(task.metadata or {})
-                count = int(metadata.get("process_recovery_count", 0))
-                metadata["process_recovery_count"] = count + 1
-                metadata["last_recovery_reason"] = recovery_reason
-                metadata["last_recovery_at"] = datetime.now().isoformat()
-                task.metadata = metadata
-                updated = True
+                task = dashboard_data.get_task(task_id)
+                if task is not None:
+                    metadata = dict(task.metadata or {})
+                    count = int(metadata.get("process_recovery_count", 0))
+                    metadata["process_recovery_count"] = count + 1
+                    metadata["last_recovery_reason"] = recovery_reason
+                    metadata["last_recovery_at"] = datetime.now().isoformat()
+                    task.metadata = metadata
+                    updated = True
 
-            agent_summary = dashboard_data.get_agent(agent_id)
-            if agent_summary is not None and hasattr(agent_summary, "process_recovery_count"):
-                current = int(getattr(agent_summary, "process_recovery_count", 0) or 0)
-                agent_summary.process_recovery_count = current + 1
-                updated = True
+                agent_summary = dashboard_data.get_agent(agent_id)
+                if (
+                    agent_summary is not None
+                    and hasattr(agent_summary, "process_recovery_count")
+                ):
+                    current = int(getattr(agent_summary, "process_recovery_count", 0) or 0)
+                    agent_summary.process_recovery_count = current + 1
+                    updated = True
 
-            if updated:
-                write_dashboard(dashboard_data)
+                if not updated:
+                    return
+
+            run_transaction(_mutate_dashboard)
         except (
             OSError,
+            TimeoutError,
             ValueError,
             AttributeError,
             KeyError,

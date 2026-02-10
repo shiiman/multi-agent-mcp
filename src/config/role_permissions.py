@@ -129,6 +129,11 @@ WORKER_SELF_SCOPE_TOOLS: set[str] = {
     "get_output",
 }
 
+# Worker が宛先を Admin に限定すべきツール
+WORKER_ADMIN_RECEIVER_TOOLS: set[str] = {
+    "send_message",
+}
+
 
 def get_allowed_roles(tool_name: str) -> list[str]:
     """指定されたツールの許可ロールを取得する。
@@ -159,6 +164,11 @@ def is_tool_allowed(tool_name: str, role: str) -> bool:
 def requires_worker_self_scope(tool_name: str) -> bool:
     """Worker の self-scope 制約が必要なツールか判定する。"""
     return tool_name in WORKER_SELF_SCOPE_TOOLS
+
+
+def requires_worker_admin_receiver(tool_name: str) -> bool:
+    """Worker の送信先を Admin に制限するツールか判定する。"""
+    return tool_name in WORKER_ADMIN_RECEIVER_TOOLS
 
 
 def get_role_error_message(tool_name: str, current_role: str) -> str:

@@ -611,6 +611,256 @@ class TestSendMessage:
         assert result["rerouted_receiver_id"] == "admin-001"
 
     @pytest.mark.asyncio
+    async def test_worker_send_message_allows_admin_receiver(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Worker が Admin 宛へ送信できることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_message(
+            sender_id="worker-001",
+            receiver_id="admin-001",
+            message_type="request",
+            content="確認お願いします",
+            caller_agent_id="worker-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["receiver_id"] == "admin-001"
+        assert result["rerouted_receiver_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_worker_send_message_rejects_owner_receiver(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Worker から Owner 宛の send_message は拒否されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_message(
+            sender_id="worker-001",
+            receiver_id="owner-001",
+            message_type="request",
+            content="owner へ送ってしまうケース",
+            caller_agent_id="worker-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "Worker は Admin にのみ send_message" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_worker_send_message_rejects_other_worker_receiver(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Worker から他 Worker 宛の send_message は拒否されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-002"] = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.2",
+            session_name="test",
+            window_index=0,
+            pane_index=2,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_message(
+            sender_id="worker-001",
+            receiver_id="worker-002",
+            message_type="request",
+            content="worker 間送信ケース",
+            caller_agent_id="worker-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "Worker は Admin にのみ send_message" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_worker_send_message_rejects_broadcast(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Worker のブロードキャスト送信は拒否されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_message(
+            sender_id="worker-001",
+            receiver_id=None,
+            message_type="request",
+            content="broadcast ケース",
+            caller_agent_id="worker-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "ブロードキャストできません" in result["error"]
+
+    @pytest.mark.asyncio
     async def test_send_message_rejects_sender_caller_mismatch(
         self, ipc_mock_ctx, git_repo
     ):
@@ -709,7 +959,10 @@ class TestSendMessage:
             last_activity=now,
         )
 
-        with patch("src.tools.helpers._send_macos_notification", new=AsyncMock(return_value=True)) as mock_macos:
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new=AsyncMock(return_value=True),
+        ) as mock_macos:
             result = await send_message(
                 sender_id="admin-001",
                 receiver_id="owner-001",

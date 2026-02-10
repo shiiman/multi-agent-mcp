@@ -1,6 +1,46 @@
 """スクリーンショット機能のテスト。"""
 
 import base64
+import os
+from datetime import datetime
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.context import AppContext
+from src.managers.ai_cli_manager import AiCliManager
+from src.managers.tmux_manager import TmuxManager
+from src.models.agent import Agent, AgentRole, AgentStatus
+
+
+def _make_screenshot_tool_mock_ctx(git_repo, settings):
+    """スクリーンショットツール用の MCP Context モックを作成する。"""
+    mock_tmux = MagicMock(spec=TmuxManager)
+    mock_tmux.settings = settings
+    ai_cli = AiCliManager(settings)
+
+    now = datetime.now()
+    owner = Agent(
+        id="owner-001",
+        role=AgentRole.OWNER,
+        status=AgentStatus.IDLE,
+        tmux_session=None,
+        working_dir=str(git_repo),
+        created_at=now,
+        last_activity=now,
+    )
+    app_ctx = AppContext(
+        settings=settings,
+        tmux=mock_tmux,
+        ai_cli=ai_cli,
+        agents={"owner-001": owner},
+        project_root=str(git_repo),
+        session_id="test-session",
+    )
+
+    mock_ctx = MagicMock()
+    mock_ctx.request_context.lifespan_context = app_ctx
+    return mock_ctx
 
 
 class TestScreenshotDirectory:
@@ -77,8 +117,6 @@ class TestScreenshotReading:
 
     def test_find_latest_screenshot(self, temp_dir):
         """最新のスクリーンショットを取得できることをテスト。"""
-        import time
-
         screenshot_dir = temp_dir / ".multi-agent-mcp" / "screenshot"
         screenshot_dir.mkdir(parents=True, exist_ok=True)
 
@@ -86,11 +124,11 @@ class TestScreenshotReading:
         old_file = screenshot_dir / "old.png"
         old_file.write_bytes(b"old")
 
-        time.sleep(0.1)  # タイムスタンプの差を確保
-
         # 新しいファイル
         new_file = screenshot_dir / "new.png"
         new_file.write_bytes(b"new")
+        os.utime(old_file, (1000, 1000))
+        os.utime(new_file, (2000, 2000))
 
         # 最新ファイルを取得
         files = list(screenshot_dir.glob("*.png"))
@@ -129,3 +167,77 @@ class TestScreenshotExtensions:
         assert "image.jpg" in filenames
         assert "image.bmp" not in filenames
         assert "document.pdf" not in filenames
+
+
+class TestReadLatestScreenshotSecurity:
+    """read_latest_screenshot の境界チェックをテストする。"""
+
+    @pytest.mark.asyncio
+    async def test_rejects_outside_reference_via_symlink(self, git_repo, settings):
+        """screenshot dir 外への解決結果を拒否する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.screenshot import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+        read_latest_screenshot = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_latest_screenshot":
+                read_latest_screenshot = tool.fn
+                break
+
+        mock_ctx = _make_screenshot_tool_mock_ctx(git_repo, settings)
+        screenshot_dir = git_repo / settings.mcp_dir / "screenshot"
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+        inside_file = screenshot_dir / "inside.png"
+        inside_file.write_bytes(b"inside")
+        os.utime(inside_file, (1000, 1000))
+
+        outside_file = git_repo / "outside.png"
+        outside_file.write_bytes(b"outside")
+        link_file = screenshot_dir / "latest-link-outside.png"
+        link_file.symlink_to(outside_file)
+
+        result = await read_latest_screenshot(
+            caller_agent_id="owner-001",
+            ctx=mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "ディレクトリ外" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_rejects_symlink_even_if_target_is_inside(self, git_repo, settings):
+        """screenshot dir 内向き symlink でも拒否する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.screenshot import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+        read_latest_screenshot = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_latest_screenshot":
+                read_latest_screenshot = tool.fn
+                break
+
+        mock_ctx = _make_screenshot_tool_mock_ctx(git_repo, settings)
+        screenshot_dir = git_repo / settings.mcp_dir / "screenshot"
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+        real_file = screenshot_dir / "real.png"
+        real_file.write_bytes(b"real")
+        os.utime(real_file, (1000, 1000))
+
+        link_file = screenshot_dir / "latest-link-inside.png"
+        link_file.symlink_to(real_file)
+
+        result = await read_latest_screenshot(
+            caller_agent_id="owner-001",
+            ctx=mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "symlink" in result["error"]

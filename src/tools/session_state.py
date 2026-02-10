@@ -92,6 +92,34 @@ def _collect_session_names(agents: dict[str, Any]) -> list[str]:
     return sorted(session_names)
 
 
+def _collect_managed_worktree_targets(app_ctx: AppContext) -> tuple[set[str], set[str]]:
+    """セッション管理下の worktree path / branch を収集する。"""
+    managed_paths: set[str] = set()
+    managed_branches: set[str] = set()
+
+    def _add_path(path: str | None) -> None:
+        if isinstance(path, str) and path:
+            managed_paths.add(os.path.realpath(path))
+
+    def _add_branch(branch: str | None) -> None:
+        if isinstance(branch, str) and branch:
+            managed_branches.add(branch)
+
+    for agent in app_ctx.agents.values():
+        _add_path(getattr(agent, "worktree_path", None))
+        _add_branch(getattr(agent, "branch", None))
+
+    if app_ctx.dashboard_manager is not None:
+        try:
+            for task in app_ctx.dashboard_manager.list_tasks():
+                _add_path(getattr(task, "worktree_path", None))
+                _add_branch(getattr(task, "branch", None))
+        except Exception as e:
+            logger.debug("managed worktree target 収集時に task 参照をスキップ: %s", e)
+
+    return managed_paths, managed_branches
+
+
 def _clear_config_session_id(app_ctx: AppContext) -> bool:
     """config.json の session_id をクリアする。
 
@@ -276,6 +304,8 @@ async def cleanup_session_resources(
         main_repo_path = repo_path or app_ctx.project_root
         if main_repo_path:
             worktree_errors: list[str] = []
+            normalized_main_repo = os.path.realpath(main_repo_path)
+            managed_paths, managed_branches = _collect_managed_worktree_targets(app_ctx)
             try:
                 from src.tools.helpers import get_worktree_manager
 
@@ -283,25 +313,28 @@ async def cleanup_session_resources(
                 worktrees = await worktree_manager.list_worktrees()
 
                 for wt in worktrees:
-                    if wt.path == main_repo_path:
+                    normalized_wt_path = os.path.realpath(wt.path)
+                    if normalized_wt_path == normalized_main_repo:
                         continue
                     if (
-                        "worker" in wt.path.lower()
-                        or ".worktrees/" in wt.path
-                        or "-worktrees/" in wt.path
+                        normalized_wt_path not in managed_paths
+                        and wt.branch not in managed_branches
                     ):
-                        try:
-                            success, msg = await worktree_manager.remove_worktree(
-                                wt.path, force=True
-                            )
-                            if success:
-                                results["removed_worktrees"] += 1
-                                logger.info(f"worktree を削除しました: {wt.path}")
-                            else:
-                                worktree_errors.append(f"{wt.path}: {msg}")
-                        except Exception as e:
-                            worktree_errors.append(f"{wt.path}: {e}")
-                            logger.warning(f"worktree 削除失敗: {wt.path} - {e}")
+                        continue
+                    try:
+                        success, msg = await worktree_manager.remove_worktree(
+                            wt.path,
+                            force=True,
+                            managed_branch_names=managed_branches,
+                        )
+                        if success:
+                            results["removed_worktrees"] += 1
+                            logger.info(f"worktree を削除しました: {wt.path}")
+                        else:
+                            worktree_errors.append(f"{wt.path}: {msg}")
+                    except Exception as e:
+                        worktree_errors.append(f"{wt.path}: {e}")
+                        logger.warning(f"worktree 削除失敗: {wt.path} - {e}")
             except Exception as e:
                 logger.warning(f"WorktreeManager の初期化に失敗: {e}")
                 worktree_errors.append(f"初期化エラー: {e}")

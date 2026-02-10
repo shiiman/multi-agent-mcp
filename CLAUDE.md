@@ -63,7 +63,7 @@ multi-agent-mcp/
 │   │       ├── ghostty.py       # Ghostty terminal support
 │   │       ├── iterm2.py        # iTerm2 terminal support
 │   │       └── terminal_app.py  # macOS Terminal.app support
-│   └── tools/                   # MCP tool definitions (86 tools)
+│   └── tools/                   # MCP tool definitions (88 tools)
 │       ├── __init__.py          # register_all_tools()
 │       ├── helpers.py           # Compatibility exports + permission helpers
 │       ├── helpers_git.py        # Git worktree root resolution helpers
@@ -83,8 +83,8 @@ multi-agent-mcp/
 │       ├── cost_capture.py      # Claude actual cost capture
 │       ├── worktree.py          # Git worktree (7)
 │       ├── merge.py             # Merge completed task branches (1)
-│       ├── ipc.py               # IPC/messaging (4)
-│       ├── dashboard.py         # Dashboard/task tools (10)
+│       ├── ipc.py               # IPC/messaging (5)
+│       ├── dashboard.py         # Dashboard/task tools (11)
 │       ├── dashboard_cost_tools.py # Cost tools (4)
 │       ├── gtrconfig.py         # Gtrconfig (3)
 │       ├── template.py          # Templates (4)
@@ -246,11 +246,21 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_ENABLE_WORKTREE` | Enable git worktree for workers (`enable_git=false` forces disabled) | true |
 | `MCP_WINDOW_NAME_MAIN` | Main tmux window name (Admin + Worker 1-6) | main |
 | `MCP_WINDOW_NAME_WORKER_PREFIX` | Prefix for extra worker windows | workers- |
+| `MCP_EXTRA_WORKER_ROWS` | Rows in each extra worker window | 2 |
+| `MCP_EXTRA_WORKER_COLS` | Columns in each extra worker window | 5 |
+| `MCP_WORKERS_PER_EXTRA_WINDOW` | Worker slots per extra worker window | 10 |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
+| `MCP_ESTIMATED_TOKENS_PER_CALL` | Estimated tokens per API call | 2000 |
+| `MCP_MODEL_COST_TABLE_JSON` | Model cost table (USD per 1K tokens, JSON) | `{"claude:opus":0.03,...}` |
+| `MCP_MODEL_COST_DEFAULT_PER_1K` | Fallback cost per 1K tokens (USD) | 0.01 |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck monitor interval (seconds) | 60 |
 | `MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS` | Stall detection timeout (seconds) | 600 |
+| `MCP_HEALTHCHECK_IN_PROGRESS_NO_IPC_TIMEOUT_SECONDS` | In-progress no-IPC timeout (seconds) | 120 |
 | `MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS` | Max recovery attempts per worker/task | 3 |
 | `MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE` | Consecutive idle detections to auto-stop daemon | 3 |
+| `MCP_CODEX_ENTER_RETRY_MAX` | Max retries for Codex Enter resend | 3 |
+| `MCP_CODEX_ENTER_RETRY_INTERVAL_MS` | Interval between Codex Enter retries (ms) | 250 |
+| `MCP_SEND_COOLDOWN_SECONDS` | Minimum cooldown between pane sends | 2.0 |
 | `MCP_DEFAULT_TERMINAL` | Default terminal app | auto |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | claude |
@@ -259,12 +269,16 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | Standard Admin thinking tokens | 4000 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | Standard Worker thinking tokens | 4000 |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT` | Standard Admin reasoning effort | medium |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT` | Standard Worker reasoning effort | medium |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | claude |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | opus |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | opus |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | Performance Admin thinking tokens | 30000 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | Performance Worker thinking tokens | 4000 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_REASONING_EFFORT` | Performance Admin reasoning effort | high |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_REASONING_EFFORT` | Performance Worker reasoning effort | high |
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
 | `MCP_CLI_DEFAULT_CLAUDE_ADMIN_MODEL` | Claude CLI Admin default model | opus |
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | Claude CLI Worker default model | sonnet |
@@ -273,12 +287,16 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | Gemini CLI Admin default model | gemini-3-pro |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | Gemini CLI Worker default model | gemini-3-flash |
 | `MCP_WORKER_CLI_MODE` | Worker CLI mode (`uniform` / `per-worker`) | uniform |
+| `MCP_WORKER_CLI_1..16` | Per-worker CLI in `per-worker` mode | - |
 | `MCP_WORKER_MODEL_MODE` | Worker model mode (`uniform` / `per-worker`) | uniform |
 | `MCP_WORKER_MODEL_UNIFORM` | Uniform Worker model value (falls back to profile worker model) | - |
+| `MCP_WORKER_MODEL_1..16` | Per-worker model in `per-worker` mode | - |
 | `MCP_QUALITY_CHECK_MAX_ITERATIONS` | Max quality check iterations | 5 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | Same issue repeat limit | 3 |
+| `MCP_QUALITY_GATE_STRICT` | Apply strict quality gate checks | true |
 | `MCP_MEMORY_MAX_ENTRIES` | Max memory entries | 1000 |
 | `MCP_MEMORY_TTL_DAYS` | Memory entry TTL in days | 90 |
+| `MCP_SCREENSHOT_EXTENSIONS` | Recognized screenshot extensions | [".png",".jpg",...] |
 
 ## Common Patterns
 
@@ -288,7 +306,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 2. Add to `src/managers/__init__.py`
 3. Create fixture in `tests/conftest.py`
 4. Create `tests/test_<name>_manager.py`
-5. Add MCP tools in `server.py`
+5. Add MCP tools in `src/tools/` and register in `src/tools/__init__.py`
 
 ### Adding a New MCP Tool
 

@@ -382,9 +382,6 @@ class MemoryManager:
             if query_lower in entry.content.lower() or query_lower in entry.key.lower():
                 results.append(entry)
 
-            if len(results) >= limit:
-                break
-
         # 更新日時でソート（新しい順）
         results.sort(key=lambda x: x.updated_at, reverse=True)
         return results[:limit]
@@ -500,7 +497,8 @@ class MemoryManager:
             # 既存エントリの更新
             entry = self.entries[key]
             entry.content = content
-            entry.tags = tags or entry.tags
+            if tags is not None:
+                entry.tags = tags
             entry.updated_at = now
             if metadata:
                 entry.metadata.update(metadata)
@@ -563,9 +561,6 @@ class MemoryManager:
             # コンテンツ検索
             if query_lower in entry.content.lower() or query_lower in entry.key.lower():
                 results.append(entry)
-
-            if len(results) >= limit:
-                break
 
         # 更新日時でソート（新しい順）
         results.sort(key=lambda x: x.updated_at, reverse=True)

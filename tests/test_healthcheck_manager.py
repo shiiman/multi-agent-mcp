@@ -429,3 +429,140 @@ class TestHealthcheckMonitoring:
         assert terminated_worker.id in result["skipped"]
         assert result["recovered"] == []
         assert result["escalated"] == []
+
+    def test_increment_recovery_counter_uses_dashboard_transaction(self, temp_dir, settings):
+        """復旧カウンタ更新がトランザクション経由で行われることをテスト。"""
+        tmux = MagicMock()
+        ai_cli = AiCliManager(settings)
+
+        session_id = "test-session"
+        dashboard_dir = temp_dir / ".multi-agent-mcp" / session_id / "dashboard"
+        dashboard = DashboardManager(
+            workspace_id=session_id,
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        dashboard.initialize()
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+
+        task = dashboard.create_task(
+            title="recovery count",
+            description="healthcheck",
+            assigned_agent_id=worker.id,
+        )
+
+        app_ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            agents={worker.id: worker},
+            dashboard_manager=dashboard,
+            workspace_id=session_id,
+            project_root=str(temp_dir),
+            session_id=session_id,
+        )
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=app_ctx.agents,
+        )
+
+        dashboard._read_dashboard = MagicMock(side_effect=AssertionError("no direct read"))  # type: ignore[method-assign]
+        dashboard._write_dashboard = MagicMock(side_effect=AssertionError("no direct write"))  # type: ignore[method-assign]
+
+        healthcheck._increment_recovery_counter(
+            app_ctx=app_ctx,
+            agent_id=worker.id,
+            task_id=task.id,
+            recovery_reason="in_progress_no_ipc",
+        )
+
+        updated_metadata = dashboard.run_dashboard_transaction(
+            lambda data: dict(data.get_task(task.id).metadata)
+        )
+        assert updated_metadata["process_recovery_count"] == 1
+        assert updated_metadata["last_recovery_reason"] == "in_progress_no_ipc"
+
+    def test_increment_recovery_counter_keeps_consistency_on_transaction_conflict(
+        self, temp_dir, settings
+    ):
+        """dashboard トランザクション競合時に整合性が維持されることをテスト。"""
+        tmux = MagicMock()
+        ai_cli = AiCliManager(settings)
+
+        session_id = "test-session"
+        dashboard_dir = temp_dir / ".multi-agent-mcp" / session_id / "dashboard"
+        dashboard = DashboardManager(
+            workspace_id=session_id,
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        dashboard.initialize()
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+
+        task = dashboard.create_task(
+            title="recovery count conflict",
+            description="healthcheck",
+            assigned_agent_id=worker.id,
+        )
+
+        dashboard.run_dashboard_transaction(
+            lambda data: data.get_task(task.id).metadata.update({"process_recovery_count": 2})
+        )
+
+        app_ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            agents={worker.id: worker},
+            dashboard_manager=dashboard,
+            workspace_id=session_id,
+            project_root=str(temp_dir),
+            session_id=session_id,
+        )
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=app_ctx.agents,
+        )
+
+        dashboard.run_dashboard_transaction = MagicMock(  # type: ignore[method-assign]
+            side_effect=TimeoutError("dashboard lock timeout")
+        )
+
+        healthcheck._increment_recovery_counter(
+            app_ctx=app_ctx,
+            agent_id=worker.id,
+            task_id=task.id,
+            recovery_reason="task_stalled",
+        )
+
+        current_task = dashboard.get_task(task.id)
+        assert current_task is not None
+        assert current_task.metadata["process_recovery_count"] == 2

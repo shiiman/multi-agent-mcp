@@ -8,6 +8,7 @@ from src.config.settings import Settings
 from src.managers.tmux_manager import (
     MAIN_SESSION,
     MAIN_WINDOW_PANE_ADMIN,
+    MAIN_WINDOW_WORKER_PANES,
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.models.workspace import WorktreeAssignment
@@ -324,14 +325,14 @@ class AgentManager:
         for agent in self.agents.values():
             if (
                 agent.role == AgentRole.WORKER
+                and agent.status != AgentStatus.TERMINATED
                 and agent.window_index is not None
                 and agent.pane_index is not None
             ):
                 used_slots.add((agent.window_index, agent.pane_index))
 
         # メインウィンドウ（Worker 1-6）の空きを探す
-        for i in range(6):
-            pane_index = 2 + i  # ペイン 2-7
+        for pane_index in MAIN_WINDOW_WORKER_PANES:
             if (0, pane_index) not in used_slots:
                 return (0, pane_index)
 
@@ -353,7 +354,11 @@ class AgentManager:
         Returns:
             Worker数
         """
-        return len([a for a in self.agents.values() if a.role == AgentRole.WORKER])
+        return len([
+            a
+            for a in self.agents.values()
+            if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
+        ])
 
     async def ensure_sessions_exist(
         self, settings: Settings, working_dir: str

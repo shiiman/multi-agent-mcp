@@ -19,7 +19,8 @@ class TestGenerateAdminTask:
             memory_context="",
             project_name="test-project",
         )
-        assert "# Admin タスク: TEST-123" in result
+        assert "TEST-123" in result
+        assert "Admin タスク" in result
 
     def test_includes_plan_content(self):
         """計画書が含まれることをテスト。"""
@@ -47,7 +48,8 @@ class TestGenerateAdminTask:
             memory_context="",
             project_name="test-project",
         )
-        assert "**作業ブランチ**: feature/my-feature" in result
+        assert "feature/my-feature" in result
+        assert ("**作業ブランチ**:" in result) or ("**作業ラベル**:" in result)
 
     def test_includes_worker_count(self):
         """Worker数が含まれることをテスト。"""

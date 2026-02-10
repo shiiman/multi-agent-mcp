@@ -1,6 +1,7 @@
 """ヘルスチェック管理ツール。"""
 
 import logging
+import shlex
 from datetime import datetime
 from typing import Any
 
@@ -80,6 +81,19 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
 
     logger.info(f"full_recovery 開始: agent={agent_id}, tasks={len(reassigned_tasks)}")
 
+    def _build_recovery_failure(status: str, error: str) -> dict[str, Any]:
+        """復旧不能時の標準レスポンスを組み立てる。"""
+        return {
+            "success": False,
+            "status": status,
+            "old_agent_id": agent_id,
+            "new_agent_id": None,
+            "new_worktree_path": None,
+            "reassigned_tasks": [t.id for t in reassigned_tasks if t.id],
+            "error": error,
+            "message": f"エージェント {agent_id} の復旧は {status} で終了しました",
+        }
+
     if (
         old_session_name is not None
         and old_window_index is not None
@@ -92,8 +106,6 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         except Exception as e:
             logger.warning(f"tmux ペインへの割り込み送信に失敗: {e}")
 
-    del agents[agent_id]
-
     new_worktree_path = old_worktree_path
     if enable_git and old_worktree_path and old_branch:
         from src.managers.worktree_manager import WorktreeManager
@@ -103,7 +115,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
             await worktree_manager.remove_worktree(old_worktree_path, force=True)
             logger.info(f"古い worktree を削除: {old_worktree_path}")
 
-            success, _msg, actual_path = await worktree_manager.create_worktree(
+            success, create_msg, actual_path = await worktree_manager.create_worktree(
                 path=old_worktree_path,
                 branch=old_branch,
                 base_branch="main",
@@ -114,7 +126,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                 import uuid
 
                 new_worktree_path = f"{old_worktree_path}-{uuid.uuid4().hex[:8]}"
-                retry_ok, _retry_msg, retry_path = await worktree_manager.create_worktree(
+                retry_ok, retry_msg, retry_path = await worktree_manager.create_worktree(
                     path=new_worktree_path,
                     branch=old_branch,
                     base_branch="main",
@@ -122,21 +134,16 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                 if retry_ok and retry_path:
                     new_worktree_path = retry_path
                 if not retry_ok:
-                    # worktree 作成が完全に失敗: メインリポジトリをフォールバック
-                    new_worktree_path = str(app_ctx.project_root)
-                    logger.warning(
-                        "worktree 作成が完全に失敗。project_root をフォールバックとして使用: %s",
-                        new_worktree_path,
+                    return _build_recovery_failure(
+                        "failed",
+                        "worktree 作成が完全に失敗しました: "
+                        f"primary={create_msg}, retry={retry_msg}",
                     )
-            if new_worktree_path != str(app_ctx.project_root):
-                logger.info(f"新しい worktree を作成: {new_worktree_path}")
+            logger.info(f"新しい worktree を作成: {new_worktree_path}")
         except Exception as e:
-            logger.warning(f"worktree 操作に失敗: {e}")
-            # 例外時もメインリポジトリにフォールバック
-            new_worktree_path = (
-                str(app_ctx.project_root)
-                if app_ctx.project_root
-                else old_worktree_path
+            return _build_recovery_failure(
+                "blocked",
+                f"worktree 操作に失敗しました: {e}",
             )
     elif not enable_git:
         logger.info("enable_git=false のため worktree 再作成をスキップします")
@@ -149,6 +156,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
     # 復旧後にランダム ID を再生成すると、ダッシュボードの可読性が落ち
     # 同一 worker が増殖したように見えるため ID は維持する。
     new_agent_id = agent_id
+    agents.pop(agent_id, None)
     tmux_session = None
     if (
         old_session_name is not None
@@ -186,7 +194,14 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         try:
             window_name = tmux._get_window_name(old_window_index)
             target = f"{old_session_name}:{window_name}.{old_pane_index}"
-            await tmux._run("send-keys", "-t", target, f"cd {recovery_dir}", "Enter")
+            quoted_recovery_dir = shlex.quote(str(recovery_dir))
+            await tmux._run(
+                "send-keys",
+                "-t",
+                target,
+                f"cd {quoted_recovery_dir}",
+                "Enter",
+            )
             await tmux.set_pane_title(
                 old_session_name, old_window_index, old_pane_index, new_agent_id
             )

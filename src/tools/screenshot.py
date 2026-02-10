@@ -209,7 +209,9 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": "project_root が設定されていません",
             }
 
-        screenshot_dir = Path(app_ctx.project_root) / app_ctx.settings.mcp_dir / "screenshot"
+        screenshot_dir = (
+            Path(app_ctx.project_root) / app_ctx.settings.mcp_dir / "screenshot"
+        ).resolve()
         if not screenshot_dir.exists():
             return {
                 "success": False,
@@ -229,13 +231,29 @@ def register_tools(mcp: FastMCP) -> None:
 
         # 最新ファイルを取得
         latest = max(files, key=lambda f: f.stat().st_mtime)
+        latest_resolved = latest.resolve()
+        try:
+            latest_resolved.relative_to(screenshot_dir)
+        except ValueError:
+            return {
+                "success": False,
+                "error": (
+                    "スクリーンショットディレクトリ外への参照は許可されていません: "
+                    f"{latest.name}"
+                ),
+            }
+        if latest.is_symlink():
+            return {
+                "success": False,
+                "error": f"symlink 経由の参照は許可されていません: {latest.name}",
+            }
 
-        data, mime_type, size_bytes = _read_image_as_base64(latest)
+        data, mime_type, size_bytes = _read_image_as_base64(latest_resolved)
 
         return {
             "success": True,
-            "filename": latest.name,
-            "path": str(latest),
+            "filename": latest_resolved.name,
+            "path": str(latest_resolved),
             "base64_data": data,
             "mime_type": mime_type,
             "size_bytes": size_bytes,

@@ -1,6 +1,7 @@
 """MemoryManager のテスト。"""
 
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,27 @@ class TestMemoryManager:
         retrieved = manager.get("key1")
         assert retrieved.content == "content2"
 
+    def test_save_update_existing_with_empty_tags_clears_tags(
+        self, manager: MemoryManager
+    ) -> None:
+        """既存エントリ更新時に tags=[] でタグをクリアできることをテスト。"""
+        manager.save("key1", "content1", tags=["tag1", "tag2"])
+
+        updated = manager.save("key1", "content2", tags=[])
+
+        assert updated.tags == []
+        assert manager.get("key1").tags == []
+
+    def test_save_update_existing_without_tags_preserves_tags(
+        self, manager: MemoryManager
+    ) -> None:
+        """既存エントリ更新時に tags 未指定なら既存タグを維持することをテスト。"""
+        manager.save("key1", "content1", tags=["tag1"])
+
+        updated = manager.save("key1", "content2")
+
+        assert updated.tags == ["tag1"]
+
     def test_get_nonexistent(self, manager: MemoryManager) -> None:
         """存在しないキーの取得テスト。"""
         entry = manager.get("nonexistent")
@@ -82,6 +104,20 @@ class TestMemoryManager:
 
         results = manager.search("content", limit=3)
         assert len(results) == 3
+
+    def test_search_limit_prefers_newest_entries(self, manager: MemoryManager) -> None:
+        """検索の件数制限時に更新日時の新しい順で返すことをテスト。"""
+        manager.save("old_key", "match content")
+        manager.save("new_key", "match content")
+
+        now = datetime.now()
+        manager.entries["old_key"].updated_at = now - timedelta(hours=2)
+        manager.entries["new_key"].updated_at = now - timedelta(hours=1)
+
+        results = manager.search("match", limit=1)
+
+        assert len(results) == 1
+        assert results[0].key == "new_key"
 
     def test_list_by_tags(self, manager: MemoryManager) -> None:
         """タグによるフィルタリングテスト。"""
@@ -309,6 +345,26 @@ class TestMemoryManager:
         results = manager.search_archive("Python")
         assert len(results) == 1
         assert results[0].key == "python_key"
+
+    def test_search_archive_limit_prefers_newest_entries(self, temp_storage: Path) -> None:
+        """アーカイブ検索の件数制限時に更新日時の新しい順で返すことをテスト。"""
+        manager = MemoryManager(temp_storage, max_entries=1, auto_prune=False)
+
+        manager.save("old_key", "Python old")
+        manager.save("mid_key", "Python mid")
+        manager.save("new_key", "Python new")
+
+        now = datetime.now()
+        manager.entries["old_key"].updated_at = now - timedelta(hours=3)
+        manager.entries["mid_key"].updated_at = now - timedelta(hours=2)
+        manager.entries["new_key"].updated_at = now - timedelta(hours=1)
+
+        manager.prune()  # old_key, mid_key をアーカイブ
+
+        results = manager.search_archive("Python", limit=1)
+
+        assert len(results) == 1
+        assert results[0].key == "mid_key"
 
     def test_restore_from_archive(self, temp_storage: Path) -> None:
         """アーカイブからの復元テスト。"""

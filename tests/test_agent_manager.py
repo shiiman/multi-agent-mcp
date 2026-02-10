@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.managers.agent_manager import AgentManager
-from src.managers.tmux_manager import MAIN_SESSION, MAIN_WINDOW_PANE_ADMIN
+from src.managers.tmux_manager import (
+    MAIN_SESSION,
+    MAIN_WINDOW_PANE_ADMIN,
+    MAIN_WINDOW_WORKER_PANES,
+)
 from src.models.agent import Agent, AgentRole, AgentStatus
 
 
@@ -408,7 +412,7 @@ class TestGridLayout:
         assert slot is not None
         window_index, pane_index = slot
         assert window_index == 0
-        assert pane_index == 2  # 最初のWorkerスロット
+        assert pane_index == MAIN_WINDOW_WORKER_PANES[0]
 
     def test_get_next_worker_slot_full(self, settings):
         """Workerが上限に達した場合Noneが返ることをテスト。"""
@@ -443,6 +447,90 @@ class TestGridLayout:
         count = manager.count_workers()
 
         assert count == 2  # sample_agents には Worker が 2 つ
+
+    def test_get_next_worker_slot_excludes_terminated_from_capacity(self, settings):
+        """TERMINATED Worker のみでも空きスロットを返すことをテスト。"""
+        mock_tmux = MagicMock()
+        manager = AgentManager(mock_tmux)
+        now = datetime.now()
+        manager.agents["worker-term"] = Agent(
+            id="worker-term",
+            role=AgentRole.WORKER,
+            status=AgentStatus.TERMINATED,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=MAIN_WINDOW_WORKER_PANES[0],
+            created_at=now,
+            last_activity=now,
+        )
+
+        slot = manager.get_next_worker_slot(settings)
+
+        assert slot == (0, MAIN_WINDOW_WORKER_PANES[0])
+
+    def test_get_next_worker_slot_excludes_terminated_from_used_slots(self, settings):
+        """TERMINATED が占有していたスロットを再利用できることをテスト。"""
+        mock_tmux = MagicMock()
+        manager = AgentManager(mock_tmux)
+        now = datetime.now()
+        manager.agents["worker-term"] = Agent(
+            id="worker-term",
+            role=AgentRole.WORKER,
+            status=AgentStatus.TERMINATED,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=MAIN_WINDOW_WORKER_PANES[0],
+            created_at=now,
+            last_activity=now,
+        )
+        manager.agents["worker-active"] = Agent(
+            id="worker-active",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.2",
+            session_name="test",
+            window_index=0,
+            pane_index=MAIN_WINDOW_WORKER_PANES[1],
+            created_at=now,
+            last_activity=now,
+        )
+
+        slot = manager.get_next_worker_slot(settings)
+
+        assert slot == (0, MAIN_WINDOW_WORKER_PANES[0])
+
+    def test_count_workers_excludes_terminated(self):
+        """count_workers が TERMINATED を除外することをテスト。"""
+        mock_tmux = MagicMock()
+        manager = AgentManager(mock_tmux)
+        now = datetime.now()
+        manager.agents = {
+            "worker-idle": Agent(
+                id="worker-idle",
+                role=AgentRole.WORKER,
+                status=AgentStatus.IDLE,
+                created_at=now,
+                last_activity=now,
+            ),
+            "worker-term": Agent(
+                id="worker-term",
+                role=AgentRole.WORKER,
+                status=AgentStatus.TERMINATED,
+                created_at=now,
+                last_activity=now,
+            ),
+            "admin": Agent(
+                id="admin",
+                role=AgentRole.ADMIN,
+                status=AgentStatus.IDLE,
+                created_at=now,
+                last_activity=now,
+            ),
+        }
+
+        assert manager.count_workers() == 1
 
 
 class TestSessionManagement:

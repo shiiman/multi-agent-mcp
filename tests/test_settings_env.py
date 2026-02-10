@@ -1,5 +1,8 @@
 """プロジェクト別 .env ファイル読み込みのテスト。"""
 
+import pytest
+from pydantic import ValidationError
+
 from src.config.settings import (
     AICli,
     ModelDefaults,
@@ -37,6 +40,24 @@ class TestGetMcpDir:
 
         monkeypatch.setenv("MCP_MCP_DIR", ".custom-b")
         assert get_mcp_dir() == ".custom-b"
+
+    def test_rejects_absolute_path_from_env(self, monkeypatch):
+        """絶対パスを拒否することをテスト。"""
+        monkeypatch.setenv("MCP_MCP_DIR", "/tmp/mcp-dir")
+        with pytest.raises(ValidationError, match="MCP_MCP_DIR は相対の単一ディレクトリ名"):
+            get_mcp_dir()
+
+    def test_rejects_parent_reference_from_env(self, monkeypatch):
+        """親参照を含む値を拒否することをテスト。"""
+        monkeypatch.setenv("MCP_MCP_DIR", "../outside")
+        with pytest.raises(ValidationError, match="MCP_MCP_DIR は相対の単一ディレクトリ名"):
+            get_mcp_dir()
+
+    def test_rejects_path_separator_from_env(self, monkeypatch):
+        """区切り文字を含むパスを拒否することをテスト。"""
+        monkeypatch.setenv("MCP_MCP_DIR", "nested/path")
+        with pytest.raises(ValidationError, match="MCP_MCP_DIR は相対の単一ディレクトリ名"):
+            get_mcp_dir()
 
 
 class TestGetProjectEnvFile:

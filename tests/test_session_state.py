@@ -247,6 +247,10 @@ class TestCleanupSessionResources:
         repo_path = temp_dir / "repo"
         repo_path.mkdir(parents=True, exist_ok=True)
         app_ctx.project_root = str(repo_path)
+        app_ctx.agents["agent-002"].worktree_path = str(
+            repo_path / ".worktrees" / "feature/add-worker-task"
+        )
+        app_ctx.agents["agent-002"].branch = "feature/add-worker-task"
 
         mock_worktree_manager = MagicMock()
         mock_worktree_manager.list_worktrees = AsyncMock(

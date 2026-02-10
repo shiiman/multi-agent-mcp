@@ -445,7 +445,23 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効な進捗率です: {progress}（有効: 0-100）",
             }
 
+        dashboard = ensure_dashboard_manager(app_ctx)
         normalized_task_id = normalize_task_id(task_id)
+        task = dashboard.get_task(task_id)
+        if not task:
+            return {
+                "success": False,
+                "error": f"タスク {task_id} が見つかりません",
+            }
+        if task.assigned_agent_id != caller_agent_id:
+            return {
+                "success": False,
+                "error": (
+                    "タスクの割り当て先と caller_agent_id が一致しません: "
+                    f"assigned={task.assigned_agent_id}, caller={caller_agent_id}"
+                ),
+            }
+
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
         actual_progress = progress or 0
         worker_cost_snapshot = None
@@ -462,44 +478,64 @@ def register_tools(mcp: FastMCP) -> None:
 
         # Admin にも進捗を通知（IPC メッセージ）
         admin_notified = False
+        notification_sent = False
+        admin_ids = find_agents_by_role(app_ctx, "admin")
+        if not admin_ids:
+            return {
+                "success": False,
+                "error": "Admin エージェントが見つかりません",
+            }
+
         try:
-            admin_ids = find_agents_by_role(app_ctx, "admin")
-            if admin_ids:
-                ipc = ensure_ipc_manager(app_ctx)
-                ipc.send_message(
-                    sender_id=caller_agent_id,
-                    receiver_id=admin_ids[0],
-                    message_type=MessageType.TASK_PROGRESS,
-                    subject=f"進捗報告: {task_id} ({actual_progress}%)",
-                    content=message or f"タスク {task_id} の進捗: {actual_progress}%",
-                    priority=MessagePriority.NORMAL,
-                    metadata={
-                        "task_id": task_id,
-                        "normalized_task_id": normalized_task_id,
-                        "progress": actual_progress,
-                        "checklist": checklist,
-                        "message": message,
-                        "reporter": caller_agent_id,
-                        "cost_snapshot": worker_cost_snapshot,
-                    },
-                )
-                admin_notified = True
+            ipc = ensure_ipc_manager(app_ctx)
+            ipc.send_message(
+                sender_id=caller_agent_id,
+                receiver_id=admin_ids[0],
+                message_type=MessageType.TASK_PROGRESS,
+                subject=f"進捗報告: {task_id} ({actual_progress}%)",
+                content=message or f"タスク {task_id} の進捗: {actual_progress}%",
+                priority=MessagePriority.NORMAL,
+                metadata={
+                    "task_id": task_id,
+                    "normalized_task_id": normalized_task_id,
+                    "progress": actual_progress,
+                    "checklist": checklist,
+                    "message": message,
+                    "reporter": caller_agent_id,
+                    "cost_snapshot": worker_cost_snapshot,
+                },
+            )
+            admin_notified = True
         except Exception as e:
             logger.warning(f"Admin への進捗通知に失敗: {e}")
+            return {
+                "success": False,
+                "error": f"Admin への進捗通知に失敗しました: {e}",
+            }
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
         if admin_notified and admin_ids:
             sync_agents_from_file(app_ctx)
             admin_agent = app_ctx.agents.get(admin_ids[0])
-            await notify_agent_via_tmux(
+            notification_sent = await notify_agent_via_tmux(
                 app_ctx, admin_agent, "task_progress", caller_agent_id
             )
+            if not notification_sent:
+                return {
+                    "success": False,
+                    "error": "Admin への tmux 通知に失敗しました",
+                    "task_id": task_id,
+                    "progress": actual_progress,
+                    "admin_notified": admin_notified,
+                    "notification_sent": False,
+                }
 
         return {
             "success": True,
             "task_id": task_id,
             "progress": actual_progress,
             "admin_notified": admin_notified,
+            "notification_sent": notification_sent,
             "cost_snapshot": worker_cost_snapshot,
             "message": f"進捗 {actual_progress}% を報告しました",
         }
@@ -557,6 +593,22 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         normalized_task_id = normalize_task_id(task_id)
+        dashboard = ensure_dashboard_manager(app_ctx)
+        task = dashboard.get_task(task_id)
+        if not task:
+            return {
+                "success": False,
+                "error": f"タスク {task_id} が見つかりません",
+            }
+        if task.assigned_agent_id != caller_agent_id:
+            return {
+                "success": False,
+                "error": (
+                    "タスクの割り当て先と caller_agent_id が一致しません: "
+                    f"assigned={task.assigned_agent_id}, caller={caller_agent_id}"
+                ),
+            }
+
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
         worker_cost_snapshot = None
         worker_agent = app_ctx.agents.get(caller_agent_id) if caller_agent_id else None
@@ -602,6 +654,17 @@ def register_tools(mcp: FastMCP) -> None:
         notification_sent = await notify_agent_via_tmux(
             app_ctx, admin_agent, msg_type.value, caller_agent_id
         )
+        if not notification_sent:
+            return {
+                "success": False,
+                "error": "Admin への tmux 通知に失敗しました",
+                "task_id": task_id,
+                "normalized_task_id": normalized_task_id,
+                "message_id": completion_message.id,
+                "reported_status": status,
+                "notification_sent": False,
+                "cost_snapshot": worker_cost_snapshot,
+            }
 
         # 🔴 Worker 自身を IDLE にリセット
         if caller_agent_id:

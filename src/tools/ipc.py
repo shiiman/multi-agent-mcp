@@ -8,6 +8,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from src.config.role_permissions import requires_worker_admin_receiver
 from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus, normalize_task_id
 from src.models.message import Message, MessagePriority, MessageType
@@ -588,14 +589,29 @@ def register_tools(mcp: FastMCP) -> None:
         if sender_id not in ipc.get_all_agent_ids():
             ipc.register_agent(sender_id)
 
+        sender_agent = app_ctx.agents.get(sender_id)
+        sender_role = str(getattr(sender_agent, "role", ""))
         original_receiver_id = receiver_id
         rerouted_receiver_id: str | None = None
+        receiver_agent = None
+
+        if (
+            sender_role == AgentRole.WORKER.value
+            and requires_worker_admin_receiver("send_message")
+            and receiver_id is None
+        ):
+            return {
+                "success": False,
+                "error": (
+                    "Worker は send_message をブロードキャストできません。"
+                    "Admin の agent_id を receiver_id に指定してください。"
+                ),
+            }
+
         if receiver_id:
             sync_agents_from_file(app_ctx)
             receiver_agent = app_ctx.agents.get(receiver_id)
             if not receiver_agent:
-                sender_agent = app_ctx.agents.get(sender_id)
-                sender_role = str(getattr(sender_agent, "role", ""))
                 is_worker_request = (
                     msg_type == MessageType.REQUEST
                     and sender_role == AgentRole.WORKER.value
@@ -622,6 +638,17 @@ def register_tools(mcp: FastMCP) -> None:
                     return {
                         "success": False,
                         "error": f"受信者 {receiver_id} が見つかりません",
+                    }
+
+            if sender_role == AgentRole.WORKER.value:
+                receiver_agent = app_ctx.agents.get(receiver_id)
+                if str(getattr(receiver_agent, "role", "")) != AgentRole.ADMIN.value:
+                    return {
+                        "success": False,
+                        "error": (
+                            "Worker は Admin にのみ send_message を送信できます。"
+                            f" receiver_id={receiver_id}"
+                        ),
                     }
 
             if receiver_id not in ipc.get_all_agent_ids():
