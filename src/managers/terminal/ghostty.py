@@ -113,16 +113,31 @@ tell application "Ghostty"
 end tell
 
 tell application "System Events"
-    tell process "Ghostty"
-        -- locale 非依存で新しいタブを開く
-        keystroke "t" using command down
-        delay 0.5
+    if exists process "Ghostty" then
+        tell process "Ghostty"
+            -- locale 非依存で新しいタブを開く
+            keystroke "t" using command down
+            delay 0.5
 
-        -- クリップボードから貼り付け（Cmd+V）
-        keystroke "v" using command down
-        delay 0.1
-        keystroke return
-    end tell
+            -- クリップボードから貼り付け（Cmd+V）
+            keystroke "v" using command down
+            delay 0.1
+            keystroke return
+        end tell
+    else if exists process "ghostty" then
+        tell process "ghostty"
+            -- locale 非依存で新しいタブを開く
+            keystroke "t" using command down
+            delay 0.5
+
+            -- クリップボードから貼り付け（Cmd+V）
+            keystroke "v" using command down
+            delay 0.1
+            keystroke return
+        end tell
+    else
+        error "Ghostty process not found"
+    end if
 end tell
 '''
         try:

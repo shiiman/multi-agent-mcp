@@ -57,6 +57,9 @@ class TestGhosttyExecutor:
         assert success is True
         executor._run_osascript.assert_awaited_once()
         executor._run_shell.assert_not_called()
+        script = executor._run_osascript.await_args.args[0]
+        assert 'exists process "Ghostty"' in script
+        assert 'exists process "ghostty"' in script
 
     @pytest.mark.asyncio
     async def test_is_running_uses_pgrep_fallback(self):

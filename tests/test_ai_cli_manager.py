@@ -519,6 +519,58 @@ class TestAiCliManagerTerminal:
             assert mock_exec.await_args_list[2].args[:3] == ("pgrep", "-x", "ghostty")
 
     @pytest.mark.asyncio
+    async def test_open_in_ghostty_tab_supports_lowercase_process_name(self, ai_cli_manager):
+        """Ghostty タブ追加スクリプトが lowercase プロセス名にも対応する。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_exec.return_value = mock_proc
+
+            success = await ai_cli_manager._open_in_ghostty_tab("echo ok")
+
+            assert success is True
+            script = mock_exec.call_args.args[2]
+            assert 'exists process "Ghostty"' in script
+            assert 'exists process "ghostty"' in script
+
+    @pytest.mark.asyncio
+    async def test_open_in_iterm2_escapes_single_quote_in_worktree_path(self, ai_cli_manager):
+        """iTerm2 スクリプトはシングルクォートを含むパスでも AppleScript として壊れない。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_exec.return_value = mock_proc
+
+            success, _ = await ai_cli_manager._open_in_iterm2("/tmp/it's test", "echo ok")
+
+            assert success is True
+            script = mock_exec.call_args.args[2]
+            # broken case: ... "cd '/tmp/it'"'"'s test' && ...
+            assert '"\'"\'"' not in script
+            # fixed case keeps embedded quotes escaped inside AppleScript string
+            assert '\\"' in script
+
+    @pytest.mark.asyncio
+    async def test_open_in_terminal_app_escapes_single_quote_in_worktree_path(
+        self, ai_cli_manager
+    ):
+        """Terminal.app スクリプトはシングルクォートを含むパスでも AppleScript として壊れない。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"tab\n", b""))
+            mock_exec.return_value = mock_proc
+
+            success, _ = await ai_cli_manager._open_in_terminal_app("/tmp/it's test", "echo ok")
+
+            assert success is True
+            script = mock_exec.call_args.args[2]
+            assert '"\'"\'"' not in script
+            assert '\\"' in script
+
+    @pytest.mark.asyncio
     async def test_open_in_iterm2_success(self, ai_cli_manager):
         """iTerm2 でターミナルを開くことをテスト。"""
         with patch("asyncio.create_subprocess_exec") as mock_exec:

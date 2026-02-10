@@ -531,13 +531,25 @@ class AiCliManager:
             activate
         end tell
         tell application "System Events"
-            tell process "Ghostty"
-                keystroke "t" using command down
-                delay 0.5
-                keystroke "v" using command down
-                delay 0.1
-                keystroke return
-            end tell
+            if exists process "Ghostty" then
+                tell process "Ghostty"
+                    keystroke "t" using command down
+                    delay 0.5
+                    keystroke "v" using command down
+                    delay 0.1
+                    keystroke return
+                end tell
+            else if exists process "ghostty" then
+                tell process "ghostty"
+                    keystroke "t" using command down
+                    delay 0.5
+                    keystroke "v" using command down
+                    delay 0.1
+                    keystroke return
+                end tell
+            else
+                error "Ghostty process not found"
+            end if
         end tell
         '''
         try:
@@ -573,8 +585,8 @@ class AiCliManager:
         """
         try:
             # AppleScript で iTerm2 を制御
-            escaped_path = escape_applescript(worktree_path)
-            escaped_command = escape_applescript(command)
+            shell_command = f"cd {shlex.quote(worktree_path)} && {command}"
+            escaped_shell_command = escape_applescript(shell_command)
 
             applescript = f'''
             tell application "iTerm"
@@ -583,13 +595,13 @@ class AiCliManager:
                     tell current window
                         create tab with default profile
                         tell current session
-                            write text "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                            write text "{escaped_shell_command}"
                         end tell
                     end tell
                 else
                     create window with default profile
                     tell current session of current window
-                        write text "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                        write text "{escaped_shell_command}"
                     end tell
                 end if
             end tell
@@ -626,19 +638,19 @@ class AiCliManager:
         """
         try:
             # AppleScript で Terminal.app を制御
-            escaped_path = escape_applescript(worktree_path)
-            escaped_command = escape_applescript(command)
+            shell_command = f"cd {shlex.quote(worktree_path)} && {command}"
+            escaped_shell_command = escape_applescript(shell_command)
 
             applescript = f'''
             tell application "Terminal"
                 activate
                 if (count of windows) > 0 then
                     tell front window
-                        do script "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                        do script "{escaped_shell_command}"
                     end tell
                     return "tab"
                 else
-                    do script "cd {shlex.quote(escaped_path)} && {escaped_command}"
+                    do script "{escaped_shell_command}"
                     return "window"
                 end if
             end tell
