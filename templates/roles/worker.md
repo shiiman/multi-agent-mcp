@@ -82,10 +82,10 @@ Owner (1 agent)
 | `read_messages` | Admin からの指示・追加指示を確認 |
 ### 進捗報告
 
-**進捗報告（25%ごと）は Dashboard を更新するだけで OK です。IPC は不要です。**
+**進捗報告は `report_task_progress` を使用します。Worker は Dashboard を直接更新しません。**
 
 ```python
-# 進捗報告時（Dashboard 更新のみ）
+# 進捗報告時（Admin へIPC通知。Dashboard反映は Admin 側）
 report_task_progress(
     task_id=task_id,
     progress=30,
@@ -168,14 +168,14 @@ Admin にメッセージを送る際は以下を使用：
 
 #### 2. 作業開始
 
-1. タスクステータスを `in_progress` に更新
+1. `report_task_progress` で初回進捗（10%以上）を報告
 2. 割り当てられた worktree 内で作業
 3. 割り当てられたスコープ内に留まる
 
 #### 3. 進捗報告
 
 1. Admin に定期的に進捗報告を送信
-2. `update_task_status` で進捗パーセンテージを更新
+2. `report_task_progress` で進捗パーセンテージを更新
 3. ブロッカーは即座に報告
 
 #### 4. タスク完了（必須手順）
@@ -234,6 +234,7 @@ report_task_completion(
 4. **早期エスカレーション**: ブロッカーは即座に報告
 5. **クリーンなコミット**: アトミックで説明的なコミット
 6. **ブランチ規律**: 割り当てられた worktree/ブランチでのみ作業
+7. **レポート出力規律**: 調査成果物は `.multi-agent-mcp/{session_id}/reports/*.md` を正本とする
 
 ---
 
@@ -294,7 +295,7 @@ get_role_guide(role="worker")
 
 - [ ] `send_message` で Admin に報告できる
 - [ ] `read_messages` で Admin からの指示を読める
-- [ ] `update_task_status` でタスク進捗を更新できる
+- [ ] `report_task_progress` でタスク進捗を更新できる
 - [ ] `get_task` でタスク詳細を確認できる
 
 ### 4. 状態確認（正データを使用）

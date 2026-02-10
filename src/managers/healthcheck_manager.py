@@ -741,6 +741,17 @@ class HealthcheckManager:
                 skipped.append(agent_id)
                 continue
 
+            if agent.status in (AgentStatus.TERMINATED, AgentStatus.TERMINATED.value):
+                stale_keys = [
+                    key
+                    for key in self._recovery_failures
+                    if key.startswith(f"{agent_id}:")
+                ]
+                for stale_key in stale_keys:
+                    self._recovery_failures.pop(stale_key, None)
+                skipped.append(agent_id)
+                continue
+
             active_task, active_task_id = self._sync_worker_active_task(
                 agent_id, agent, dashboard, app_ctx,
             )

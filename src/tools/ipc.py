@@ -96,11 +96,24 @@ def _auto_update_dashboard_from_messages(
                 checklist = msg.metadata.get("checklist")
                 message_text = msg.metadata.get("message")
                 reporter = msg.metadata.get("reporter")
+                status_ok, status_msg = dashboard.update_task_status(
+                    task_id, TaskStatus.IN_PROGRESS, progress
+                )
+                if not status_ok:
+                    skipped_reasons.append(
+                        f"status_update_rejected:{task_id}:{status_msg}"
+                    )
+                    continue
+
                 if checklist:
-                    dashboard.update_task_checklist(
+                    checklist_ok, checklist_msg = dashboard.update_task_checklist(
                         task_id, checklist, log_message=message_text
                     )
-                dashboard.update_task_status(task_id, TaskStatus.IN_PROGRESS, progress)
+                    if not checklist_ok:
+                        skipped_reasons.append(
+                            f"checklist_update_error:{task_id}:{checklist_msg}"
+                        )
+
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
                     agent.current_task = task_id
@@ -115,9 +128,15 @@ def _auto_update_dashboard_from_messages(
                 if task and task.status == TaskStatus.COMPLETED:
                     skipped_reasons.append(f"already_completed:{task_id}")
                     continue
-                dashboard.update_task_status(
+                status_ok, status_msg = dashboard.update_task_status(
                     task_id, TaskStatus.COMPLETED, progress=100
                 )
+                if not status_ok:
+                    skipped_reasons.append(
+                        f"status_update_rejected:{task_id}:{status_msg}"
+                    )
+                    continue
+
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
                     if agent.current_task == task_id:
@@ -133,7 +152,15 @@ def _auto_update_dashboard_from_messages(
                 if task and task.status == TaskStatus.FAILED:
                     skipped_reasons.append(f"already_failed:{task_id}")
                     continue
-                dashboard.update_task_status(task_id, TaskStatus.FAILED)
+                status_ok, status_msg = dashboard.update_task_status(
+                    task_id, TaskStatus.FAILED
+                )
+                if not status_ok:
+                    skipped_reasons.append(
+                        f"status_update_rejected:{task_id}:{status_msg}"
+                    )
+                    continue
+
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
                     if agent.current_task == task_id:
