@@ -354,3 +354,38 @@ class TestHealthcheckMonitoring:
         summary = dashboard.get_summary()
         assert summary["process_crash_count"] == 1
         assert summary["process_recovery_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_monitor_skips_terminal_worker(self, temp_dir, settings):
+        """TERMINATED worker は監視復旧対象外でスキップされることをテスト。"""
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=False)
+        tmux.create_session = AsyncMock(return_value=False)
+        tmux.capture_pane_by_index = AsyncMock(return_value="")
+
+        now = datetime.now()
+        terminated_worker = Agent(
+            id="worker-terminated",
+            role=AgentRole.WORKER,
+            status=AgentStatus.TERMINATED,
+            tmux_session="test:0.2",
+            session_name="test",
+            window_index=0,
+            pane_index=2,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={terminated_worker.id: terminated_worker},
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=10,
+            max_recovery_attempts=1,
+        )
+
+        result = await healthcheck.monitor_and_recover_workers()
+        assert terminated_worker.id in result["skipped"]
+        assert result["recovered"] == []
+        assert result["escalated"] == []

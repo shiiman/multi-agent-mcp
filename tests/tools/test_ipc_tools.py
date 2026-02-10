@@ -834,6 +834,87 @@ class TestReadMessages:
         assert state["waiting_for_admin"] is False
         assert state["unlock_reason"] == "admin_notification_consumed"
 
+    @pytest.mark.asyncio
+    async def test_read_messages_admin_auto_updates_dashboard_from_task_progress(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Admin read_messages 時に task_progress から Dashboard が自動更新されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+        assert read_messages is not None
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="progress target",
+            description="auto update",
+            assigned_agent_id="worker-001",
+        )
+
+        app_ctx.ipc_manager.send_message(
+            sender_id="worker-001",
+            receiver_id="admin-001",
+            message_type=MessageType.TASK_PROGRESS,
+            content="50% reached",
+            metadata={
+                "task_id": f"task:{task.id}",
+                "progress": 50,
+                "message": "50% reached",
+                "reporter": "worker-001",
+            },
+        )
+
+        result = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["dashboard_updated"] is True
+        assert result["dashboard_updates_applied"] == 1
+        updated = app_ctx.dashboard_manager.get_task(task.id)
+        assert updated is not None
+        assert updated.status == TaskStatus.IN_PROGRESS
+        assert updated.progress == 50
+
 
 class TestGetUnreadCount:
     """get_unread_count ツールのテスト。"""
@@ -975,4 +1056,3 @@ class TestRegisterAgentToIpc:
 
         assert result["success"] is True
         assert result["agent_id"] == "new-agent-001"
-

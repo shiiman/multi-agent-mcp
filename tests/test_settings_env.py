@@ -149,6 +149,7 @@ class TestGenerateEnvTemplate:
         assert "MCP_HEALTHCHECK_IN_PROGRESS_NO_IPC_TIMEOUT_SECONDS" in template
         assert "MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS" in template
         assert "MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE" in template
+        assert "MCP_SEND_COOLDOWN_SECONDS=2.0" in template
 
     def test_template_has_comments(self):
         """テンプレートにコメントが含まれることをテスト。"""

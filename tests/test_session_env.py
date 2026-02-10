@@ -78,6 +78,11 @@ class TestGenerateEnvTemplate:
         result = generate_env_template(settings=settings)
         assert f"MCP_MAX_WORKERS={settings.max_workers}" in result
 
+    def test_template_contains_send_cooldown_default(self, settings):
+        """テンプレートに send cooldown の既定値が含まれることをテスト。"""
+        result = generate_env_template(settings=settings)
+        assert "MCP_SEND_COOLDOWN_SECONDS=2.0" in result
+
 
 class TestSetupMcpDirectories:
     """_setup_mcp_directories のテスト。"""

@@ -655,6 +655,9 @@ class HealthcheckManager:
         for agent_id, agent in list(self.agents.items()):
             if agent.role != AgentRole.WORKER.value:
                 continue
+            if agent.status == AgentStatus.TERMINATED.value:
+                skipped.append(agent_id)
+                continue
 
             active_task, active_task_id = self._sync_worker_active_task(
                 agent_id, agent, dashboard, app_ctx,

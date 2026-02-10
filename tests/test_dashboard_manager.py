@@ -193,6 +193,15 @@ class TestDashboardManager:
         assert reopened.progress == 0
         assert reopened.completed_at is None
 
+    def test_reopen_task_rejects_non_terminal(self, dashboard_manager):
+        """reopen_task は終端状態以外を拒否することをテスト。"""
+        task = dashboard_manager.create_task(title="Not Terminal")
+        dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=10)
+
+        success, message = dashboard_manager.reopen_task(task.id)
+        assert success is False
+        assert "終端状態ではありません" in message
+
     def test_list_tasks(self, dashboard_manager):
         """タスク一覧をテスト。"""
         dashboard_manager.create_task(title="Task 1")
