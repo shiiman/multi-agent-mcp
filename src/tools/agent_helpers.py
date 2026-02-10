@@ -108,6 +108,21 @@ def _resolve_tmux_session_name(agent: Agent) -> str | None:
 
 def _resolve_agent_cli_name(agent: Agent, app_ctx: AppContext) -> str:
     """Agent の CLI 名を文字列で返す。"""
+    if (
+        agent.role == AgentRole.WORKER
+        and agent.window_index is not None
+        and agent.pane_index is not None
+    ):
+        try:
+            worker_no = resolve_worker_number_from_slot(
+                app_ctx.settings,
+                agent.window_index,
+                agent.pane_index,
+            )
+            return app_ctx.settings.get_worker_cli(worker_no).value
+        except Exception as e:
+            logger.debug("Worker CLI の再解決に失敗したため agent.ai_cli を使用: %s", e)
+
     if agent.ai_cli:
         return agent.ai_cli.value if hasattr(agent.ai_cli, "value") else str(agent.ai_cli)
     return str(app_ctx.ai_cli.get_default_cli().value)

@@ -20,6 +20,7 @@ from src.tools.agent_helpers import (
     build_worker_task_branch,
     resolve_worker_number_from_slot,
 )
+from src.tools.helpers import refresh_app_settings
 
 
 def _make_owner_agent() -> Agent:
@@ -79,19 +80,40 @@ class TestResolveHelpers:
         assert _resolve_tmux_session_name(agent) is None
 
     def test_resolve_agent_cli_name_from_agent(self):
-        """agent.ai_cli が設定されていればその value を返す。"""
+        """Worker は agent.ai_cli より設定値（env 由来）を優先して解決する。"""
         agent = _make_worker_agent()
         agent.ai_cli = AICli.CLAUDE
         app_ctx = MagicMock()
-        assert _resolve_agent_cli_name(agent, app_ctx) == "claude"
+        app_ctx.settings.get_worker_cli.return_value = AICli.CODEX
+        assert _resolve_agent_cli_name(agent, app_ctx) == "codex"
 
     def test_resolve_agent_cli_name_fallback(self):
         """agent.ai_cli が未設定ならデフォルトを返す。"""
-        agent = _make_worker_agent()
+        agent = _make_owner_agent()
         agent.ai_cli = None
         app_ctx = MagicMock()
         app_ctx.ai_cli.get_default_cli.return_value = AICli.CLAUDE
         assert _resolve_agent_cli_name(agent, app_ctx) == "claude"
+
+    def test_resolve_worker_cli_name_prefers_env_even_if_agent_cli_stale(
+        self, app_ctx, temp_dir
+    ):
+        """受入条件 #1/#2: stale ai_cli より .env 設定の Worker CLI を優先する。"""
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        (mcp_dir / ".env").write_text(
+            "MCP_MODEL_PROFILE_ACTIVE=standard\n"
+            "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n",
+            encoding="utf-8",
+        )
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.settings.enable_git = False
+        refresh_app_settings(app_ctx, str(temp_dir))
+
+        agent = _make_worker_agent()
+        agent.ai_cli = AICli.CLAUDE  # agents.json 由来の残骸を想定
+
+        assert _resolve_agent_cli_name(agent, app_ctx) == "codex"
 
 
 class TestSanitizeBranchPart:
@@ -403,3 +425,84 @@ class TestSendTaskToWorker:
         assert result["command_sent"] == "bootstrap-command"
         assert agent.ai_bootstrapped is True
         assert app_ctx.tmux.send_keys_to_pane.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_worker_bootstrap_resolves_cli_from_env(self, app_ctx, temp_dir):
+        """受入条件 #1/#2: Worker 起動時に env の CLI を優先して再解決する。"""
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        (mcp_dir / ".env").write_text(
+            "MCP_MODEL_PROFILE_ACTIVE=standard\n"
+            "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n",
+            encoding="utf-8",
+        )
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.settings.enable_git = False
+        refresh_app_settings(app_ctx, str(temp_dir))
+
+        now = datetime.now()
+        agent = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            worktree_path=str(temp_dir),
+            ai_cli=AICli.CLAUDE,  # agents.json の古い値を想定
+            created_at=now,
+            last_activity=now,
+            ai_bootstrapped=False,
+        )
+        app_ctx.agents[agent.id] = agent
+        app_ctx.session_id = "session-002"
+        app_ctx.ai_cli.build_stdin_command = MagicMock(return_value="bootstrap-codex")
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.write_task_file.return_value = Path(temp_dir) / "task.md"
+        mock_dashboard.save_markdown_dashboard.return_value = None
+        mock_dashboard.record_api_call.return_value = None
+
+        mock_persona_manager = MagicMock()
+        mock_persona_manager.get_optimal_persona.return_value = MagicMock(
+            name="coder",
+            system_prompt_addition="focus on fixes",
+        )
+
+        with (
+            patch("src.tools.agent_helpers.search_memory_context", return_value=[]),
+            patch(
+                "src.tools.agent_helpers.ensure_persona_manager",
+                return_value=mock_persona_manager,
+            ),
+            patch(
+                "src.tools.agent_helpers.get_mcp_tool_prefix_from_config",
+                return_value="mcp__x__",
+            ),
+            patch("src.tools.agent_helpers.generate_7section_task", return_value="task body"),
+            patch("src.tools.agent_helpers.ensure_dashboard_manager", return_value=mock_dashboard),
+            patch("src.tools.agent_helpers.resolve_main_repo_root", return_value=str(temp_dir)),
+            patch("src.tools.agent_helpers.save_agent_to_file", return_value=True),
+        ):
+            result = await _send_task_to_worker(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content="do task",
+                task_id="task-002",
+                branch="feature/task-002",
+                worktree_path=str(temp_dir),
+                session_id="session-002",
+                worker_index=0,
+                enable_worktree=False,
+                profile_settings={
+                    "worker_model": "gpt-5.3-codex",
+                    "worker_thinking_tokens": 4000,
+                    "worker_reasoning_effort": "none",
+                },
+                caller_agent_id="admin-001",
+            )
+
+        assert result["task_sent"] is True
+        assert app_ctx.ai_cli.build_stdin_command.call_args.kwargs["cli"] == "codex"
