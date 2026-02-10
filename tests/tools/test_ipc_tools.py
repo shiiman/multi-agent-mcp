@@ -1039,6 +1039,89 @@ class TestReadMessages:
         assert state["waiting_for_admin"] is False
         assert state["unlock_reason"] == "admin_notification_consumed"
 
+    @pytest.mark.asyncio
+    async def test_read_messages_skips_rejected_terminal_to_in_progress_transition(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """終端タスクへの TASK_PROGRESS が安全にスキップされることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        task = app_ctx.dashboard_manager.create_task(title="実装タスク")
+        ok, _ = app_ctx.dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED)
+        assert ok is True
+
+        app_ctx.ipc_manager.send_message(
+            sender_id="worker-001",
+            receiver_id="admin-001",
+            message_type=MessageType.TASK_PROGRESS,
+            content="進捗報告",
+            metadata={
+                "task_id": task.id,
+                "normalized_task_id": task.id,
+                "progress": 50,
+                "message": "中間報告",
+                "reporter": "worker-001",
+            },
+        )
+
+        result = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["dashboard_updated"] is True
+        assert result["dashboard_updates_applied"] == 0
+        assert any(
+            str(reason).startswith(f"status_update_rejected:{task.id}:")
+            for reason in result["dashboard_updates_skipped_reason"]
+        )
+
+        task_after = app_ctx.dashboard_manager.get_task(task.id)
+        assert task_after is not None
+        assert task_after.status == TaskStatus.COMPLETED
+
 
 class TestGetUnreadCount:
     """get_unread_count ツールのテスト。"""

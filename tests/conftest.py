@@ -44,11 +44,15 @@ def temp_dir():
 
 
 @pytest.fixture
-def settings(temp_dir):
+def settings(temp_dir, monkeypatch):
     """テスト用の設定を作成する。"""
     from src.config.settings import TerminalApp
 
+    # 実行環境の MCP_PROJECT_ROOT/.env をテストへ持ち込まない
+    monkeypatch.delenv("MCP_PROJECT_ROOT", raising=False)
+
     return Settings(
+        _env_file=None,
         max_workers=3,
         tmux_prefix="test-mcp-agent",
         default_terminal=TerminalApp.AUTO,

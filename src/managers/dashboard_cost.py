@@ -56,32 +56,33 @@ class DashboardCostMixin:
             status_line = None
             source = "estimated"
 
-        dashboard = self._read_dashboard()
-        record = ApiCallRecord(
-            ai_cli=normalized_cli,
-            model=model,
-            tokens=tokens,
-            estimated_cost_usd=estimated_cost,
-            actual_cost_usd=actual_cost_usd,
-            cost_source=source,
-            status_line=status_line,
-            timestamp=datetime.now(),
-            agent_id=agent_id,
-            task_id=task_id,
-        )
-        dashboard.cost.calls.append(record)
+        def _record(dashboard: Dashboard) -> None:
+            record = ApiCallRecord(
+                ai_cli=normalized_cli,
+                model=model,
+                tokens=tokens,
+                estimated_cost_usd=estimated_cost,
+                actual_cost_usd=actual_cost_usd,
+                cost_source=source,
+                status_line=status_line,
+                timestamp=datetime.now(),
+                agent_id=agent_id,
+                task_id=task_id,
+            )
+            dashboard.cost.calls.append(record)
 
-        if (
-            source == "actual"
-            and actual_cost_usd is not None
-            and agent_id
-            and normalized_cli == "claude"
-        ):
-            dashboard.cost.actual_cost_by_agent[agent_id] = actual_cost_usd
+            if (
+                source == "actual"
+                and actual_cost_usd is not None
+                and agent_id
+                and normalized_cli == "claude"
+            ):
+                dashboard.cost.actual_cost_by_agent[agent_id] = actual_cost_usd
 
-        # 統計を再計算
-        self._recalculate_cost_stats(dashboard)
-        self._write_dashboard(dashboard)
+            # 統計を再計算
+            self._recalculate_cost_stats(dashboard)
+
+        self.run_dashboard_transaction(_record)
 
         logger.debug(
             "API呼び出しを記録: %s (%s tokens, source=%s)",
@@ -216,9 +217,10 @@ class DashboardCostMixin:
         Args:
             threshold_usd: 新しい閾値（USD）
         """
-        dashboard = self._read_dashboard()
-        dashboard.cost.warning_threshold_usd = threshold_usd
-        self._write_dashboard(dashboard)
+        def _set(dashboard: Dashboard) -> None:
+            dashboard.cost.warning_threshold_usd = threshold_usd
+
+        self.run_dashboard_transaction(_set)
         logger.info(f"コスト警告閾値を ${threshold_usd:.2f} に設定しました")
 
     def reset_cost_counter(self) -> int:
@@ -227,10 +229,12 @@ class DashboardCostMixin:
         Returns:
             削除した記録数
         """
-        dashboard = self._read_dashboard()
-        count = len(dashboard.cost.calls)
-        dashboard.cost = CostInfo()
-        self._write_dashboard(dashboard)
+        def _reset(dashboard: Dashboard) -> int:
+            count = len(dashboard.cost.calls)
+            dashboard.cost = CostInfo()
+            return count
+
+        count = self.run_dashboard_transaction(_reset)
         logger.info(f"コスト記録をリセットしました（{count} 件削除）")
         return count
 

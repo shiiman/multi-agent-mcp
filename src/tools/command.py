@@ -303,6 +303,7 @@ def register_tools(mcp: FastMCP) -> None:
             return assign_err
 
         agent.current_task = effective_task_id
+        agent.branch = dispatch_branch or None
         agent.status = AgentStatus.BUSY
         agent.last_activity = datetime.now()
         save_agent_to_file(app_ctx, agent)
@@ -377,6 +378,7 @@ def register_tools(mcp: FastMCP) -> None:
         )
         if success:
             agent.status = AgentStatus.BUSY
+            agent.branch = branch_name or f"feature/{session_id}"
             agent.last_activity = datetime.now()
             save_agent_to_file(app_ctx, agent)
             dashboard.save_markdown_dashboard(project_root, session_id)

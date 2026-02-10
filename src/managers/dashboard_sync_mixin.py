@@ -25,84 +25,83 @@ class DashboardSyncMixin:
         Returns:
             保存したファイルのパス（{session_id}/dashboard/dashboard.md）
         """
-        from datetime import datetime
-
-        dashboard = self._read_dashboard()
-
-        # 🔴 agents.json からエージェント情報を同期
         session_dir = self.dashboard_dir.parent  # {mcp_dir}/{session_id}/
         agents_file = session_dir / "agents.json"
-        if agents_file.exists():
-            try:
-                with open(agents_file, encoding="utf-8") as f:
-                    agents_data = json.load(f)
 
-                dashboard.agents = []
-                for agent_id, agent_dict in agents_data.items():
-                    # last_activity を datetime に変換
-                    last_activity = agent_dict.get("last_activity")
-                    if isinstance(last_activity, str):
-                        try:
-                            last_activity = datetime.fromisoformat(last_activity)
-                        except ValueError:
-                            last_activity = None
+        def _sync(dashboard) -> None:
+            # 🔴 agents.json からエージェント情報を同期
+            if agents_file.exists():
+                try:
+                    with open(agents_file, encoding="utf-8") as f:
+                        agents_data = json.load(f)
 
-                    role = agent_dict.get("role")
-                    name = None
-                    if role == "owner":
-                        name = "owner"
-                    elif role == "admin":
-                        name = "admin"
-                    elif role == "worker":
-                        ai_cli = agent_dict.get("ai_cli")
-                        if isinstance(ai_cli, dict):
-                            cli_name = str(ai_cli.get("value", "worker"))
-                        else:
-                            cli_name = str(ai_cli or "worker")
-                        name = self._build_worker_name(
-                            agent_dict.get("id", agent_id),
-                            cli_name,
-                            window_index=agent_dict.get("window_index"),
-                            pane_index=agent_dict.get("pane_index"),
+                    dashboard.agents = []
+                    for agent_id, agent_dict in agents_data.items():
+                        # last_activity を datetime に変換
+                        last_activity = agent_dict.get("last_activity")
+                        if isinstance(last_activity, str):
+                            try:
+                                last_activity = datetime.fromisoformat(last_activity)
+                            except ValueError:
+                                last_activity = None
+
+                        role = agent_dict.get("role")
+                        name = None
+                        if role == "owner":
+                            name = "owner"
+                        elif role == "admin":
+                            name = "admin"
+                        elif role == "worker":
+                            ai_cli = agent_dict.get("ai_cli")
+                            if isinstance(ai_cli, dict):
+                                cli_name = str(ai_cli.get("value", "worker"))
+                            else:
+                                cli_name = str(ai_cli or "worker")
+                            name = self._build_worker_name(
+                                agent_dict.get("id", agent_id),
+                                cli_name,
+                                window_index=agent_dict.get("window_index"),
+                                pane_index=agent_dict.get("pane_index"),
+                            )
+
+                        summary = AgentSummary(
+                            agent_id=agent_dict.get("id", agent_id),
+                            name=name,
+                            role=agent_dict.get("role"),
+                            status=agent_dict.get("status"),
+                            current_task_id=agent_dict.get("current_task"),
+                            worktree_path=agent_dict.get("worktree_path"),
+                            branch=agent_dict.get("branch"),
+                            last_activity=last_activity,
                         )
+                        dashboard.agents.append(summary)
 
-                    summary = AgentSummary(
-                        agent_id=agent_dict.get("id", agent_id),
-                        name=name,
-                        role=agent_dict.get("role"),
-                        status=agent_dict.get("status"),
-                        current_task_id=agent_dict.get("current_task"),
-                        worktree_path=agent_dict.get("worktree_path"),
-                        branch=None,
-                        last_activity=last_activity,
-                    )
-                    dashboard.agents.append(summary)
+                    dashboard.calculate_stats()
+                    logger.debug(f"agents.json から {len(dashboard.agents)} 件のエージェントを同期")
+                except Exception as e:
+                    logger.warning(f"agents.json の読み込みに失敗: {e}")
 
-                dashboard.calculate_stats()
-                logger.debug(f"agents.json から {len(dashboard.agents)} 件のエージェントを同期")
-            except Exception as e:
-                logger.warning(f"agents.json の読み込みに失敗: {e}")
+            # 🔴 IPC メッセージを収集（Dashboard 表示用）
+            ipc_dir = session_dir / "ipc"
+            if ipc_dir.exists():
+                try:
+                    all_messages: list[MessageSummary] = []
+                    for agent_dir in ipc_dir.iterdir():
+                        if agent_dir.is_dir():
+                            for msg_file in agent_dir.glob("*.md"):
+                                msg = self._parse_ipc_message(msg_file)
+                                if msg:
+                                    all_messages.append(msg)
+                    # 時系列順ソート（全件保持）
+                    all_messages.sort(key=lambda m: m.created_at or datetime.min)
+                    dashboard.messages = all_messages
+                    logger.debug(f"IPC メッセージ {len(dashboard.messages)} 件を収集")
+                except Exception as e:
+                    logger.warning(f"IPC メッセージの収集に失敗: {e}")
 
-        # 🔴 IPC メッセージを収集（Dashboard 表示用）
-        ipc_dir = session_dir / "ipc"
-        if ipc_dir.exists():
-            try:
-                all_messages: list[MessageSummary] = []
-                for agent_dir in ipc_dir.iterdir():
-                    if agent_dir.is_dir():
-                        for msg_file in agent_dir.glob("*.md"):
-                            msg = self._parse_ipc_message(msg_file)
-                            if msg:
-                                all_messages.append(msg)
-                # 時系列順ソート（全件保持）
-                all_messages.sort(key=lambda m: m.created_at or datetime.min)
-                dashboard.messages = all_messages
-                logger.debug(f"IPC メッセージ {len(dashboard.messages)} 件を収集")
-            except Exception as e:
-                logger.warning(f"IPC メッセージの収集に失敗: {e}")
+            self._write_messages_markdown(dashboard)
 
-        self._write_dashboard(dashboard)
-        self._write_messages_markdown(dashboard)
+        self.run_dashboard_transaction(_sync)
         return self._get_dashboard_path()
 
     def _parse_ipc_message(self, file_path: Path) -> MessageSummary | None:

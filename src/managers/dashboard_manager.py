@@ -7,8 +7,10 @@ YAML Front Matter 付き Markdown で統一管理。
 import logging
 import os
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, TypeVar
 
 import yaml
 
@@ -20,6 +22,8 @@ if TYPE_CHECKING:
     from src.config.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+_TransactionResult = TypeVar("_TransactionResult")
 
 
 class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
@@ -38,6 +42,7 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
         self.workspace_path = workspace_path
         self.dashboard_dir = Path(dashboard_dir)
         self.settings = settings or load_settings_for_project(workspace_path)
+        self._dashboard_lock_timeout_seconds = 1.0
 
     def initialize(self) -> None:
         """ダッシュボード環境を初期化する。"""
@@ -67,8 +72,58 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
     def _get_messages_path(self) -> Path:
         return self.dashboard_dir / "messages.md"
 
+    def _get_dashboard_lock_path(self) -> Path:
+        return self.dashboard_dir / "dashboard.lock"
+
+    @contextmanager
+    def _dashboard_file_lock(self) -> None:
+        """Dashboard 読み書き用の排他ロックを取得する。"""
+        import fcntl
+
+        lock_path = self._get_dashboard_lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        started_at = time.monotonic()
+
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            while True:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError as e:
+                    elapsed = time.monotonic() - started_at
+                    if elapsed >= self._dashboard_lock_timeout_seconds:
+                        msg = (
+                            f"dashboard lock timeout ({self._dashboard_lock_timeout_seconds:.2f}s): "
+                            f"{lock_path}"
+                        )
+                        raise TimeoutError(msg) from e
+                    time.sleep(0.01)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def run_dashboard_transaction(
+        self,
+        mutate: Callable[[Dashboard], _TransactionResult],
+        *,
+        write_back: bool = True,
+    ) -> _TransactionResult:
+        """Dashboard をロック下で更新するトランザクションを実行する。"""
+        with self._dashboard_file_lock():
+            dashboard = self._read_dashboard_unlocked()
+            result = mutate(dashboard)
+            if write_back:
+                self._write_dashboard_unlocked(dashboard)
+            return result
+
     def _write_dashboard(self, dashboard: Dashboard) -> None:
         """ダッシュボードをファイルに保存する（YAML Front Matter + Markdown）。"""
+        with self._dashboard_file_lock():
+            self._write_dashboard_unlocked(dashboard)
+
+    def _write_dashboard_unlocked(self, dashboard: Dashboard) -> None:
+        """ロック取得済み前提でダッシュボードを書き込む。"""
         dashboard_path = self._get_dashboard_path()
         try:
             front_matter_data = dashboard.model_dump(mode="json", exclude={"messages"})
@@ -96,9 +151,15 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
                 raise
         except OSError as e:
             logger.error(f"ダッシュボード保存エラー: {e}")
+            raise
 
     def _read_dashboard(self) -> Dashboard:
         """ダッシュボードをファイルから読み込む。"""
+        with self._dashboard_file_lock():
+            return self._read_dashboard_unlocked()
+
+    def _read_dashboard_unlocked(self) -> Dashboard:
+        """ロック取得済み前提でダッシュボードを読み込む。"""
         dashboard_path = self._get_dashboard_path()
         if dashboard_path.exists():
             try:

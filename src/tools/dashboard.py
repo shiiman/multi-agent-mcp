@@ -123,6 +123,7 @@ def register_tools(mcp: FastMCP) -> None:
         description: str = "",
         assigned_agent_id: str | None = None,
         branch: str | None = None,
+        metadata: dict | None = None,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -135,6 +136,7 @@ def register_tools(mcp: FastMCP) -> None:
             description: タスク説明
             assigned_agent_id: 割り当て先エージェントID（オプション）
             branch: 作業ブランチ（オプション）
+            metadata: 追加メタデータ（オプション）
             caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
@@ -151,12 +153,56 @@ def register_tools(mcp: FastMCP) -> None:
             description=description,
             assigned_agent_id=assigned_agent_id,
             branch=branch,
+            metadata=metadata,
         )
 
         return {
             "success": True,
             "task": task.model_dump(mode="json"),
             "message": f"タスクを作成しました: {task.id}",
+        }
+
+    @mcp.tool()
+    async def reopen_task(
+        task_id: str,
+        reset_progress: bool = False,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        """終端タスクを再開する。
+
+        ※ Admin のみ使用可能。
+
+        Args:
+            task_id: 再開するタスクID
+            reset_progress: 進捗率を 0 に戻すか
+            caller_agent_id: 呼び出し元エージェントID（必須）
+
+        Returns:
+            再開結果（success, task_id, message または error）
+        """
+        app_ctx, role_error = require_permission(ctx, "reopen_task", caller_agent_id)
+        if role_error:
+            return role_error
+
+        dashboard = ensure_dashboard_manager(app_ctx)
+        success, message = dashboard.reopen_task(task_id=task_id, reset_progress=reset_progress)
+
+        if success:
+            task = dashboard.get_task(task_id)
+            if task and task.assigned_agent_id:
+                assigned = app_ctx.agents.get(task.assigned_agent_id)
+                if assigned and assigned.current_task == task.id:
+                    assigned.current_task = None
+                    if assigned.role == AgentRole.WORKER.value:
+                        assigned.status = AgentStatus.IDLE
+                    assigned.last_activity = datetime.now()
+                    save_agent_to_file(app_ctx, assigned)
+
+        return {
+            "success": success,
+            "task_id": task_id,
+            "message": message,
         }
 
     @mcp.tool()
@@ -174,7 +220,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         Args:
             task_id: タスクID
-            status: 新しいステータス（pending/in_progress/completed/failed/blocked）
+            status: 新しいステータス（pending/in_progress/blocked/completed/failed/cancelled）
             progress: 進捗率（0-100）
             error_message: エラーメッセージ（failedの場合）
             caller_agent_id: 呼び出し元エージェントID（ロールチェック用）
@@ -279,6 +325,8 @@ def register_tools(mcp: FastMCP) -> None:
             agent = app_ctx.agents.get(agent_id)
             if agent:
                 agent.current_task = task_id
+                if branch:
+                    agent.branch = branch
                 if agent.role == AgentRole.WORKER.value:
                     agent.status = AgentStatus.BUSY
                 agent.last_activity = datetime.now()

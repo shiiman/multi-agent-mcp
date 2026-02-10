@@ -318,41 +318,46 @@ class DashboardMarkdownMixin:
         agent_labels = self._build_agent_label_map(dashboard)
         lines.extend(["## メッセージ履歴"])
         for msg in dashboard.messages:
-            time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
-            emoji = type_emoji.get(msg.message_type, "📨")
-            content = msg.content.strip() if msg.content else "(本文なし)"
-            sender_id = msg.sender_id or "unknown"
-            receiver_id = msg.receiver_id
-
-            def _format_actor(actor_id: str | None) -> str:
-                if not actor_id:
-                    return "unknown"
-                if actor_id == "system":
-                    return "system"
-                label = agent_labels.get(actor_id)
-                if label:
-                    return label
-                return f"unknown({actor_id[:8]})"
-
-            sender = _format_actor(sender_id)
-            receiver = (
-                _format_actor(receiver_id)
-                if receiver_id
-                else "broadcast"
-            )
-            route = f"{sender} → {receiver}"
-            lines.extend([
-                "",
-                "<details open>",
-                f"<summary>{time_str} {emoji} {route}</summary>",
-                "",
-                "```text",
-                content,
-                "```",
-                "</details>",
-            ])
+            lines.extend(self._render_message_details(msg, agent_labels, type_emoji))
 
         return "\n".join(lines)
+
+    def _render_message_details(
+        self,
+        msg,
+        agent_labels: dict[str, str],
+        type_emoji: dict[str, str],
+    ) -> list[str]:
+        """メッセージ1件分の Markdown ブロックを返す。"""
+        time_str = msg.created_at.strftime("%H:%M:%S") if msg.created_at else "-"
+        emoji = type_emoji.get(msg.message_type, "📨")
+        content = msg.content.strip() if msg.content else "(本文なし)"
+        sender_id = msg.sender_id or "unknown"
+        receiver_id = msg.receiver_id
+
+        def _format_actor(actor_id: str | None) -> str:
+            if not actor_id:
+                return "unknown"
+            if actor_id == "system":
+                return "system"
+            label = agent_labels.get(actor_id)
+            if label:
+                return label
+            return f"unknown({actor_id[:8]})"
+
+        sender = _format_actor(sender_id)
+        receiver = _format_actor(receiver_id) if receiver_id else "broadcast"
+        route = f"{sender} → {receiver}"
+        return [
+            "",
+            "<details open>",
+            f"<summary>{time_str} {emoji} {route}</summary>",
+            "",
+            "```text",
+            content,
+            "```",
+            "</details>",
+        ]
 
     def _write_messages_markdown(self, dashboard: Dashboard) -> None:
         """messages.md を保存する。"""
@@ -364,6 +369,39 @@ class DashboardMarkdownMixin:
             )
         except OSError as e:
             logger.error(f"messages.md 保存エラー: {e}")
+
+    def _append_message_markdown(self, dashboard: Dashboard, message) -> None:
+        """messages.md へ単一メッセージを追記する。"""
+        messages_path = self._get_messages_path()
+        type_emoji = {
+            "task_progress": "📊",
+            "task_complete": "✅",
+            "task_failed": "❌",
+            "request": "❓",
+            "response": "💬",
+            "task_approved": "👍",
+            "error": "🔴",
+        }
+        agent_labels = self._build_agent_label_map(dashboard)
+        block = "\n".join(self._render_message_details(message, agent_labels, type_emoji))
+        try:
+            if not messages_path.exists():
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                initial = "\n".join(
+                    [
+                        "# Multi-Agent Messages",
+                        "",
+                        f"**更新時刻**: {now}",
+                        "",
+                        "## メッセージ履歴",
+                    ]
+                )
+                messages_path.write_text(f"{initial}{block}\n", encoding="utf-8")
+                return
+            with open(messages_path, "a", encoding="utf-8") as f:
+                f.write(f"{block}\n")
+        except OSError as e:
+            logger.error("messages.md 追記エラー: %s", e)
 
     def _generate_stats_section(self, dashboard: Dashboard) -> list[str]:
         """統計・コスト情報セクションを生成する。"""
@@ -378,6 +416,10 @@ class DashboardMarkdownMixin:
             f"- **総タスク数**: {dashboard.total_tasks}",
             f"- **完了タスク**: {dashboard.completed_tasks}",
             f"- **失敗タスク**: {dashboard.failed_tasks}",
+            f"- **セッション開始**: {dashboard.session_started_at.isoformat() if dashboard.session_started_at else '-'}",
+            f"- **セッション終了**: {dashboard.session_finished_at.isoformat() if dashboard.session_finished_at else '-'}",
+            f"- **プロセスクラッシュ回数**: {dashboard.process_crash_count}",
+            f"- **プロセス復旧回数**: {dashboard.process_recovery_count}",
         ]
         pending_tasks = len(dashboard.get_tasks_by_status(TaskStatus.PENDING))
         in_progress_tasks = len(dashboard.get_tasks_by_status(TaskStatus.IN_PROGRESS))

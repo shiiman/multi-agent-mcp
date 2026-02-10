@@ -82,6 +82,7 @@ async def _assign_and_dispatch_task(
                 )
             else:
                 agent.current_task = task_id
+                agent.branch = branch
                 if str(agent.role) == AgentRole.WORKER.value:
                     agent.status = AgentStatus.BUSY
                 agent.last_activity = datetime.now()
