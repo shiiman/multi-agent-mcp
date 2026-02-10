@@ -35,12 +35,29 @@ GitHub から直接インストールできます（リポジトリの clone は
 
 ### CLI で追加
 
-```bash
-# グローバル設定（全プロジェクトで使用可能）
-claude mcp add --scope user multi-agent-mcp -- uvx --reinstall --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+通常運用では `--reinstall` なしを推奨します。
+追加コマンドは次の「設定の追加・削除（再インストールとは別）」を参照してください。
 
-# プロジェクト設定（そのプロジェクトのみ、チーム共有）
-claude mcp add --scope project multi-agent-mcp -- uvx --reinstall --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+### 設定の追加・削除（再インストールとは別）
+
+**Claude**
+
+```bash
+# 追加（--reinstall なし）
+claude mcp add --scope user multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+
+# 削除
+claude mcp remove multi-agent-mcp
+```
+
+**Codex**
+
+```bash
+# 追加（--reinstall なし）
+codex mcp add multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+
+# 削除
+codex mcp remove multi-agent-mcp
 ```
 
 ### 設定ファイルに直接記述
@@ -89,30 +106,35 @@ claude mcp add --scope project multi-agent-mcp -- uvx --reinstall --from git+htt
 
 ### 自動更新について
 
-上記の例では `--reinstall` オプションを使用しており、起動時に毎回 GitHub から最新版を再インストールします。
+`--reinstall` オプションを付けると、起動時に毎回 GitHub から最新版を再インストールします。
 
 > **Note**: `--refresh` オプションでは Git リポジトリのキャッシュが効いたままになり、更新が反映されないことがあります。確実に最新版を使用するには `--reinstall` を推奨します。
 
-**自動更新が不要な場合**（高速起動）:
+`--reinstall` なし運用で更新したい場合は、次の「必要なときだけ再インストールする手順」を実行してください。
 
-`--reinstall` を削除すると、初回のみ GitHub から取得し、以降はキャッシュを使用します。
-
-```bash
-claude mcp add --scope user multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
-```
-
-**手動更新方法**（`--reinstall` なしの場合）:
+**必要なときだけ再インストールする手順（Claude/Codex 共通）**:
 
 ```bash
-uv cache clean multi-agent-mcp
-# または
+# 1) 1回だけ再インストール（通常運用では毎回不要）
 uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+
+# 2) 使用中のクライアントを再起動して MCP を再接続
+# - Claude を使っている場合: Claude を再起動
+# - Codex を使っている場合: Codex を再起動
+
+# 3) 反映確認（使用クライアントに応じて実行）
+claude mcp list
+codex mcp get multi-agent-mcp
+
+# 4) 反映されない場合のみキャッシュクリア
+uv cache clean multi-agent-mcp
 ```
 
 ### 設定の確認
 
 ```bash
 claude mcp list
+codex mcp list
 ```
 
 ## 提供するTools（86個）
