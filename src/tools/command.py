@@ -127,7 +127,12 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             出力内容（success, agent_id, lines, output または error）
         """
-        app_ctx, role_error = require_permission(ctx, "get_output", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx,
+            "get_output",
+            caller_agent_id,
+            target_agent_id=agent_id,
+        )
         if role_error:
             return role_error
 

@@ -231,6 +231,7 @@ def check_tool_permission(
     app_ctx: AppContext,
     tool_name: str,
     caller_agent_id: str | None,
+    target_agent_id: str | None = None,
 ) -> dict[str, Any] | None:
     """ツールのロール権限をチェックする。
 
@@ -241,11 +242,16 @@ def check_tool_permission(
         app_ctx: アプリケーションコンテキスト
         tool_name: ツール名
         caller_agent_id: 呼び出し元エージェントID（必須、ただし初期化ツールは例外）
+        target_agent_id: 対象エージェントID（Worker self-scope チェック用）
 
     Returns:
         権限エラーの場合はエラー dict、許可されている場合は None
     """
-    from src.config.role_permissions import get_allowed_roles, get_role_error_message
+    from src.config.role_permissions import (
+        get_allowed_roles,
+        get_role_error_message,
+        requires_worker_self_scope,
+    )
 
     # 初期化ツールは caller_agent_id なしで許可（Owner 作成前に実行）
     if caller_agent_id is None and tool_name in BOOTSTRAP_TOOLS:
@@ -307,6 +313,25 @@ def check_tool_permission(
             "success": False,
             "error": get_role_error_message(tool_name, role.value),
         }
+
+    # Worker self-scope 制約: 対象エージェントIDは caller_agent_id と一致必須
+    if role == AgentRole.WORKER and requires_worker_self_scope(tool_name):
+        if target_agent_id is None:
+            return {
+                "success": False,
+                "error": (
+                    f"`{tool_name}` は Worker self-scope 対象ツールです。"
+                    "`target_agent_id` が未指定のため拒否しました。"
+                ),
+            }
+        if target_agent_id != caller_agent_id:
+            return {
+                "success": False,
+                "error": (
+                    f"Worker は `{tool_name}` を自分自身の agent_id でのみ実行できます。"
+                    f"caller_agent_id={caller_agent_id}, target_agent_id={target_agent_id}"
+                ),
+            }
 
     return None
 
@@ -375,7 +400,10 @@ def get_app_ctx(ctx: Any) -> AppContext:
 
 
 def require_permission(
-    ctx: Any, tool_name: str, caller_agent_id: str | None
+    ctx: Any,
+    tool_name: str,
+    caller_agent_id: str | None,
+    target_agent_id: str | None = None,
 ) -> tuple[AppContext, dict[str, Any] | None]:
     """AppContext 取得と権限チェックをまとめて行う。
 
@@ -383,8 +411,34 @@ def require_permission(
         (app_ctx, error_or_none) のタプル。error が None なら許可。
     """
     app_ctx = get_app_ctx(ctx)
-    error = check_tool_permission(app_ctx, tool_name, caller_agent_id)
+    error = check_tool_permission(
+        app_ctx,
+        tool_name,
+        caller_agent_id,
+        target_agent_id=target_agent_id,
+    )
     return app_ctx, error
+
+
+def validate_sender_caller_match(
+    sender_id: str,
+    caller_agent_id: str | None,
+) -> dict[str, Any] | None:
+    """sender_id と caller_agent_id の一致を検証する。"""
+    if caller_agent_id is None:
+        return {
+            "success": False,
+            "error": "caller_agent_id が必要です",
+        }
+    if sender_id != caller_agent_id:
+        return {
+            "success": False,
+            "error": (
+                "sender_id と caller_agent_id が一致しないため拒否しました。"
+                f" sender_id={sender_id}, caller_agent_id={caller_agent_id}"
+            ),
+        }
+    return None
 
 
 # ========== tmux 通知ヘルパー ==========

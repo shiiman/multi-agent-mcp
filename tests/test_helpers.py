@@ -335,6 +335,59 @@ class TestCheckToolPermission:
         assert result is not None
         assert result["success"] is False
 
+    def test_worker_self_scope_tool_allows_self_target(self, app_ctx):
+        """Worker self-scope 対象ツールは自身の agent_id のみ許可される。"""
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        result = check_tool_permission(
+            app_ctx,
+            "read_messages",
+            "worker-001",
+            target_agent_id="worker-001",
+        )
+        assert result is None
+
+    def test_worker_self_scope_tool_blocks_other_target(self, app_ctx):
+        """Worker self-scope 対象ツールで他 agent_id 指定時に拒否される。"""
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        result = check_tool_permission(
+            app_ctx,
+            "read_messages",
+            "worker-001",
+            target_agent_id="owner-001",
+        )
+        assert result is not None
+        assert result["success"] is False
+        assert "自分自身の agent_id" in result["error"]
+
+    def test_worker_self_scope_tool_blocks_missing_target(self, app_ctx):
+        """Worker self-scope 対象ツールは target_agent_id 未指定を拒否する。"""
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        result = check_tool_permission(app_ctx, "read_messages", "worker-001")
+        assert result is not None
+        assert result["success"] is False
+        assert "target_agent_id" in result["error"]
+
     def test_undefined_tool_allows_all_roles(self, app_ctx):
         """権限が未定義のツールは全ロール許可。"""
         now = datetime.now()
