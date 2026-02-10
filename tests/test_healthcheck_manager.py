@@ -85,6 +85,43 @@ class TestHealthcheckMonitoring:
     """monitor_and_recover_workers の追加テスト。"""
 
     @pytest.mark.asyncio
+    async def test_monitor_skips_terminated_workers(self):
+        """TERMINATED Worker は監視対象外としてスキップされる。"""
+        now = datetime.now() - timedelta(seconds=700)
+        worker = Agent(
+            id="worker-terminated",
+            role=AgentRole.WORKER,
+            status=AgentStatus.TERMINATED,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task="task-terminated",
+            created_at=now,
+            last_activity=now,
+        )
+        agents = {"worker-terminated": worker}
+
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=False)
+        tmux.create_session = AsyncMock(return_value=True)
+        tmux.capture_pane_by_index = AsyncMock(return_value="")
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=agents,
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=10,
+            max_recovery_attempts=1,
+        )
+
+        result = await healthcheck.monitor_and_recover_workers()
+
+        assert result["recovered"] == []
+        assert result["escalated"] == []
+        assert "worker-terminated" in result["skipped"]
+
+    @pytest.mark.asyncio
     async def test_monitor_stall_is_ignored_when_pane_output_changes(self):
         now = datetime.now() - timedelta(seconds=700)
         worker = Agent(
@@ -349,3 +386,6 @@ class TestHealthcheckMonitoring:
         assert len(result["recovered"]) == 1
         assert result["recovered"][0]["reason"] == "in_progress_no_ipc"
         assert worker.ai_bootstrapped is False
+        updated_task = dashboard.get_task(task.id)
+        assert updated_task is not None
+        assert updated_task.metadata["process_recovery_count"] == 1

@@ -399,3 +399,47 @@ class TestFullRecovery:
 
         assert result["success"] is False
         assert "見つかりません" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_execute_full_recovery_no_git_preserves_working_dir(
+        self, healthcheck_mock_ctx, git_repo
+    ):
+        """enable_git=false では worktree 再作成せず working_dir を維持して復旧する。"""
+        from src.models.dashboard import TaskStatus
+        from src.tools.healthcheck import execute_full_recovery
+
+        app_ctx = healthcheck_mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_git = False
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-no-git",
+            role=AgentRole.WORKER,
+            status=AgentStatus.ERROR,
+            tmux_session=None,
+            session_name=None,
+            window_index=None,
+            pane_index=None,
+            working_dir=str(git_repo),
+            worktree_path=None,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents[worker.id] = worker
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="no-git recovery",
+            description="healthcheck",
+            assigned_agent_id=worker.id,
+        )
+        app_ctx.dashboard_manager.update_task_status(
+            task.id, TaskStatus.IN_PROGRESS, progress=5
+        )
+
+        result = await execute_full_recovery(app_ctx, worker.id)
+
+        assert result["success"] is True
+        assert result["new_worktree_path"] == str(git_repo)
+        recovered = app_ctx.agents[worker.id]
+        assert recovered.working_dir == str(git_repo)
+        assert recovered.worktree_path is None
