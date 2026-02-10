@@ -103,11 +103,7 @@ class HealthcheckManager:
     async def _capture_pane_hash(self, agent: "Agent") -> str | None:
         """Worker pane の出力ハッシュを取得する。"""
         session_name = agent.resolved_session_name
-        if (
-            not session_name
-            or agent.window_index is None
-            or agent.pane_index is None
-        ):
+        if not session_name or agent.window_index is None or agent.pane_index is None:
             return None
 
         try:
@@ -323,9 +319,7 @@ class HealthcheckManager:
             try:
                 window_name = self.tmux_manager._get_window_name(agent.window_index)
                 target = f"{session_name}:{window_name}.{agent.pane_index}"
-                code, _, stderr = await self.tmux_manager._run(
-                    "send-keys", "-t", target, "C-c"
-                )
+                code, _, stderr = await self.tmux_manager._run("send-keys", "-t", target, "C-c")
                 if code != 0:
                     return False, f"強制復旧に失敗しました: {stderr}"
                 return True, f"エージェント {agent_id} に割り込みを送信しました"
@@ -348,20 +342,53 @@ class HealthcheckManager:
             results.append((status.agent_id, success, message))
         return results
 
-    async def _run_full_recovery(self, app_ctx: Any, agent_id: str) -> tuple[bool, str]:
+    async def _run_full_recovery(self, app_ctx: Any, agent_id: str) -> dict[str, Any]:
         """段階復旧の 2 段目として full_recovery を実行する。"""
         try:
             from src.tools.healthcheck import execute_full_recovery
 
             result = await execute_full_recovery(app_ctx, agent_id)
-            if result.get("success"):
-                return True, result.get("message", "full_recovery succeeded")
-            return False, result.get("error", result.get("message", "full_recovery failed"))
+            if not result.get("success"):
+                return {
+                    "status": "failed",
+                    "message": result.get("error", result.get("message", "full_recovery failed")),
+                    "resume_required_task_ids": [],
+                }
+
+            recovery_status = str(result.get("recovery_status", "recovered"))
+            return {
+                "status": recovery_status,
+                "message": result.get("message", "full_recovery succeeded"),
+                "resume_required_task_ids": result.get("resume_required_task_ids", []),
+            }
         except (OSError, subprocess.SubprocessError, ImportError, ValueError) as e:
-            return False, str(e)
+            return {
+                "status": "failed",
+                "message": str(e),
+                "resume_required_task_ids": [],
+            }
+
+    @staticmethod
+    def _compose_recovery_failure_reason(
+        recovery_reason: str,
+        attempt_error: str,
+        full_recovery_status: str,
+        full_recovery_error: str,
+    ) -> str:
+        """復旧失敗理由を一貫した粒度で文字列化する。"""
+        return (
+            f"recovery_reason={recovery_reason}; "
+            f"attempt_recovery_error={attempt_error or 'none'}; "
+            f"full_recovery_status={full_recovery_status}; "
+            f"full_recovery_error={full_recovery_error or 'none'}"
+        )
 
     def _notify_admins_task_failed(
-        self, app_ctx: Any, agent_id: str, task_id: str, reason: str,
+        self,
+        app_ctx: Any,
+        agent_id: str,
+        task_id: str,
+        reason: str,
     ) -> str | None:
         """タスク失敗を dashboard 更新 + Admin IPC 通知する。エラー時は文字列を返す。"""
         try:
@@ -373,7 +400,8 @@ class HealthcheckManager:
 
             dashboard = app_ctx.dashboard_manager or ensure_dashboard_manager(app_ctx)
             dashboard.update_task_status(
-                task_id=task_id, status=TaskStatus.FAILED,
+                task_id=task_id,
+                status=TaskStatus.FAILED,
                 error_message=f"healthcheck_recovery_failed: {reason}",
             )
             if app_ctx.project_root and app_ctx.session_id:
@@ -385,10 +413,14 @@ class HealthcheckManager:
                 if aid not in ipc.get_all_agent_ids():
                     ipc.register_agent(aid)
                 ipc.send_message(
-                    sender_id="healthcheck-daemon", receiver_id=aid,
+                    sender_id="healthcheck-daemon",
+                    receiver_id=aid,
                     message_type=MessageType.ERROR,
                     subject=f"task failed by healthcheck: {task_id}",
-                    content=f"Worker {agent_id} の復旧上限超過により task {task_id} を failed 化。",
+                    content=(
+                        f"Worker {agent_id} の復旧上限超過により task {task_id} "
+                        f"を failed 化。理由: {reason}"
+                    ),
                     priority=MessagePriority.HIGH,
                     metadata={"agent_id": agent_id, "task_id": task_id, "reason": reason},
                 )
@@ -397,7 +429,11 @@ class HealthcheckManager:
         return None
 
     async def _finalize_failed_task(
-        self, app_ctx: Any, agent_id: str, agent: "Agent", reason: str,
+        self,
+        app_ctx: Any,
+        agent_id: str,
+        agent: "Agent",
+        reason: str,
     ) -> dict[str, str]:
         """復旧失敗上限を超えたタスクを failed 化し、Admin に通知する。"""
         from src.models.agent import AgentStatus
@@ -414,6 +450,7 @@ class HealthcheckManager:
             agent.last_activity = datetime.now()
             try:
                 from src.tools.helpers import save_agent_to_file
+
                 save_agent_to_file(app_ctx, agent)
             except (OSError, json.JSONDecodeError, ValueError) as e:
                 logger.debug("復旧後のエージェント保存に失敗: %s", e)
@@ -566,13 +603,17 @@ class HealthcheckManager:
         return None, False
 
     def _save_agent_after_recovery(
-        self, app_ctx: Any | None, agent: "Agent", label: str,
+        self,
+        app_ctx: Any | None,
+        agent: "Agent",
+        label: str,
     ) -> None:
         """復旧後のエージェント保存。"""
         if app_ctx is None:
             return
         try:
             from src.tools.helpers import save_agent_to_file
+
             agent.ai_bootstrapped = False
             save_agent_to_file(app_ctx, agent)
         except (OSError, json.JSONDecodeError, ValueError) as e:
@@ -618,10 +659,7 @@ class HealthcheckManager:
                     updated = True
 
                 agent_summary = dashboard_data.get_agent(agent_id)
-                if (
-                    agent_summary is not None
-                    and hasattr(agent_summary, "process_recovery_count")
-                ):
+                if agent_summary is not None and hasattr(agent_summary, "process_recovery_count"):
                     current = int(getattr(agent_summary, "process_recovery_count", 0) or 0)
                     agent_summary.process_recovery_count = current + 1
                     updated = True
@@ -664,15 +702,25 @@ class HealthcheckManager:
             self._recovery_failures.pop(task_key, None)
             return {
                 "status": "recovered",
-                "detail": {"agent_id": agent_id, "reason": recovery_reason,
-                           "method": "attempt_recovery", "message": message},
+                "detail": {
+                    "agent_id": agent_id,
+                    "reason": recovery_reason,
+                    "method": "attempt_recovery",
+                    "message": message,
+                },
             }
 
-        full_success, full_message = False, ""
+        full_result = {
+            "status": "not_executed",
+            "message": "not_executed",
+            "resume_required_task_ids": [],
+        }
         if app_ctx is not None:
-            full_success, full_message = await self._run_full_recovery(app_ctx, agent_id)
+            full_result = await self._run_full_recovery(app_ctx, agent_id)
 
-        if full_success:
+        full_status = str(full_result.get("status", "failed"))
+        full_message = str(full_result.get("message", "full_recovery failed"))
+        if full_status == "recovered":
             target = (app_ctx.agents.get(agent_id) if app_ctx else None) or agent
             self._save_agent_after_recovery(app_ctx, target, "full_recovery")
             self._increment_recovery_counter(
@@ -684,20 +732,53 @@ class HealthcheckManager:
             self._recovery_failures.pop(task_key, None)
             return {
                 "status": "recovered",
-                "detail": {"agent_id": agent_id, "reason": recovery_reason,
-                           "method": "full_recovery", "message": full_message},
+                "detail": {
+                    "agent_id": agent_id,
+                    "reason": recovery_reason,
+                    "method": "full_recovery",
+                    "message": full_message,
+                },
+            }
+
+        if full_status == "resume_pending":
+            # Worker 復旧自体は成功しているが、タスク再開確認までは完了扱いにしない。
+            self._recovery_failures.pop(task_key, None)
+            resume_ids = [
+                str(task_id)
+                for task_id in full_result.get("resume_required_task_ids", [])
+                if task_id
+            ]
+            return {
+                "status": "escalated",
+                "detail": {
+                    "agent_id": agent_id,
+                    "reason": recovery_reason,
+                    "method": "full_recovery",
+                    "status": "resume_pending",
+                    "resume_required_tasks": ",".join(resume_ids),
+                    "message": full_message,
+                },
             }
 
         attempts = self._recovery_failures.get(task_key, 0) + 1
         self._recovery_failures[task_key] = attempts
+        failure_reason = self._compose_recovery_failure_reason(
+            recovery_reason=recovery_reason,
+            attempt_error=message,
+            full_recovery_status=full_status,
+            full_recovery_error=full_message,
+        )
         escalation = {
-            "agent_id": agent_id, "reason": recovery_reason,
+            "agent_id": agent_id,
+            "reason": recovery_reason,
             "attempts": str(attempts),
-            "message": (f"attempt_recovery failed: {message}; "
-                        f"full_recovery failed: {full_message or 'not_executed'}"),
+            "attempt_recovery_error": message,
+            "full_recovery_status": full_status,
+            "full_recovery_error": full_message,
+            "message": failure_reason,
         }
         if attempts >= self.max_recovery_attempts:
-            failed = await self._finalize_failed_task(app_ctx, agent_id, agent, message)
+            failed = await self._finalize_failed_task(app_ctx, agent_id, agent, failure_reason)
             self._recovery_failures.pop(task_key, None)
             return {"status": "failed", "detail": escalation, "failed_task": failed}
         return {"status": "escalated", "detail": escalation}
@@ -733,9 +814,7 @@ class HealthcheckManager:
                 continue
             if agent.status in (AgentStatus.TERMINATED, AgentStatus.TERMINATED.value):
                 stale_keys = [
-                    key
-                    for key in self._recovery_failures
-                    if key.startswith(f"{agent_id}:")
+                    key for key in self._recovery_failures if key.startswith(f"{agent_id}:")
                 ]
                 for stale_key in stale_keys:
                     self._recovery_failures.pop(stale_key, None)
@@ -743,7 +822,10 @@ class HealthcheckManager:
                 continue
 
             active_task, active_task_id = self._sync_worker_active_task(
-                agent_id, agent, dashboard, app_ctx,
+                agent_id,
+                agent,
+                dashboard,
+                app_ctx,
             )
 
             current_key = self._recovery_key(agent_id, active_task_id)
@@ -763,7 +845,10 @@ class HealthcheckManager:
                 agent.current_task = active_task_id
 
             recovery_reason, force_recovery = await self._diagnose_worker_issue(
-                agent_id, agent, active_task, now,
+                agent_id,
+                agent,
+                active_task,
+                now,
             )
 
             if recovery_reason is None:
@@ -776,7 +861,12 @@ class HealthcheckManager:
                     logger.debug("process_crash_count 更新に失敗: %s", e)
 
             result = await self._attempt_staged_recovery(
-                app_ctx, agent_id, agent, recovery_reason, force_recovery, current_key,
+                app_ctx,
+                agent_id,
+                agent,
+                recovery_reason,
+                force_recovery,
+                current_key,
             )
 
             if result["status"] == "recovered":

@@ -57,8 +57,7 @@ async def capture_claude_actual_cost_for_agent(
     dashboard = ensure_dashboard_manager(app_ctx)
     latest_calls = dashboard.get_dashboard().cost.calls[-50:]
     already_recorded = any(
-        c.agent_id == agent.id and c.status_line == status_line
-        for c in latest_calls
+        c.agent_id == agent.id and c.status_line == status_line for c in latest_calls
     )
     if already_recorded:
         return {

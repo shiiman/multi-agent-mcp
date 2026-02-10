@@ -59,12 +59,8 @@ def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str
             "max_workers": p.model_profile_performance_max_workers,
             "admin_thinking_tokens": p.model_profile_performance_admin_thinking_tokens,
             "worker_thinking_tokens": p.model_profile_performance_worker_thinking_tokens,
-            "admin_reasoning_effort": (
-                p.model_profile_performance_admin_reasoning_effort.value
-            ),
-            "worker_reasoning_effort": (
-                p.model_profile_performance_worker_reasoning_effort.value
-            ),
+            "admin_reasoning_effort": (p.model_profile_performance_admin_reasoning_effort.value),
+            "worker_reasoning_effort": (p.model_profile_performance_worker_reasoning_effort.value),
         }
 
 

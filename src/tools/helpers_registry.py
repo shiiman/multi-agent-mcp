@@ -60,8 +60,7 @@ def save_agent_to_registry(
     with open(agent_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     logger.debug(
-        f"エージェントをレジストリに保存: {agent_id} -> {project_root}"
-        f" (session: {session_id})"
+        f"エージェントをレジストリに保存: {agent_id} -> {project_root} (session: {session_id})"
     )
 
 

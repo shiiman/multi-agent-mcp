@@ -126,6 +126,33 @@ class TestCreateAgent:
         assert result["agent"]["role"] == "owner"
 
     @pytest.mark.asyncio
+    async def test_create_admin_without_caller_fails(self, mock_ctx, git_repo):
+        """Admin 作成は caller_agent_id なしでは拒否されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_agent = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_agent":
+                create_agent = tool.fn
+                break
+
+        assert create_agent is not None
+
+        result = await create_agent(
+            role="admin",
+            working_dir=str(git_repo),
+            ctx=mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "caller_agent_id" in result["error"]
+
+    @pytest.mark.asyncio
     async def test_create_owner_refreshes_settings_from_project_env(self, mock_ctx, git_repo):
         """Owner 作成時に project .env の設定へ再同期されることをテスト。"""
         from mcp.server.fastmcp import FastMCP
@@ -949,6 +976,10 @@ class TestAgentHelperFunctions:
 
         assert _build_change_directory_command("claude", "/tmp/wt") == "!cd /tmp/wt"
         assert _build_change_directory_command("codex", "/tmp/wt") == "cd /tmp/wt"
+        assert (
+            _build_change_directory_command("claude", "/tmp/work tree/it's")
+            == "!cd '/tmp/work tree/it'\"'\"'s'"
+        )
 
 
 class TestCreateWorkersBatchBehavior:

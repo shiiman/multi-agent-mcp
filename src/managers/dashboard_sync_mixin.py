@@ -1,9 +1,11 @@
 """Dashboard の外部同期ロジック mixin。"""
 
+import copy
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -14,6 +16,24 @@ logger = logging.getLogger(__name__)
 
 class DashboardSyncMixin:
     """agents.json / IPC との同期機能を提供する mixin。"""
+
+    _last_sync_report: dict[str, Any] | None = None
+
+    @staticmethod
+    def _build_sync_stage_report() -> dict[str, Any]:
+        """同期ステージの初期レポートを作成する。"""
+        return {"success": True, "count": 0, "error": None}
+
+    @staticmethod
+    def _format_sync_error(error: Exception) -> dict[str, str]:
+        """例外を構造化エラー情報へ変換する。"""
+        return {"type": type(error).__name__, "message": str(error)}
+
+    def get_last_sync_report(self) -> dict[str, Any] | None:
+        """直近の同期実行レポートを取得する。"""
+        if self._last_sync_report is None:
+            return None
+        return copy.deepcopy(self._last_sync_report)
 
     def save_markdown_dashboard(self, project_root: Path, session_id: str) -> Path:
         """Markdownダッシュボードをファイルに保存する。
@@ -27,6 +47,12 @@ class DashboardSyncMixin:
         """
         session_dir = self.dashboard_dir.parent  # {mcp_dir}/{session_id}/
         agents_file = session_dir / "agents.json"
+        sync_report: dict[str, Any] = {
+            "success": True,
+            "agents_sync": self._build_sync_stage_report(),
+            "ipc_sync": self._build_sync_stage_report(),
+            "messages_write": self._build_sync_stage_report(),
+        }
 
         def _sync(dashboard) -> None:
             if dashboard.session_started_at is None:
@@ -81,8 +107,13 @@ class DashboardSyncMixin:
 
                     dashboard.calculate_stats()
                     logger.debug(f"agents.json から {len(dashboard.agents)} 件のエージェントを同期")
-                except Exception as e:
-                    logger.warning(f"agents.json の読み込みに失敗: {e}")
+                    sync_report["agents_sync"]["count"] = len(dashboard.agents)
+                except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+                    sync_report["agents_sync"]["success"] = False
+                    sync_report["agents_sync"]["error"] = self._format_sync_error(e)
+                    logger.warning("agents.json の読み込みに失敗: %s", e)
+            else:
+                sync_report["agents_sync"]["count"] = len(dashboard.agents)
 
             # 🔴 IPC メッセージを収集（Dashboard 表示用）
             ipc_dir = session_dir / "ipc"
@@ -99,12 +130,32 @@ class DashboardSyncMixin:
                     all_messages.sort(key=lambda m: m.created_at or datetime.min)
                     dashboard.messages = all_messages
                     logger.debug(f"IPC メッセージ {len(dashboard.messages)} 件を収集")
-                except Exception as e:
-                    logger.warning(f"IPC メッセージの収集に失敗: {e}")
+                    sync_report["ipc_sync"]["count"] = len(dashboard.messages)
+                except (OSError, ValueError, TypeError) as e:
+                    sync_report["ipc_sync"]["success"] = False
+                    sync_report["ipc_sync"]["error"] = self._format_sync_error(e)
+                    logger.warning("IPC メッセージの収集に失敗: %s", e)
+            else:
+                sync_report["ipc_sync"]["count"] = len(dashboard.messages)
 
-            self._write_messages_markdown(dashboard)
+            try:
+                self._write_messages_markdown(dashboard)
+            except (OSError, ValueError, TypeError) as e:
+                sync_report["messages_write"]["success"] = False
+                sync_report["messages_write"]["error"] = self._format_sync_error(e)
+                logger.warning("messages.md の書き込みに失敗: %s", e)
+
+            sync_report["messages_write"]["count"] = len(dashboard.messages)
+            sync_report["success"] = (
+                sync_report["agents_sync"]["success"]
+                and sync_report["ipc_sync"]["success"]
+                and sync_report["messages_write"]["success"]
+            )
 
         self.run_dashboard_transaction(_sync)
+        self._last_sync_report = copy.deepcopy(sync_report)
+        if not sync_report["success"]:
+            logger.warning("Dashboard 同期の部分失敗を検知: %s", sync_report)
         return self._get_dashboard_path()
 
     def _parse_ipc_message(self, file_path: Path) -> MessageSummary | None:

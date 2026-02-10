@@ -21,6 +21,7 @@ from src.tools.agent_helpers import (
 )
 from src.tools.helpers import (
     InvalidConfigError,
+    get_app_ctx,
     get_enable_git_from_config,
     refresh_app_settings,
     require_permission,
@@ -31,6 +32,7 @@ from src.tools.helpers import (
 from src.tools.model_profile import get_current_profile_settings
 
 logger = logging.getLogger(__name__)
+
 
 def register_lifecycle_tools(mcp: FastMCP) -> None:
     """エージェント管理ツールを登録する。"""
@@ -62,7 +64,21 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         Returns:
             作成結果（success, agent, message または error）
         """
-        app_ctx, role_error = require_permission(ctx, "create_agent", caller_agent_id)
+        valid_roles = {r.value for r in AgentRole}
+        if role not in valid_roles:
+            return {
+                "success": False,
+                "error": f"無効な役割です: {role}（有効: {sorted(valid_roles)}）",
+            }
+
+        bootstrap_owner_creation = role == "owner" and caller_agent_id is None
+        if bootstrap_owner_creation:
+            app_ctx = get_app_ctx(ctx)
+        else:
+            app_ctx, role_error = require_permission(ctx, "create_agent", caller_agent_id)
+            if role_error:
+                return role_error
+
         try:
             refresh_app_settings(app_ctx, working_dir)
         except (ValueError, OSError) as e:
@@ -71,24 +87,19 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         settings = app_ctx.settings
         agents = app_ctx.agents
 
-        # ロールチェック（Owner 作成時は caller_agent_id 不要、それ以外は必須）
-        if role != "owner":
-            if role_error:
-                return role_error
-        else:
-            # Owner 作成時は working_dir から project_root を自動設定
-            # （init_tmux_workspace より前に create_agent(owner) が呼ばれるため）
-            if not app_ctx.project_root and working_dir:
-                if app_ctx.settings.enable_git:
-                    try:
-                        app_ctx.project_root = resolve_main_repo_root(working_dir)
-                    except ValueError:
-                        # init_tmux_workspace(enable_git=false) で上書きされる前提で許容する
-                        app_ctx.project_root = str(Path(working_dir).expanduser())
-                else:
+        # Owner 作成時は working_dir から project_root を自動設定
+        # （init_tmux_workspace より前に create_agent(owner) が呼ばれるため）
+        if role == "owner" and not app_ctx.project_root and working_dir:
+            if app_ctx.settings.enable_git:
+                try:
+                    app_ctx.project_root = resolve_main_repo_root(working_dir)
+                except ValueError:
+                    # init_tmux_workspace(enable_git=false) で上書きされる前提で許容する
                     app_ctx.project_root = str(Path(working_dir).expanduser())
-                refresh_app_settings(app_ctx, app_ctx.project_root)
-                logger.info(f"Owner 作成時に project_root を自動設定: {app_ctx.project_root}")
+            else:
+                app_ctx.project_root = str(Path(working_dir).expanduser())
+            refresh_app_settings(app_ctx, app_ctx.project_root)
+            logger.info(f"Owner 作成時に project_root を自動設定: {app_ctx.project_root}")
 
         # 入力検証
         profile_settings = get_current_profile_settings(app_ctx)
@@ -103,8 +114,13 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         # ペイン位置の決定
         agent_id = str(uuid.uuid4())[:8]
         pane_result = await _determine_pane_position(
-            app_ctx.tmux, agents, settings, agent_role, agent_id,
-            working_dir, profile_max_workers,
+            app_ctx.tmux,
+            agents,
+            settings,
+            agent_role,
+            agent_id,
+            working_dir,
+            profile_max_workers,
         )
         if not pane_result["success"]:
             return {"success": False, "error": pane_result["error"]}
@@ -305,8 +321,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         file_saved = save_agent_to_file(app_ctx, agent)
 
         logger.info(
-            f"エージェント {agent_id} を終了しました"
-            f" (status: terminated, file_saved: {file_saved})"
+            f"エージェント {agent_id} を終了しました (status: terminated, file_saved: {file_saved})"
         )
 
         return {
@@ -371,8 +386,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             return {
                 "success": False,
                 "error": (
-                    "Owner エージェントは initialize_agent の"
-                    "対象外です（起点の AI CLI が担う）"
+                    "Owner エージェントは initialize_agent の対象外です（起点の AI CLI が担う）"
                 ),
             }
 
@@ -434,8 +448,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 return {
                     "success": False,
                     "error": (
-                        "prompt_type='file' の場合、"
-                        "custom_prompt にファイルパスを指定してください"
+                        "prompt_type='file' の場合、custom_prompt にファイルパスを指定してください"
                     ),
                 }
             file_path = Path(custom_prompt)
@@ -562,8 +575,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             "terminal": terminal_app.value,
             "working_dir": working_dir,
             "message": (
-                f"エージェント {agent_id} を初期化しました"
-                f"（tmux attach + {cli.value} 起動）"
+                f"エージェント {agent_id} を初期化しました（tmux attach + {cli.value} 起動）"
             ),
             "file_persisted": file_saved,
         }

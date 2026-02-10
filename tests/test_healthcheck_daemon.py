@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -78,6 +78,61 @@ async def test_healthcheck_daemon_auto_stops_on_idle(temp_dir, settings):
     await asyncio.wait_for(daemon_task, timeout=2.0)
 
     assert is_healthcheck_daemon_running(app_ctx) is False
+
+
+@pytest.mark.asyncio
+async def test_healthcheck_daemon_notifies_on_auto_stop(temp_dir, settings):
+    """auto-stop 時に停止通知を送信する。"""
+    settings.healthcheck_interval_seconds = 1
+    settings.healthcheck_idle_stop_consecutive = 1
+
+    worker = _make_idle_worker()
+    app_ctx = _make_daemon_ctx(temp_dir, settings, {worker.id: worker})
+    app_ctx.agents["admin-001"] = Agent(
+        id="admin-001",
+        role=AgentRole.ADMIN,
+        status=AgentStatus.IDLE,
+        tmux_session="test:0.0",
+        session_name="test",
+        window_index=0,
+        pane_index=0,
+        current_task=None,
+        created_at=datetime.now(),
+        last_activity=datetime.now(),
+    )
+
+    with patch("src.managers.healthcheck_daemon._notify_daemon_stopped", new=AsyncMock()) as notify:
+        started = await start_healthcheck_daemon(app_ctx)
+        assert started is True
+        daemon_task = app_ctx.healthcheck_daemon_task
+        assert daemon_task is not None
+        await asyncio.wait_for(daemon_task, timeout=2.0)
+
+    notify.assert_awaited_once()
+    assert notify.await_args.kwargs["stop_reason"] == "auto_stop_idle"
+
+
+@pytest.mark.asyncio
+async def test_healthcheck_daemon_notifies_on_auto_stop_check_failure(temp_dir, settings):
+    """auto-stop 判定例外時に停止通知を送信する。"""
+    settings.healthcheck_interval_seconds = 1
+    settings.healthcheck_idle_stop_consecutive = 10
+
+    worker = _make_idle_worker()
+    app_ctx = _make_daemon_ctx(temp_dir, settings, {worker.id: worker})
+
+    with (
+        patch("src.managers.healthcheck_daemon._should_auto_stop", side_effect=RuntimeError("boom")),
+        patch("src.managers.healthcheck_daemon._notify_daemon_stopped", new=AsyncMock()) as notify,
+    ):
+        started = await start_healthcheck_daemon(app_ctx)
+        assert started is True
+        daemon_task = app_ctx.healthcheck_daemon_task
+        assert daemon_task is not None
+        await asyncio.wait_for(daemon_task, timeout=2.0)
+
+    notify.assert_awaited_once()
+    assert notify.await_args.kwargs["stop_reason"] == "auto_stop_check_failed"
 
 
 @pytest.mark.asyncio

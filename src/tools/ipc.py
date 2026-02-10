@@ -59,6 +59,46 @@ def _mark_admin_ipc_consumed(app_ctx: Any, admin_id: str) -> None:
     )
 
 
+def _admin_polling_blocked_response(tool_name: str) -> dict[str, Any]:
+    """Admin の空読みポーリング抑止レスポンスを生成する。"""
+    return {
+        "success": False,
+        "error": (f"polling_blocked: unread=0 の状態で {tool_name} を連続実行できません"),
+        "next_action": "wait_for_ipc_notification",
+    }
+
+
+def _apply_admin_empty_polling_guard(
+    app_ctx: Any,
+    admin_id: str,
+    *,
+    should_guard: bool,
+    tool_name: str,
+) -> dict[str, Any] | None:
+    """Admin の空読みポーリング抑止を適用する。"""
+    if not should_guard:
+        return None
+
+    poll_state = get_admin_poll_state(app_ctx, admin_id)
+    last_blocked = poll_state.get("last_poll_blocked_at")
+    now = datetime.now()
+    if last_blocked is None:
+        # 初回の空読み: 記録だけして通す（ブロックしない）
+        poll_state["last_poll_blocked_at"] = now
+        return None
+
+    if (now - last_blocked).total_seconds() >= _POLLING_BLOCKED_GRACE_SECONDS:
+        # 猶予時間を超過: ブロック解除して1回だけ確認を許可
+        poll_state["last_poll_blocked_at"] = None
+        logger.info(
+            "polling_blocked 猶予時間超過: %s のブロックを一時解除",
+            admin_id,
+        )
+        return None
+
+    return _admin_polling_blocked_response(tool_name)
+
+
 def _auto_update_dashboard_from_messages(
     app_ctx: Any, messages: list[Message]
 ) -> tuple[bool, int, list[str]]:
@@ -114,9 +154,7 @@ def _auto_update_dashboard_from_messages(
                     task_id, TaskStatus.IN_PROGRESS, progress
                 )
                 if not status_ok:
-                    skipped_reasons.append(
-                        f"status_update_rejected:{task_id}:{status_msg}"
-                    )
+                    skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
                     continue
 
                 if checklist:
@@ -124,9 +162,7 @@ def _auto_update_dashboard_from_messages(
                         task_id, checklist, log_message=message_text
                     )
                     if not checklist_ok:
-                        skipped_reasons.append(
-                            f"checklist_update_error:{task_id}:{checklist_msg}"
-                        )
+                        skipped_reasons.append(f"checklist_update_error:{task_id}:{checklist_msg}")
 
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
@@ -146,9 +182,7 @@ def _auto_update_dashboard_from_messages(
                     task_id, TaskStatus.COMPLETED, progress=100
                 )
                 if not status_ok:
-                    skipped_reasons.append(
-                        f"status_update_rejected:{task_id}:{status_msg}"
-                    )
+                    skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
                     continue
 
                 if reporter and reporter in app_ctx.agents:
@@ -166,13 +200,9 @@ def _auto_update_dashboard_from_messages(
                 if task and task.status == TaskStatus.FAILED:
                     skipped_reasons.append(f"already_failed:{task_id}")
                     continue
-                status_ok, status_msg = dashboard.update_task_status(
-                    task_id, TaskStatus.FAILED
-                )
+                status_ok, status_msg = dashboard.update_task_status(task_id, TaskStatus.FAILED)
                 if not status_ok:
-                    skipped_reasons.append(
-                        f"status_update_rejected:{task_id}:{status_msg}"
-                    )
+                    skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
                     continue
 
                 if reporter and reporter in app_ctx.agents:
@@ -190,9 +220,7 @@ def _auto_update_dashboard_from_messages(
     # Markdown ダッシュボードも更新
     try:
         if app_ctx.session_id and app_ctx.project_root:
-            dashboard.save_markdown_dashboard(
-                Path(app_ctx.project_root), app_ctx.session_id
-            )
+            dashboard.save_markdown_dashboard(Path(app_ctx.project_root), app_ctx.session_id)
     except Exception as e:
         logger.debug(f"Markdown ダッシュボード更新をスキップ: {e}")
 
@@ -309,9 +337,7 @@ def _get_branch_changed_files(project_root: str, branch: str) -> tuple[set[str],
     return _split_lines(out), None
 
 
-def _is_branch_tree_equal_to_head(
-    project_root: str, branch: str
-) -> tuple[bool, str | None]:
+def _is_branch_tree_equal_to_head(project_root: str, branch: str) -> tuple[bool, str | None]:
     """HEAD と branch のツリー内容が同一か判定する。"""
     try:
         proc = subprocess.run(
@@ -330,9 +356,7 @@ def _is_branch_tree_equal_to_head(
     return False, (proc.stderr or proc.stdout).strip()
 
 
-def _is_branch_changes_already_applied(
-    project_root: str, branch: str
-) -> tuple[bool, str | None]:
+def _is_branch_changes_already_applied(project_root: str, branch: str) -> tuple[bool, str | None]:
     """branch の変更が patch-id ベースで HEAD に適用済みか判定する。"""
     ok, out = _run_git_capture(project_root, ["cherry", "HEAD", branch])
     if not ok:
@@ -343,9 +367,7 @@ def _is_branch_changes_already_applied(
     return all(line.startswith("-") for line in lines), None
 
 
-def _check_branch_integration_state(
-    project_root: str, branches: list[str]
-) -> list[dict[str, Any]]:
+def _check_branch_integration_state(project_root: str, branches: list[str]) -> list[dict[str, Any]]:
     """完了ブランチが統合済みか（merge/cherry/tree-equal/diff包含）を判定する。"""
     diff_files, diff_error = _get_working_tree_diff_files(project_root)
     if diff_error:
@@ -371,9 +393,7 @@ def _check_branch_integration_state(
 
         merged = _is_branch_merged_into_head(project_root, branch)
         changed_files, branch_error = _get_branch_changed_files(project_root, branch)
-        tree_equal_to_head, tree_equal_error = _is_branch_tree_equal_to_head(
-            project_root, branch
-        )
+        tree_equal_to_head, tree_equal_error = _is_branch_tree_equal_to_head(project_root, branch)
         changes_already_applied, cherry_error = _is_branch_changes_already_applied(
             project_root, branch
         )
@@ -483,8 +503,7 @@ def _validate_admin_completion_gate(
         suggestions.append("品質チェック専用タスクを作成し、証跡を揃えてください。")
 
     ui_required = any(
-        _is_ui_related_task(t.title, t.description, getattr(t, "metadata", None))
-        for t in tasks
+        _is_ui_related_task(t.title, t.description, getattr(t, "metadata", None)) for t in tasks
     )
     playwright_done = any(
         _is_playwright_task(t.title, t.description, getattr(t, "metadata", None))
@@ -638,8 +657,7 @@ def register_tools(mcp: FastMCP) -> None:
             receiver_agent = app_ctx.agents.get(receiver_id)
             if not receiver_agent:
                 is_worker_request = (
-                    msg_type == MessageType.REQUEST
-                    and sender_role == AgentRole.WORKER.value
+                    msg_type == MessageType.REQUEST and sender_role == AgentRole.WORKER.value
                 )
                 if is_worker_request:
                     admin_ids = find_agents_by_role(app_ctx, "admin")
@@ -720,30 +738,33 @@ def register_tools(mcp: FastMCP) -> None:
             )
             if receiver_agent:
                 has_tmux_pane = (
-                    receiver_agent.session_name
-                    and receiver_agent.pane_index is not None
+                    receiver_agent.session_name and receiver_agent.pane_index is not None
                 )
                 if has_tmux_pane:
                     # tmux ペインがある場合: リトライ付き tmux 通知
                     tmux_ok = await notify_agent_via_tmux(
-                        app_ctx, receiver_agent, msg_type.value, sender_id,
-                        allow_macos_fallback=is_admin_to_owner_task_complete,
+                        app_ctx,
+                        receiver_agent,
+                        msg_type.value,
+                        sender_id,
+                        allow_macos_fallback=False,
                     )
                     if tmux_ok:
                         notification_sent = True
                         notification_method = "tmux"
-                    else:
-                        notification_sent = is_admin_to_owner_task_complete
-                        notification_method = (
-                            "macos_fallback" if is_admin_to_owner_task_complete else None
-                        )
+                    elif is_admin_to_owner_task_complete:
+                        # tmux 通知失敗時のみ macOS 通知を追加試行する
+                        from src.tools.helpers import _send_macos_notification
+
+                        macos_ok = await _send_macos_notification(msg_type.value, sender_id)
+                        if macos_ok:
+                            notification_sent = True
+                            notification_method = "macos_fallback"
                 elif is_admin_to_owner_task_complete:
                     # tmux ペインがない Owner への admin 通知を macOS で補完
                     from src.tools.helpers import _send_macos_notification
 
-                    macos_ok = await _send_macos_notification(
-                        msg_type.value, sender_id
-                    )
+                    macos_ok = await _send_macos_notification(msg_type.value, sender_id)
                     if macos_ok:
                         notification_sent = True
                         notification_method = "macos"
@@ -761,9 +782,33 @@ def register_tools(mcp: FastMCP) -> None:
                 auto_cleanup_error = str(e)
                 logger.warning("task_approved 後の自動クリーンアップに失敗: %s", e)
 
+        delivery_state = (
+            "broadcast"
+            if receiver_id is None
+            else ("delivered" if notification_sent else "queued_unnotified")
+        )
+        if receiver_id and not notification_sent:
+            logger.warning(
+                "IPC メッセージは保存されましたが通知に失敗: sender=%s receiver=%s type=%s",
+                sender_id,
+                receiver_id,
+                msg_type.value,
+            )
+
+        success = delivery_state in {"broadcast", "delivered"}
+        response_message = (
+            "ブロードキャストを送信しました"
+            if receiver_id is None
+            else f"メッセージを {receiver_id} に送信しました"
+        )
+        if receiver_id and not notification_sent:
+            response_message = f"メッセージを {receiver_id} に保存しましたが通知に失敗しました"
+
         return {
-            "success": True,
+            "success": success,
             "message_id": message.id,
+            "delivery_state": delivery_state,
+            "message_saved": True,
             "notification_sent": notification_sent,
             "notification_method": notification_method,  # "tmux" or "macos" or None
             "original_receiver_id": original_receiver_id,
@@ -773,10 +818,11 @@ def register_tools(mcp: FastMCP) -> None:
             "auto_cleanup_executed": auto_cleanup_executed,
             "auto_cleanup_result": auto_cleanup_result,
             "auto_cleanup_error": auto_cleanup_error,
-            "message": (
-                "ブロードキャストを送信しました"
-                if receiver_id is None
-                else f"メッセージを {receiver_id} に送信しました"
+            "message": response_message,
+            "error": (
+                "delivery_failed: メッセージ保存後の通知送信に失敗しました"
+                if receiver_id and not notification_sent
+                else None
             ),
         }
 
@@ -821,10 +867,7 @@ def register_tools(mcp: FastMCP) -> None:
                 valid_types = [t.value for t in MessageType]
                 return {
                     "success": False,
-                    "error": (
-                        f"無効なメッセージタイプです: {message_type}"
-                        f"（有効: {valid_types}）"
-                    ),
+                    "error": (f"無効なメッセージタイプです: {message_type}（有効: {valid_types}）"),
                 }
 
         # エージェントが登録されていなければ登録
@@ -860,29 +903,14 @@ def register_tools(mcp: FastMCP) -> None:
         dashboard_updates_skipped_reason: list[str] = []
         if is_admin_caller:
             unread_count = ipc.get_unread_count(agent_id)
-            if unread_only and unread_count == 0:
-                poll_state = get_admin_poll_state(app_ctx, caller_agent_id or agent_id)
-                last_blocked = poll_state.get("last_poll_blocked_at")
-                now = datetime.now()
-                if last_blocked is None:
-                    # 初回の空読み: 記録だけして通す（ブロックしない）
-                    poll_state["last_poll_blocked_at"] = now
-                elif (now - last_blocked).total_seconds() >= _POLLING_BLOCKED_GRACE_SECONDS:
-                    # 猶予時間を超過: ブロック解除してメッセージ確認を許可
-                    poll_state["last_poll_blocked_at"] = None
-                    logger.info(
-                        "polling_blocked 猶予時間超過: %s のブロックを一時解除",
-                        caller_agent_id or agent_id,
-                    )
-                else:
-                    # 猶予時間内の2回目以降: ブロック
-                    return {
-                        "success": False,
-                        "error": (
-                            "polling_blocked: unread=0 の状態で read_messages を連続実行できません"
-                        ),
-                        "next_action": "wait_for_ipc_notification",
-                    }
+            guard_error = _apply_admin_empty_polling_guard(
+                app_ctx,
+                caller_agent_id or agent_id,
+                should_guard=bool(unread_only and unread_count == 0),
+                tool_name="read_messages",
+            )
+            if guard_error:
+                return guard_error
 
         owner_wait_unlocked = False
         if is_owner_caller and caller_agent_id and owner_wait_state:
@@ -893,10 +921,8 @@ def register_tools(mcp: FastMCP) -> None:
                     (msg.sender_id == expected_admin_id)
                     if expected_admin_id
                     else (
-                        (
-                            getattr(app_ctx.agents.get(msg.sender_id), "role", None)
-                            in (AgentRole.ADMIN.value, "admin")
-                        )
+                        getattr(app_ctx.agents.get(msg.sender_id), "role", None)
+                        in (AgentRole.ADMIN.value, "admin")
                     )
                 )
                 for msg in messages
@@ -912,9 +938,7 @@ def register_tools(mcp: FastMCP) -> None:
                 dashboard_updated,
                 dashboard_updates_applied,
                 dashboard_updates_skipped_reason,
-            ) = _auto_update_dashboard_from_messages(
-                app_ctx, messages
-            )
+            ) = _auto_update_dashboard_from_messages(app_ctx, messages)
             if messages:
                 _mark_admin_ipc_consumed(app_ctx, caller_agent_id or agent_id)
             else:
@@ -963,6 +987,7 @@ def register_tools(mcp: FastMCP) -> None:
         sync_agents_from_file(app_ctx)
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
+        is_admin_caller = caller_role in (AgentRole.ADMIN.value, "admin")
         is_owner_caller = caller_role in (AgentRole.OWNER.value, "owner")
         if is_owner_caller and caller_agent_id:
             owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
@@ -972,6 +997,20 @@ def register_tools(mcp: FastMCP) -> None:
                     return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
                 if count == 0:
                     return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+
+        if is_admin_caller:
+            guard_error = _apply_admin_empty_polling_guard(
+                app_ctx,
+                caller_agent_id or agent_id,
+                should_guard=(count == 0),
+                tool_name="get_unread_count",
+            )
+            if guard_error:
+                return guard_error
+            if count > 0:
+                _mark_admin_ipc_consumed(app_ctx, caller_agent_id or agent_id)
+            else:
+                _mark_admin_waiting_for_ipc(app_ctx, caller_agent_id or agent_id)
 
         return {
             "success": True,

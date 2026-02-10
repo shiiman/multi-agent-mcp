@@ -135,8 +135,7 @@ def register_tools(mcp: FastMCP) -> None:
         if strategy == "rebase":
             effective_strategy = "merge"
             strategy_warning = (
-                "strategy=rebase は no-commit プレビューでは非対応のため "
-                "merge 相当で適用しました。"
+                "strategy=rebase は no-commit プレビューでは非対応のため merge 相当で適用しました。"
             )
 
         for branch in branches:

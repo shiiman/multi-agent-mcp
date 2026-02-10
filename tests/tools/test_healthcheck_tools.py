@@ -440,6 +440,9 @@ class TestFullRecovery:
         result = await execute_full_recovery(app_ctx, worker.id)
 
         assert result["success"] is True
+        assert result["recovery_status"] == "resume_pending"
+        assert result["resume_required"] is True
+        assert result["resume_confirmed"] is False
         assert result["new_worktree_path"] == str(git_repo)
         recovered = app_ctx.agents[worker.id]
         assert recovered.working_dir == str(git_repo)

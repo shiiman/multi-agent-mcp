@@ -149,9 +149,7 @@ def resolve_project_root(
 # ========== ロールチェック ヘルパー ==========
 
 
-def ensure_project_root_from_caller(
-    app_ctx: AppContext, caller_agent_id: str | None
-) -> None:
+def ensure_project_root_from_caller(app_ctx: AppContext, caller_agent_id: str | None) -> None:
     """caller_agent_id からレジストリを検索し、app_ctx.project_root と session_id を設定する。
 
     各ツールの最初で呼び出すことで、Admin/Worker の MCP インスタンスでも
@@ -162,6 +160,7 @@ def ensure_project_root_from_caller(
         caller_agent_id: 呼び出し元エージェントID
     """
     if caller_agent_id:
+
         def _apply_project_root(candidate: str | None) -> bool:
             """有効な project_root 候補を AppContext に適用する。"""
             if not candidate:
@@ -175,9 +174,7 @@ def ensure_project_root_from_caller(
                 refresh_app_settings(app_ctx, candidate)
             except (ValueError, OSError) as e:
                 logger.warning(f"project settings の再読み込みをスキップ: {e}")
-            logger.debug(
-                f"caller_agent_id {caller_agent_id} から project_root を設定: {candidate}"
-            )
+            logger.debug(f"caller_agent_id {caller_agent_id} から project_root を設定: {candidate}")
             return True
 
         # レジストリの値が現在の app_ctx と異なる場合は再同期する
@@ -223,7 +220,7 @@ def get_agent_role(app_ctx: AppContext, agent_id: str) -> AgentRole | None:
 
 # 初期化フェーズで caller_agent_id なしで呼び出し可能なツール
 # （Owner 作成前に実行する必要があるため）
-BOOTSTRAP_TOOLS = {"init_tmux_workspace", "create_agent"}
+BOOTSTRAP_TOOLS = {"init_tmux_workspace"}
 OWNER_WAIT_ALLOWED_TOOLS = {"read_messages", "get_unread_count", "unlock_owner_wait"}
 
 
@@ -302,10 +299,16 @@ def check_tool_permission(
     # 許可ロールを取得
     allowed_roles = get_allowed_roles(tool_name)
 
-    # ツールが未定義の場合は全ロール許可（後方互換性）
+    # ツールが未定義の場合は fail-close（明示定義必須）
     if not allowed_roles:
-        logger.warning(f"ツール '{tool_name}' の権限が未定義です。全ロールに許可します。")
-        return None
+        logger.error("ツール '%s' の権限が未定義のため拒否しました", tool_name)
+        return {
+            "success": False,
+            "error": (
+                f"ツール `{tool_name}` の権限定義が存在しないため実行を拒否しました。"
+                " `src/config/role_permissions.py` に明示的な定義を追加してください。"
+            ),
+        }
 
     # ロールチェック
     if role.value not in allowed_roles:
@@ -346,11 +349,7 @@ def find_agents_by_role(app_ctx: AppContext, role: str) -> list[str]:
     Returns:
         該当するエージェントIDのリスト
     """
-    return [
-        agent_id
-        for agent_id, agent in app_ctx.agents.items()
-        if agent.role == role
-    ]
+    return [agent_id for agent_id, agent in app_ctx.agents.items() if agent.role == role]
 
 
 def get_owner_wait_state(app_ctx: AppContext, owner_id: str) -> dict[str, Any]:
@@ -458,9 +457,7 @@ async def _send_macos_notification(msg_type_value: str, sender_id: str) -> bool:
 
     try:
         notification_title = escape_applescript("Multi-Agent MCP")
-        notification_body = escape_applescript(
-            f"[IPC] {msg_type_value} from {sender_id}"
-        )
+        notification_body = escape_applescript(f"[IPC] {msg_type_value} from {sender_id}")
         subprocess.run(
             [
                 "osascript",
@@ -504,11 +501,7 @@ async def notify_agent_via_tmux(
     Returns:
         送信成功時は True、失敗時は False
     """
-    if (
-        not agent
-        or not agent.session_name
-        or agent.pane_index is None
-    ):
+    if not agent or not agent.session_name or agent.pane_index is None:
         logger.warning(
             "エージェントの tmux 情報が見つかりません: %s",
             getattr(agent, "id", "unknown"),
@@ -519,9 +512,7 @@ async def notify_agent_via_tmux(
     default_cli = app_ctx.ai_cli.get_default_cli()
     resolved_cli = agent.ai_cli or default_cli
     agent_cli = (
-        resolved_cli.value
-        if hasattr(resolved_cli, "value")
-        else str(resolved_cli or "")
+        resolved_cli.value if hasattr(resolved_cli, "value") else str(resolved_cli or "")
     ).lower()
 
     # リトライ付きで tmux 通知を送信
@@ -543,9 +534,7 @@ async def notify_agent_via_tmux(
                 )
                 return True
         except Exception as e:
-            logger.warning(
-                "tmux 通知の送信に失敗 (attempt=%d): %s", attempt + 1, e
-            )
+            logger.warning("tmux 通知の送信に失敗 (attempt=%d): %s", attempt + 1, e)
 
         if attempt < _TMUX_NOTIFY_MAX_RETRIES - 1:
             await asyncio.sleep(_TMUX_NOTIFY_RETRY_INTERVAL)
@@ -569,9 +558,7 @@ async def notify_agent_via_tmux(
 # ========== Admin ポーリングガード ==========
 
 
-def get_admin_poll_state(
-    app_ctx: AppContext, admin_id: str
-) -> dict[str, Any]:
+def get_admin_poll_state(app_ctx: AppContext, admin_id: str) -> dict[str, Any]:
     """Admin ごとのポーリングガード状態を取得する。
 
     AppContext._admin_poll_state に状態を保持し、未初期化なら

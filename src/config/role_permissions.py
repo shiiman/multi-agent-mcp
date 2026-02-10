@@ -124,6 +124,8 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
 
 # Worker が自身の agent_id のみを対象に実行できるツール
 WORKER_SELF_SCOPE_TOOLS: set[str] = {
+    "list_tasks",
+    "get_task",
     "read_messages",
     "get_unread_count",
     "get_output",
@@ -186,5 +188,5 @@ def get_role_error_message(tool_name: str, current_role: str) -> str:
     return (
         f"あなたのロール ({current_role}) では `{tool_name}` は使用禁止です。"
         f"許可されたロール: {allowed_str}。"
-        f"`get_role_guide(role=\"{current_role}\")` で自身の役割を確認してください。"
+        f'`get_role_guide(role="{current_role}")` で自身の役割を確認してください。'
     )

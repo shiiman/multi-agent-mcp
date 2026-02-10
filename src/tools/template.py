@@ -99,8 +99,7 @@ def register_tools(mcp: FastMCP) -> None:
             available_roles = list_role_guides()
             return {
                 "success": False,
-                "error": f"ロール '{role}' が見つかりません。"
-                f"有効なロール: {available_roles}",
+                "error": f"ロール '{role}' が見つかりません。有効なロール: {available_roles}",
             }
 
         return {

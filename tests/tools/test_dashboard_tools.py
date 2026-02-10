@@ -652,6 +652,122 @@ class TestListTasks:
         assert result["count"] == 2
         assert len(result["tasks"]) == 2
 
+    @pytest.mark.asyncio
+    async def test_worker_list_tasks_is_self_scoped(self, dashboard_mock_ctx, git_repo):
+        """Worker の list_tasks は自分のタスクのみに制限されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_task = None
+        list_tasks = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_task":
+                create_task = tool.fn
+            elif tool.name == "list_tasks":
+                list_tasks = tool.fn
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-002"] = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.2",
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        await create_task(
+            title="worker-001 task",
+            assigned_agent_id="worker-001",
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+        await create_task(
+            title="worker-002 task",
+            assigned_agent_id="worker-002",
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        result = await list_tasks(
+            caller_agent_id="worker-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["tasks"][0]["assigned_agent_id"] == "worker-001"
+
+    @pytest.mark.asyncio
+    async def test_worker_list_tasks_other_agent_is_denied(self, dashboard_mock_ctx, git_repo):
+        """Worker が他エージェント指定で list_tasks を呼ぶと拒否されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        list_tasks = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "list_tasks":
+                list_tasks = tool.fn
+                break
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-002"] = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.2",
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await list_tasks(
+            agent_id="worker-002",
+            caller_agent_id="worker-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "caller_agent_id" in result["error"]
+
 
 class TestGetTask:
     """get_task ツールのテスト。"""
@@ -744,6 +860,71 @@ class TestGetTask:
 
         assert result["success"] is False
         assert "見つかりません" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_worker_get_task_other_assignment_is_denied(self, dashboard_mock_ctx, git_repo):
+        """Worker は他人に割り当てられたタスクを取得できないことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_task = None
+        get_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_task":
+                create_task = tool.fn
+            elif tool.name == "get_task":
+                get_task = tool.fn
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-002"] = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.2",
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        create_result = await create_task(
+            title="worker-002 task",
+            assigned_agent_id="worker-002",
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+        task_id = create_result["task"]["id"]
+
+        result = await get_task(
+            task_id=task_id,
+            caller_agent_id="worker-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "自分に割り当てられたタスクのみ取得できます" in result["error"]
 
 
 class TestGetDashboard:

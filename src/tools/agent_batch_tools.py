@@ -31,8 +31,7 @@ def _validate_batch_config(config: dict, worker_index: int) -> dict[str, Any] | 
         return {
             "success": False,
             "error": (
-                f"Worker {worker_index + 1}: task_content を送信する場合は "
-                "task_id が必須です"
+                f"Worker {worker_index + 1}: task_content を送信する場合は task_id が必須です"
             ),
             "worker_index": worker_index,
         }
@@ -77,9 +76,7 @@ async def _assign_and_dispatch_task(
             task_assigned = success
             if not success:
                 assignment_error = message
-                logger.warning(
-                    f"Worker {worker_index + 1}: タスク割り当て失敗 - {message}"
-                )
+                logger.warning(f"Worker {worker_index + 1}: タスク割り当て失敗 - {message}")
             else:
                 agent.current_task = task_id
                 agent.branch = branch
@@ -97,9 +94,17 @@ async def _assign_and_dispatch_task(
     dispatch_error: str | None = None
     if task_content and session_id:
         send_result = await _send_task_to_worker(
-            app_ctx, agent, task_content, task_id, branch, worktree_path,
-            session_id, worker_index, enable_worktree,
-            profile_settings, caller_agent_id,
+            app_ctx,
+            agent,
+            task_content,
+            task_id,
+            branch,
+            worktree_path,
+            session_id,
+            worker_index,
+            enable_worktree,
+            profile_settings,
+            caller_agent_id,
         )
         task_sent = bool(send_result.get("task_sent"))
         dispatch_mode = str(send_result.get("dispatch_mode", "none"))
@@ -168,8 +173,10 @@ async def _setup_worker_tmux_pane(
 
     if window_index > 0:
         ok = await tmux.add_extra_worker_window(
-            project_name=project_name, window_index=window_index,
-            rows=settings.extra_worker_rows, cols=settings.extra_worker_cols,
+            project_name=project_name,
+            window_index=window_index,
+            rows=settings.extra_worker_rows,
+            cols=settings.extra_worker_cols,
         )
         if not ok:
             return None, {
@@ -184,21 +191,36 @@ async def _setup_worker_tmux_pane(
 
     now = datetime.now()
     agent = Agent(
-        id=agent_id, role=AgentRole.WORKER, status=AgentStatus.IDLE,
-        tmux_session=tmux_session, working_dir=worktree_path,
+        id=agent_id,
+        role=AgentRole.WORKER,
+        status=AgentStatus.IDLE,
+        tmux_session=tmux_session,
+        working_dir=worktree_path,
         worktree_path=worktree_path if enable_worktree else None,
-        session_name=project_name, window_index=window_index, pane_index=pane_index,
-        ai_cli=worker_cli, created_at=now, last_activity=now,
+        session_name=project_name,
+        window_index=window_index,
+        pane_index=pane_index,
+        ai_cli=worker_cli,
+        created_at=now,
+        last_activity=now,
     )
     return agent, None
 
 
 async def _create_single_worker(
-    app_ctx: Any, agents: dict[str, Agent], settings: Any,
-    config: dict, worker_index: int, assigned_slot: tuple[int, int] | None,
-    repo_path: str, base_branch: str, project_name: str,
-    enable_worktree: bool, session_id: str | None,
-    profile_settings: dict, caller_agent_id: str | None,
+    app_ctx: Any,
+    agents: dict[str, Agent],
+    settings: Any,
+    config: dict,
+    worker_index: int,
+    assigned_slot: tuple[int, int] | None,
+    repo_path: str,
+    base_branch: str,
+    project_name: str,
+    enable_worktree: bool,
+    session_id: str | None,
+    profile_settings: dict,
+    caller_agent_id: str | None,
 ) -> dict[str, Any]:
     """単一の Worker を新規作成する。"""
     validation_error = _validate_batch_config(config, worker_index)
@@ -213,22 +235,23 @@ async def _create_single_worker(
     try:
         if assigned_slot is None:
             return {
-                "success": False, "worker_index": worker_index,
-                "error": (
-                    f"Worker {worker_index + 1}: "
-                    "利用可能なスロットがありません"
-                ),
+                "success": False,
+                "worker_index": worker_index,
+                "error": (f"Worker {worker_index + 1}: 利用可能なスロットがありません"),
             }
 
         window_index, pane_index = assigned_slot
         worker_no = resolve_worker_number_from_slot(
-            settings, window_index, pane_index,
+            settings,
+            window_index,
+            pane_index,
         )
         branch = requested_branch or f"worker-{worker_no}"
         if enable_worktree:
             if not task_id:
                 return {
-                    "success": False, "worker_index": worker_index,
+                    "success": False,
+                    "worker_index": worker_index,
                     "error": f"Worker {worker_index + 1}: task_id が必須です",
                 }
             branch = build_worker_task_branch(base_branch, worker_no, task_id)
@@ -236,16 +259,27 @@ async def _create_single_worker(
         worktree_path = repo_path
         if enable_worktree:
             wt_path, wt_error = await _create_worktree_for_worker(
-                app_ctx, repo_path, branch, base_branch, worker_index,
+                app_ctx,
+                repo_path,
+                branch,
+                base_branch,
+                worker_index,
             )
             if wt_error:
                 return {"success": False, "error": wt_error, "worker_index": worker_index}
             worktree_path = wt_path
 
         agent, tmux_error = await _setup_worker_tmux_pane(
-            app_ctx, settings, project_name, repo_path,
-            window_index, pane_index, worker_no, worktree_path,
-            enable_worktree, worker_index,
+            app_ctx,
+            settings,
+            project_name,
+            repo_path,
+            window_index,
+            pane_index,
+            worker_no,
+            worktree_path,
+            enable_worktree,
+            worker_index,
         )
         if tmux_error:
             return tmux_error
@@ -253,17 +287,26 @@ async def _create_single_worker(
         agents[agent.id] = agent
         logger.info(
             "Worker %d (ID: %s) を作成しました: %s",
-            worker_index + 1, agent.id, agent.tmux_session,
+            worker_index + 1,
+            agent.id,
+            agent.tmux_session,
         )
         post_result = _post_create_agent(app_ctx, agent, agents)
 
         dispatch = await _assign_and_dispatch_task(
-            app_ctx, agent, task_id, task_content, branch,
-            worktree_path, session_id, worker_index,
-            enable_worktree, profile_settings, caller_agent_id,
+            app_ctx,
+            agent,
+            task_id,
+            task_content,
+            branch,
+            worktree_path,
+            session_id,
+            worker_index,
+            enable_worktree,
+            profile_settings,
+            caller_agent_id,
         )
-        (task_assigned, assignment_error,
-         task_sent, dispatch_mode, dispatch_error) = dispatch
+        (task_assigned, assignment_error, task_sent, dispatch_mode, dispatch_error) = dispatch
 
         return {
             "success": True,
@@ -317,7 +360,9 @@ async def _reuse_single_worker(
 
     worktree_path = worker.worktree_path or repo_path
     worker_no = resolve_worker_number_from_slot(
-        settings, worker.window_index or 0, worker.pane_index or 0,
+        settings,
+        worker.window_index or 0,
+        worker.pane_index or 0,
     )
     worker.ai_cli = settings.get_worker_cli(worker_no)
     branch = requested_branch or f"worker-{worker_no}"
@@ -326,8 +371,7 @@ async def _reuse_single_worker(
             return {
                 "success": False,
                 "error": (
-                    f"Worker {worker_index + 1}: MCP_ENABLE_WORKTREE=true のため "
-                    "task_id が必須です"
+                    f"Worker {worker_index + 1}: MCP_ENABLE_WORKTREE=true のため task_id が必須です"
                 ),
                 "worker_index": worker_index,
             }
@@ -341,12 +385,24 @@ async def _reuse_single_worker(
         worker.worktree_path = wt_path
         worker.working_dir = wt_path
 
-    task_assigned, assignment_error, task_sent, dispatch_mode, dispatch_error = (
-        await _assign_and_dispatch_task(
-            app_ctx, worker, task_id, task_content, branch, worktree_path,
-            session_id, worker_index, enable_worktree,
-            profile_settings, caller_agent_id,
-        )
+    (
+        task_assigned,
+        assignment_error,
+        task_sent,
+        dispatch_mode,
+        dispatch_error,
+    ) = await _assign_and_dispatch_task(
+        app_ctx,
+        worker,
+        task_id,
+        task_content,
+        branch,
+        worktree_path,
+        session_id,
+        worker_index,
+        enable_worktree,
+        profile_settings,
+        caller_agent_id,
     )
 
     worker.last_activity = datetime.now()
@@ -398,7 +454,8 @@ def _validate_batch_capacity(
         (reusable_workers, reuse_count, error_or_None)
     """
     current_worker_count = sum(
-        1 for a in agents.values()
+        1
+        for a in agents.values()
         if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
     )
     requested_count = len(worker_configs)
@@ -406,7 +463,8 @@ def _validate_batch_capacity(
     if reuse_idle_workers:
         reusable_workers = sorted(
             [
-                a for a in agents.values()
+                a
+                for a in agents.values()
                 if a.role == AgentRole.WORKER
                 and a.status == AgentStatus.IDLE
                 and not a.current_task
@@ -421,15 +479,19 @@ def _validate_batch_capacity(
     new_worker_needed = requested_count - reuse_count
     new_worker_capacity = max(profile_max_workers - current_worker_count, 0)
     if new_worker_needed > new_worker_capacity:
-        return reusable_workers, reuse_count, {
-            "success": False,
-            "error": (
-                "Worker数が上限を超えます"
-                f"（現在: {current_worker_count}, 要求: {requested_count}, "
-                f"再利用可能: {reuse_count}, 新規上限: {new_worker_capacity}, "
-                f"総上限: {profile_max_workers}）"
-            ),
-        }
+        return (
+            reusable_workers,
+            reuse_count,
+            {
+                "success": False,
+                "error": (
+                    "Worker数が上限を超えます"
+                    f"（現在: {current_worker_count}, 要求: {requested_count}, "
+                    f"再利用可能: {reuse_count}, 新規上限: {new_worker_capacity}, "
+                    f"総上限: {profile_max_workers}）"
+                ),
+            },
+        )
     return reusable_workers, reuse_count, None
 
 
@@ -457,7 +519,10 @@ def register_batch_tools(mcp: FastMCP) -> None:
         profile_settings = get_current_profile_settings(app_ctx)
         agents = app_ctx.agents
         reusable_workers, reuse_count, capacity_error = _validate_batch_capacity(
-            agents, worker_configs, reuse_idle_workers, profile_settings["max_workers"],
+            agents,
+            worker_configs,
+            reuse_idle_workers,
+            profile_settings["max_workers"],
         )
         if capacity_error:
             return capacity_error
@@ -469,29 +534,65 @@ def register_batch_tools(mcp: FastMCP) -> None:
         pre_assigned_slots = _pre_assign_pane_slots(agents, project_name, len(create_configs))
         logger.info("Workerバッチ: reuse=%s, create=%s", reuse_count, len(create_configs))
 
-        reuse_results = await asyncio.gather(*[
-            _reuse_single_worker(
-                app_ctx, settings, c, i, reusable_workers[i],
-                repo_path, base_branch, enable_wt, session_id, profile_settings, caller_agent_id,
-            ) for i, c in enumerate(reuse_configs)
-        ], return_exceptions=True)
-        create_results = await asyncio.gather(*[
-            _create_single_worker(
-                app_ctx, agents, settings, c, i + len(reuse_configs),
-                pre_assigned_slots[i], repo_path, base_branch, project_name,
-                enable_wt, session_id, profile_settings, caller_agent_id,
-            ) for i, c in enumerate(create_configs)
-        ], return_exceptions=True)
+        reuse_results = await asyncio.gather(
+            *[
+                _reuse_single_worker(
+                    app_ctx,
+                    settings,
+                    c,
+                    i,
+                    reusable_workers[i],
+                    repo_path,
+                    base_branch,
+                    enable_wt,
+                    session_id,
+                    profile_settings,
+                    caller_agent_id,
+                )
+                for i, c in enumerate(reuse_configs)
+            ],
+            return_exceptions=True,
+        )
+        create_results = await asyncio.gather(
+            *[
+                _create_single_worker(
+                    app_ctx,
+                    agents,
+                    settings,
+                    c,
+                    i + len(reuse_configs),
+                    pre_assigned_slots[i],
+                    repo_path,
+                    base_branch,
+                    project_name,
+                    enable_wt,
+                    session_id,
+                    profile_settings,
+                    caller_agent_id,
+                )
+                for i, c in enumerate(create_configs)
+            ],
+            return_exceptions=True,
+        )
 
         workers, failed_count, errors = _collect_batch_results([*reuse_results, *create_results])
         ok = failed_count == 0
-        msg = (f"{len(workers)} 件のWorker処理が完了しました" if ok
-               else f"{len(workers)} 件のWorker処理が完了（{failed_count} 件失敗）")
+        msg = (
+            f"{len(workers)} 件のWorker処理が完了しました"
+            if ok
+            else f"{len(workers)} 件のWorker処理が完了（{failed_count} 件失敗）"
+        )
         try:
             from src.managers.healthcheck_daemon import ensure_healthcheck_daemon_started
+
             await ensure_healthcheck_daemon_started(app_ctx)
         except Exception as e:
             logger.warning("healthcheck daemon 起動に失敗: %s", e)
         logger.info(msg)
-        return {"success": ok, "workers": workers, "failed_count": failed_count,
-                "errors": errors if errors else None, "message": msg}
+        return {
+            "success": ok,
+            "workers": workers,
+            "failed_count": failed_count,
+            "errors": errors if errors else None,
+            "message": msg,
+        }

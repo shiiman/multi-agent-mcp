@@ -48,7 +48,5 @@ class AppContext:
     """Admin ごとのポーリングガード状態"""
     _owner_wait_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Owner ごとの待機ロック状態"""
-    _admin_last_healthcheck_at: dict[str, datetime] = field(
-        default_factory=dict
-    )
+    _admin_last_healthcheck_at: dict[str, datetime] = field(default_factory=dict)
     """Admin ごとの最終ヘルスチェック実行時刻"""

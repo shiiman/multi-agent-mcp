@@ -227,37 +227,39 @@ class DashboardMarkdownMixin:
             "",
         ]
         if show_worktree:
-            lines.extend([
-                "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 | worktree |",
-                "|:---|:---|:---|:---|:---|:---|:---|:---|",
-            ])
+            lines.extend(
+                [
+                    "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 | worktree |",
+                    "|:---|:---|:---|:---|:---|:---|:---|:---|",
+                ]
+            )
         else:
-            lines.extend([
-                "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 |",
-                "|:---|:---|:---|:---|:---|:---|:---|",
-            ])
+            lines.extend(
+                [
+                    "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 |",
+                    "|:---|:---|:---|:---|:---|:---|:---|",
+                ]
+            )
         agent_labels = self._build_agent_label_map(dashboard)
 
         for task in dashboard.tasks:
             status_value = str(task.status.value).lower()
             emoji = task_emoji.get(status_value, "❓")
             status_label = self._TASK_STATUS_LABELS_JA.get(status_value, str(task.status.value))
-            assigned = self._format_agent_display(
-                task.assigned_agent_id,
-                agent_labels,
-                with_id=False,
-            ) if task.assigned_agent_id else "-"
+            assigned = (
+                self._format_agent_display(
+                    task.assigned_agent_id,
+                    agent_labels,
+                    with_id=False,
+                )
+                if task.assigned_agent_id
+                else "-"
+            )
             started_at = self._format_task_time(task.started_at)
             completed_at = self._format_task_time(task.completed_at)
             if show_worktree:
-                worktree = self._format_worktree_path(
-                    task.worktree_path, dashboard.workspace_path
-                )
-                worktree_cell = (
-                    "<details><summary>表示</summary>"
-                    f"<code>{worktree}</code>"
-                    "</details>"
-                )
+                worktree = self._format_worktree_path(task.worktree_path, dashboard.workspace_path)
+                worktree_cell = f"<details><summary>表示</summary><code>{worktree}</code></details>"
                 lines.append(
                     f"| `{task.id[:8]}` | {task.title} | {emoji} {status_label} | "
                     f"`{assigned}` | {task.progress}% | {started_at} | {completed_at} | "
@@ -298,14 +300,16 @@ class DashboardMarkdownMixin:
         for task in detail_tasks:
             status_value = str(task.status.value).lower()
             status_label = self._TASK_STATUS_LABELS_JA.get(status_value, str(task.status.value))
-            lines.extend([
-                "",
-                f"### {task.title}",
-                "",
-                f"**状態**: `{status_label}`",
-                "",
-                f"**進捗**: {task.progress}%",
-            ])
+            lines.extend(
+                [
+                    "",
+                    f"### {task.title}",
+                    "",
+                    f"**状態**: `{status_label}`",
+                    "",
+                    f"**進捗**: {task.progress}%",
+                ]
+            )
 
             if task.error_message:
                 lines.extend(["", f"**エラー**: {task.error_message}"])
@@ -478,9 +482,7 @@ class DashboardMarkdownMixin:
                     else call.estimated_cost_usd
                 )
 
-                role_data = role_stats.setdefault(
-                    role, {"calls": 0, "tokens": 0, "cost": 0.0}
-                )
+                role_data = role_stats.setdefault(role, {"calls": 0, "tokens": 0, "cost": 0.0})
                 role_data["calls"] += 1
                 role_data["tokens"] += call.tokens
                 role_data["cost"] += call_cost
@@ -497,21 +499,23 @@ class DashboardMarkdownMixin:
                 model_data["tokens"] += call.tokens
                 model_data["cost"] += call_cost
 
-            lines.extend([
-                "",
-                "---",
-                "",
-                "## コスト情報",
-                "",
-                f"- **総API呼び出し数**: {cost.total_api_calls}",
-                f"- **推定トークン数**: {cost.estimated_tokens:,}",
-                f"- **実測コスト (Claude)**: ${cost.actual_cost_usd:.4f}",
-                f"- **推定コスト (全CLI)**: ${cost.estimated_cost_usd:.4f}",
-                f"- **合算コスト**: ${cost.total_cost_usd:.4f}",
-                f"- **警告閾値**: ${cost.warning_threshold_usd:.2f}",
-                "",
-                "**役割別内訳**:",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "---",
+                    "",
+                    "## コスト情報",
+                    "",
+                    f"- **総API呼び出し数**: {cost.total_api_calls}",
+                    f"- **推定トークン数**: {cost.estimated_tokens:,}",
+                    f"- **実測コスト (Claude)**: ${cost.actual_cost_usd:.4f}",
+                    f"- **推定コスト (全CLI)**: ${cost.estimated_cost_usd:.4f}",
+                    f"- **合算コスト**: ${cost.total_cost_usd:.4f}",
+                    f"- **警告閾値**: ${cost.warning_threshold_usd:.2f}",
+                    "",
+                    "**役割別内訳**:",
+                ]
+            )
 
             for role in sorted(role_stats):
                 data = role_stats[role]
@@ -531,9 +535,7 @@ class DashboardMarkdownMixin:
                 else:
                     label = agent_labels.get(agent_id, "unknown")
                     display = label
-                lines.append(
-                    f"- `{display}`: {data['calls']} calls / {data['tokens']:,} tokens"
-                )
+                lines.append(f"- `{display}`: {data['calls']} calls / {data['tokens']:,} tokens")
 
             lines.extend(["", "**モデル別内訳**:"])
             for model_name, data in sorted(
@@ -547,12 +549,15 @@ class DashboardMarkdownMixin:
                 )
 
             if cost.total_cost_usd >= cost.warning_threshold_usd:
-                lines.extend([
-                    "",
-                    "⚠️ **警告**: 合算コストが閾値を超えています！",
-                ])
+                lines.extend(
+                    [
+                        "",
+                        "⚠️ **警告**: 合算コストが閾値を超えています！",
+                    ]
+                )
 
         return lines
+
     def generate_markdown_dashboard(self) -> str:
         """Markdown形式のダッシュボードを生成する。
 

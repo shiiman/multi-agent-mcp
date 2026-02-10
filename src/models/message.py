@@ -47,15 +47,11 @@ class Message(BaseModel):
         None, description="宛先エージェントID（Noneの場合はブロードキャスト）"
     )
     message_type: MessageType = Field(..., description="メッセージ種類")
-    priority: MessagePriority = Field(
-        default=MessagePriority.NORMAL, description="優先度"
-    )
+    priority: MessagePriority = Field(default=MessagePriority.NORMAL, description="優先度")
     subject: str = Field(default="", description="件名")
     content: str = Field(..., description="メッセージ内容")
     metadata: dict = Field(default_factory=dict, description="追加メタデータ")
-    created_at: datetime = Field(
-        default_factory=datetime.now, description="作成日時"
-    )
+    created_at: datetime = Field(default_factory=datetime.now, description="作成日時")
     read_at: datetime | None = Field(None, description="既読日時")
 
     @property
@@ -73,9 +69,7 @@ class MessageQueue(BaseModel):
     """エージェントのメッセージキュー。"""
 
     agent_id: str = Field(..., description="エージェントID")
-    messages: list[Message] = Field(
-        default_factory=list, description="メッセージリスト"
-    )
+    messages: list[Message] = Field(default_factory=list, description="メッセージリスト")
 
     @property
     def unread_count(self) -> int:

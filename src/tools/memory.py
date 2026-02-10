@@ -343,4 +343,3 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "summary": summary,
         }
-

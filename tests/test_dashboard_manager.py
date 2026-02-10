@@ -4,6 +4,8 @@ import json
 import re
 from datetime import datetime
 
+import pytest
+
 from src.managers.dashboard_manager import DashboardManager
 from src.models.dashboard import AgentSummary, MessageSummary, TaskStatus
 
@@ -226,6 +228,21 @@ class TestDashboardManager:
         assert reopened.progress == 0
         assert reopened.completed_at is None
 
+    def test_reopen_task_resets_started_at(self, dashboard_manager):
+        """reopen_task で started_at がリセットされることをテスト。"""
+        task = dashboard_manager.create_task(title="Reopen StartedAt Target")
+        dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=10)
+        in_progress = dashboard_manager.get_task(task.id)
+        assert in_progress.started_at is not None
+        dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED)
+
+        success, _ = dashboard_manager.reopen_task(task.id)
+
+        assert success is True
+        reopened = dashboard_manager.get_task(task.id)
+        assert reopened.status == TaskStatus.PENDING
+        assert reopened.started_at is None
+
     def test_reopen_task_rejects_non_terminal(self, dashboard_manager):
         """reopen_task は終端状態以外を拒否することをテスト。"""
         task = dashboard_manager.create_task(title="Not Terminal")
@@ -377,6 +394,31 @@ class TestTaskFileManagement:
 class TestDashboardMarkdownSync:
     """Markdown 同期処理の追加テスト。"""
 
+    def test_dashboard_lock_fails_fast_in_event_loop_context(
+        self, dashboard_manager, monkeypatch
+    ):
+        """event loop 実行中は lock 待機を行わず即座に timeout することをテスト。"""
+        sleep_calls: list[float] = []
+
+        def _always_blocking(*_args, **_kwargs):
+            raise BlockingIOError("lock busy")
+
+        monkeypatch.setattr("fcntl.flock", _always_blocking)
+        monkeypatch.setattr(
+            dashboard_manager,
+            "_is_event_loop_running",
+            lambda: True,
+        )
+        monkeypatch.setattr(
+            "src.managers.dashboard_manager.time.sleep",
+            lambda seconds: sleep_calls.append(seconds),
+        )
+
+        with pytest.raises(TimeoutError, match="event loop context"):
+            dashboard_manager.get_dashboard()
+
+        assert sleep_calls == []
+
     def test_save_markdown_dashboard_ignores_invalid_last_activity(
         self, dashboard_manager, temp_dir
     ):
@@ -406,6 +448,29 @@ class TestDashboardMarkdownSync:
         dashboard = dashboard_manager.get_dashboard()
         assert len(dashboard.agents) == 1
         assert dashboard.agents[0].last_activity is None
+
+    def test_save_markdown_dashboard_exposes_structured_sync_failure_report(
+        self, dashboard_manager, temp_dir
+    ):
+        """同期失敗が構造化レポートとして取得できることをテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        session_dir = dashboard_manager.dashboard_dir.parent
+        agents_path = session_dir / "agents.json"
+        agents_path.parent.mkdir(parents=True, exist_ok=True)
+        agents_path.write_text("{invalid-json", encoding="utf-8")
+
+        md_path = dashboard_manager.save_markdown_dashboard(project_root, "session-sync-error")
+
+        report = dashboard_manager.get_last_sync_report()
+        assert md_path.exists()
+        assert report is not None
+        assert report["success"] is False
+        assert report["agents_sync"]["success"] is False
+        assert report["agents_sync"]["error"]["type"] == "JSONDecodeError"
+        assert report["ipc_sync"]["success"] is True
+        assert report["messages_write"]["success"] is True
 
     def test_save_markdown_dashboard_sets_session_metadata(self, dashboard_manager, temp_dir):
         """dashboard front matter にセッション統計が保存されることをテスト。"""

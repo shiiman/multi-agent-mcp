@@ -142,9 +142,7 @@ class DashboardCostMixin:
         dashboard.cost.estimated_cost_usd = sum(c.estimated_cost_usd for c in dashboard.cost.calls)
         dashboard.cost.actual_cost_usd = sum(latest_actual_by_agent.values())
         estimated_non_actual = sum(
-            c.estimated_cost_usd
-            for c in dashboard.cost.calls
-            if c.cost_source != "actual"
+            c.estimated_cost_usd for c in dashboard.cost.calls if c.cost_source != "actual"
         )
         dashboard.cost.total_cost_usd = dashboard.cost.actual_cost_usd + estimated_non_actual
 
@@ -217,6 +215,7 @@ class DashboardCostMixin:
         Args:
             threshold_usd: 新しい閾値（USD）
         """
+
         def _set(dashboard: Dashboard) -> None:
             dashboard.cost.warning_threshold_usd = threshold_usd
 
@@ -229,6 +228,7 @@ class DashboardCostMixin:
         Returns:
             削除した記録数
         """
+
         def _reset(dashboard: Dashboard) -> int:
             count = len(dashboard.cost.calls)
             dashboard.cost = CostInfo()
@@ -266,7 +266,8 @@ class DashboardCostMixin:
         """
         dashboard = self._read_dashboard()
         return sum(
-            c.actual_cost_usd if c.cost_source == "actual" and c.actual_cost_usd is not None
+            c.actual_cost_usd
+            if c.cost_source == "actual" and c.actual_cost_usd is not None
             else c.estimated_cost_usd
             for c in dashboard.cost.calls
             if c.task_id == task_id
@@ -322,10 +323,9 @@ class DashboardCostMixin:
             dashboard.cost.actual_cost_by_agent.keys()
         )
         for agent_id in agent_ids:
-            by_agent[agent_id] = (
-                by_agent_estimated_non_actual.get(agent_id, 0.0)
-                + dashboard.cost.actual_cost_by_agent.get(agent_id, 0.0)
-            )
+            by_agent[agent_id] = by_agent_estimated_non_actual.get(
+                agent_id, 0.0
+            ) + dashboard.cost.actual_cost_by_agent.get(agent_id, 0.0)
 
         return {
             "by_agent": by_agent,

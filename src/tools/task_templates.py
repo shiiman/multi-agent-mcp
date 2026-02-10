@@ -146,9 +146,7 @@ def generate_7section_task(
         work_env_lines.append(f"- **作業ディレクトリ**: `{worktree_path}`")
     if branch_name:
         work_env_lines.append(f"- **作業ブランチ**: `{branch_name}`")
-    work_env_section = (
-        "\n".join(work_env_lines) if work_env_lines else "（メインリポジトリで作業）"
-    )
+    work_env_section = "\n".join(work_env_lines) if work_env_lines else "（メインリポジトリで作業）"
 
     # memory_context が空の場合のデフォルト値
     memory_context_display = memory_context if memory_context else "（関連情報なし）"

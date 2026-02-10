@@ -88,9 +88,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         return {
             "success": True,
-            "assignments": [
-                {"task_id": tid, "worker_id": wid} for tid, wid in assignments
-            ],
+            "assignments": [{"task_id": tid, "worker_id": wid} for tid, wid in assignments],
             "count": len(assignments),
             "message": f"{len(assignments)} 件のタスクを割り当てました",
         }

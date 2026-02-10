@@ -22,7 +22,7 @@ def normalize_task_id(task_id: str | None) -> str:
     normalized = task_id.strip().lower()
     for prefix in ("task:", "task_", "task-"):
         if normalized.startswith(prefix):
-            normalized = normalized[len(prefix):]
+            normalized = normalized[len(prefix) :]
             break
     return normalized
 
@@ -59,24 +59,14 @@ class TaskInfo(BaseModel):
     title: str = Field(..., description="タスクタイトル")
     description: str = Field(default="", description="タスク参照情報（task_file_path）")
     task_file_path: str | None = Field(default=None, description="タスク指示ファイルパス")
-    status: TaskStatus = Field(
-        default=TaskStatus.PENDING, description="ステータス"
-    )
-    assigned_agent_id: str | None = Field(
-        None, description="割り当てられたエージェントID"
-    )
+    status: TaskStatus = Field(default=TaskStatus.PENDING, description="ステータス")
+    assigned_agent_id: str | None = Field(None, description="割り当てられたエージェントID")
     branch: str | None = Field(None, description="関連ブランチ")
     worktree_path: str | None = Field(None, description="worktreeパス")
     progress: int = Field(default=0, ge=0, le=100, description="進捗率（0-100）")
-    checklist: list[ChecklistItem] = Field(
-        default_factory=list, description="チェックリスト"
-    )
-    logs: list[TaskLog] = Field(
-        default_factory=list, description="進捗ログ（最新5件を保持）"
-    )
-    created_at: datetime = Field(
-        default_factory=datetime.now, description="作成日時"
-    )
+    checklist: list[ChecklistItem] = Field(default_factory=list, description="チェックリスト")
+    logs: list[TaskLog] = Field(default_factory=list, description="進捗ログ（最新5件を保持）")
+    created_at: datetime = Field(default_factory=datetime.now, description="作成日時")
     started_at: datetime | None = Field(None, description="開始日時")
     completed_at: datetime | None = Field(None, description="完了日時")
     error_message: str | None = Field(None, description="エラーメッセージ")
@@ -145,27 +135,17 @@ class Dashboard(BaseModel):
 
     workspace_id: str = Field(..., description="ワークスペースID")
     workspace_path: str = Field(..., description="ワークスペースパス")
-    updated_at: datetime = Field(
-        default_factory=datetime.now, description="更新日時"
-    )
-    session_started_at: datetime | None = Field(
-        default=None, description="セッション開始時刻"
-    )
-    session_finished_at: datetime | None = Field(
-        default=None, description="セッション終了時刻"
-    )
+    updated_at: datetime = Field(default_factory=datetime.now, description="更新日時")
+    session_started_at: datetime | None = Field(default=None, description="セッション開始時刻")
+    session_finished_at: datetime | None = Field(default=None, description="セッション終了時刻")
     process_crash_count: int = Field(default=0, description="プロセスクラッシュ回数")
     process_recovery_count: int = Field(default=0, description="プロセス復旧回数")
 
     # エージェント情報
-    agents: list[AgentSummary] = Field(
-        default_factory=list, description="エージェント一覧"
-    )
+    agents: list[AgentSummary] = Field(default_factory=list, description="エージェント一覧")
 
     # タスク情報
-    tasks: list[TaskInfo] = Field(
-        default_factory=list, description="タスク一覧"
-    )
+    tasks: list[TaskInfo] = Field(default_factory=list, description="タスク一覧")
 
     # 統計情報
     total_agents: int = Field(default=0, description="エージェント総数")
@@ -176,17 +156,13 @@ class Dashboard(BaseModel):
 
     # Worktree情報
     total_worktrees: int = Field(default=0, description="worktree総数")
-    active_worktrees: int = Field(
-        default=0, description="アクティブworktree数"
-    )
+    active_worktrees: int = Field(default=0, description="アクティブworktree数")
 
     # コスト情報
     cost: CostInfo = Field(default_factory=CostInfo, description="コスト情報")
 
     # メッセージ履歴（Dashboard 表示用、YAML には保存しない）
-    messages: list[MessageSummary] = Field(
-        default_factory=list, description="メッセージ履歴"
-    )
+    messages: list[MessageSummary] = Field(default_factory=list, description="メッセージ履歴")
 
     def get_task(self, task_id: str) -> TaskInfo | None:
         """タスクを取得する。"""
@@ -213,14 +189,8 @@ class Dashboard(BaseModel):
     def calculate_stats(self) -> None:
         """統計情報を再計算する。"""
         self.total_agents = len(self.agents)
-        self.active_agents = len(
-            [a for a in self.agents if a.status in ("busy", "idle")]
-        )
+        self.active_agents = len([a for a in self.agents if a.status in ("busy", "idle")])
         self.total_tasks = len(self.tasks)
-        self.completed_tasks = len(
-            [t for t in self.tasks if t.status == TaskStatus.COMPLETED]
-        )
-        self.failed_tasks = len(
-            [t for t in self.tasks if t.status == TaskStatus.FAILED]
-        )
+        self.completed_tasks = len([t for t in self.tasks if t.status == TaskStatus.COMPLETED])
+        self.failed_tasks = len([t for t in self.tasks if t.status == TaskStatus.FAILED])
         self.updated_at = datetime.now()

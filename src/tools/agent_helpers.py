@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,8 @@ def _get_next_worker_slot(
     # 最大Worker数チェック（TERMINATED Worker を除外）
     total_workers = len(
         [
-            a for a in agents.values()
+            a
+            for a in agents.values()
             if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
         ]
     )
@@ -145,9 +147,10 @@ def _resolve_agent_enable_git(
 
 def _build_change_directory_command(cli_name: str, worktree_path: str) -> str:
     """CLI ごとのディレクトリ移動コマンドを返す。"""
+    quoted_path = shlex.quote(worktree_path)
     if cli_name == AICli.CLAUDE.value:
-        return f"!cd {worktree_path}"
-    return f"cd {worktree_path}"
+        return f"!cd {quoted_path}"
+    return f"cd {quoted_path}"
 
 
 def _sanitize_branch_part(value: str) -> str:
@@ -200,10 +203,14 @@ def _validate_agent_creation(
     try:
         agent_role = AgentRole(role)
     except ValueError:
-        return None, None, {
-            "success": False,
-            "error": f"無効な役割です: {role}（有効: owner, admin, worker）",
-        }
+        return (
+            None,
+            None,
+            {
+                "success": False,
+                "error": f"無効な役割です: {role}（有効: owner, admin, worker）",
+            },
+        )
 
     selected_cli: AICli | None = None
     if ai_cli:
@@ -211,29 +218,42 @@ def _validate_agent_creation(
             selected_cli = AICli(ai_cli)
         except ValueError:
             valid_clis = [c.value for c in AICli]
-            return None, None, {
-                "success": False,
-                "error": f"無効なAI CLIです: {ai_cli}（有効: {valid_clis}）",
-            }
+            return (
+                None,
+                None,
+                {
+                    "success": False,
+                    "error": f"無効なAI CLIです: {ai_cli}（有効: {valid_clis}）",
+                },
+            )
 
     if agent_role == AgentRole.WORKER:
         worker_count = sum(
-            1 for a in agents.values()
+            1
+            for a in agents.values()
             if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
         )
         if worker_count >= profile_max_workers:
-            return None, None, {
-                "success": False,
-                "error": f"Worker数が上限（{profile_max_workers}）に達しています",
-            }
+            return (
+                None,
+                None,
+                {
+                    "success": False,
+                    "error": f"Worker数が上限（{profile_max_workers}）に達しています",
+                },
+            )
 
     if agent_role in (AgentRole.OWNER, AgentRole.ADMIN):
         existing = [a for a in agents.values() if a.role == agent_role]
         if existing:
-            return None, None, {
-                "success": False,
-                "error": f"{agent_role.value}は既に存在します（ID: {existing[0].id}）",
-            }
+            return (
+                None,
+                None,
+                {
+                    "success": False,
+                    "error": f"{agent_role.value}は既に存在します（ID: {existing[0].id}）",
+                },
+            )
 
     return agent_role, selected_cli, None
 
@@ -329,9 +349,7 @@ def _post_create_agent(
     if not app_ctx.session_id and agent.role == AgentRole.OWNER:
         app_ctx.session_id = f"provisional-{_uuid.uuid4().hex[:8]}"
         provisional_session = True
-        logger.info(
-            "Owner 作成時に仮 session_id を設定: %s", app_ctx.session_id
-        )
+        logger.info("Owner 作成時に仮 session_id を設定: %s", app_ctx.session_id)
 
     # IPC マネージャーに登録
     if app_ctx.session_id:
@@ -376,9 +394,7 @@ def _post_create_agent(
         owner_id = owner_agent.id if owner_agent else agent.id
 
     if app_ctx.project_root:
-        save_agent_to_registry(
-            agent.id, owner_id, app_ctx.project_root, app_ctx.session_id
-        )
+        save_agent_to_registry(agent.id, owner_id, app_ctx.project_root, app_ctx.session_id)
         logger.info(f"エージェント {agent.id} をグローバルレジストリに登録しました")
 
     # ダッシュボードにエージェント情報を追加
@@ -386,9 +402,7 @@ def _post_create_agent(
         try:
             dashboard = ensure_dashboard_manager(app_ctx)
             dashboard.update_agent_summary(agent)
-            dashboard.save_markdown_dashboard(
-                app_ctx.project_root, app_ctx.session_id
-            )
+            dashboard.save_markdown_dashboard(app_ctx.project_root, app_ctx.session_id)
             result["dashboard_updated"] = True
             logger.info(f"エージェント {agent.id} をダッシュボードに追加しました")
         except Exception as e:
@@ -446,11 +460,7 @@ async def _reset_bootstrap_state_if_shell(
     worker_index: int,
 ) -> str | None:
     """pane の実行コマンドを確認し、shell なら bootstrap 状態をリセットする。"""
-    if (
-        agent.session_name is None
-        or agent.window_index is None
-        or agent.pane_index is None
-    ):
+    if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
         return None
 
     try:
@@ -528,9 +538,7 @@ def _prepare_worker_task_content(
     # タスクファイル作成
     dashboard = ensure_dashboard_manager(app_ctx)
     agent_label = (
-        dashboard.get_agent_label(agent)
-        if hasattr(dashboard, "get_agent_label")
-        else agent.id
+        dashboard.get_agent_label(agent) if hasattr(dashboard, "get_agent_label") else agent.id
     )
     task_file = dashboard.write_task_file(
         project_root,
@@ -555,7 +563,9 @@ async def _dispatch_bootstrap_command(
     tmux = app_ctx.tmux
     agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
     worker_no = resolve_worker_number_from_slot(
-        app_ctx.settings, agent.window_index, agent.pane_index,
+        app_ctx.settings,
+        agent.window_index,
+        agent.pane_index,
     )
     worker_model_default = profile_settings.get("worker_model")
     worker_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
@@ -570,9 +580,7 @@ async def _dispatch_bootstrap_command(
         project_root=str(project_root),
         model=worker_model,
         role="worker",
-        role_template_path=str(
-            get_role_template_path("worker", enable_git=agent_enable_git)
-        ),
+        role_template_path=str(get_role_template_path("worker", enable_git=agent_enable_git)),
         thinking_tokens=thinking_tokens,
         reasoning_effort=reasoning_effort,
     )
@@ -617,7 +625,10 @@ async def _dispatch_followup_command(
         )
         if not changed:
             current_command = await _reset_bootstrap_state_if_shell(
-                app_ctx, agent, tmux, worker_index,
+                app_ctx,
+                agent,
+                tmux,
+                worker_index,
             )
             error = (
                 "failed to change directory before followup dispatch"
@@ -658,7 +669,10 @@ async def _handle_dispatch_failure(
 
     if dispatch_mode == "followup":
         current_command = await _reset_bootstrap_state_if_shell(
-            app_ctx, agent, tmux, worker_index,
+            app_ctx,
+            agent,
+            tmux,
+            worker_index,
         )
         if (current_command or "").strip().lower() in _SHELL_COMMANDS:
             logger.info(
@@ -666,8 +680,13 @@ async def _handle_dispatch_failure(
                 worker_index + 1,
             )
             retry_success, retry_command = await _dispatch_bootstrap_command(
-                app_ctx, agent, task_file, worktree_path, project_root,
-                enable_worktree, profile_settings,
+                app_ctx,
+                agent,
+                task_file,
+                worktree_path,
+                project_root,
+                enable_worktree,
+                profile_settings,
             )
             if retry_success:
                 agent.status = AgentStatus.BUSY
@@ -697,10 +716,16 @@ async def _handle_dispatch_failure(
 
 
 def _record_dispatch_success(
-    app_ctx: AppContext, agent: Agent, dispatch_mode: str,
-    project_root: Path, session_id: str,
-    agent_cli_name: str, worker_model: str | None, thinking_tokens: int,
-    task_id: str, worker_index: int,
+    app_ctx: AppContext,
+    agent: Agent,
+    dispatch_mode: str,
+    project_root: Path,
+    session_id: str,
+    agent_cli_name: str,
+    worker_model: str | None,
+    thinking_tokens: int,
+    task_id: str,
+    worker_index: int,
 ) -> None:
     """dispatch 成功時のエージェント状態更新とコスト記録を行う。"""
     agent.status = AgentStatus.BUSY
@@ -712,8 +737,11 @@ def _record_dispatch_success(
     dashboard.save_markdown_dashboard(project_root, session_id)
     try:
         dashboard.record_api_call(
-            ai_cli=agent_cli_name, model=worker_model,
-            estimated_tokens=thinking_tokens, agent_id=agent.id, task_id=task_id,
+            ai_cli=agent_cli_name,
+            model=worker_model,
+            estimated_tokens=thinking_tokens,
+            agent_id=agent.id,
+            task_id=task_id,
         )
     except Exception as e:
         logger.debug("API コール記録に失敗: %s", e)
@@ -721,9 +749,17 @@ def _record_dispatch_success(
 
 
 async def _send_task_to_worker(
-    app_ctx: AppContext, agent: Agent, task_content: str, task_id: str | None,
-    branch: str, worktree_path: str, session_id: str, worker_index: int,
-    enable_worktree: bool, profile_settings: dict, caller_agent_id: str | None,
+    app_ctx: AppContext,
+    agent: Agent,
+    task_content: str,
+    task_id: str | None,
+    branch: str,
+    worktree_path: str,
+    session_id: str,
+    worker_index: int,
+    enable_worktree: bool,
+    profile_settings: dict,
+    caller_agent_id: str | None,
 ) -> dict[str, Any]:
     """Worker にタスクを送信する。"""
     try:
@@ -732,8 +768,15 @@ async def _send_task_to_worker(
             return _make_dispatch_result(False, dispatch_error="task_id が必要です")
 
         project_root, task_file = _prepare_worker_task_content(
-            app_ctx, agent, task_content, task_id, branch,
-            worktree_path, session_id, enable_worktree, caller_agent_id,
+            app_ctx,
+            agent,
+            task_content,
+            task_id,
+            branch,
+            worktree_path,
+            session_id,
+            enable_worktree,
+            caller_agent_id,
         )
 
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
@@ -741,31 +784,43 @@ async def _send_task_to_worker(
 
         agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
         worker_no = resolve_worker_number_from_slot(
-            app_ctx.settings, agent.window_index, agent.pane_index,
+            app_ctx.settings,
+            agent.window_index,
+            agent.pane_index,
         )
         worker_model = app_ctx.settings.get_worker_model(
-            worker_no, profile_settings.get("worker_model"),
+            worker_no,
+            profile_settings.get("worker_model"),
         )
         thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
         should_bootstrap = not bool(getattr(agent, "ai_bootstrapped", False))
 
         if should_bootstrap:
             success, command_sent = await _dispatch_bootstrap_command(
-                app_ctx, agent, task_file, worktree_path,
-                project_root, enable_worktree, profile_settings,
+                app_ctx,
+                agent,
+                task_file,
+                worktree_path,
+                project_root,
+                enable_worktree,
+                profile_settings,
             )
             dispatch_mode = "bootstrap"
         else:
             dispatch_mode = "followup"
-            success, command_sent, followup_error = (
-                await _dispatch_followup_command(
-                    app_ctx, agent, task_file, worktree_path,
-                    enable_worktree, worker_index, profile_settings,
-                )
+            success, command_sent, followup_error = await _dispatch_followup_command(
+                app_ctx,
+                agent,
+                task_file,
+                worktree_path,
+                enable_worktree,
+                worker_index,
+                profile_settings,
             )
             if followup_error:
                 return _make_dispatch_result(
-                    False, dispatch_mode=dispatch_mode,
+                    False,
+                    dispatch_mode=dispatch_mode,
                     dispatch_error=followup_error,
                     task_file=str(task_file),
                     command_sent=command_sent,
@@ -773,21 +828,36 @@ async def _send_task_to_worker(
 
         if success:
             _record_dispatch_success(
-                app_ctx, agent, dispatch_mode, project_root,
-                session_id, agent_cli_name, worker_model,
-                thinking_tokens, task_id, worker_index,
+                app_ctx,
+                agent,
+                dispatch_mode,
+                project_root,
+                session_id,
+                agent_cli_name,
+                worker_model,
+                thinking_tokens,
+                task_id,
+                worker_index,
             )
             return _make_dispatch_result(
-                True, dispatch_mode=dispatch_mode,
+                True,
+                dispatch_mode=dispatch_mode,
                 task_file=str(task_file),
                 command_sent=command_sent,
             )
 
         return await _handle_dispatch_failure(
-            app_ctx, agent, task_file, worktree_path,
-            project_root, session_id, worker_index,
-            dispatch_mode, command_sent,
-            enable_worktree, profile_settings,
+            app_ctx,
+            agent,
+            task_file,
+            worktree_path,
+            project_root,
+            session_id,
+            worker_index,
+            dispatch_mode,
+            command_sent,
+            enable_worktree,
+            profile_settings,
         )
     except Exception as e:
         logger.warning(f"Worker {worker_index + 1}: タスク送信エラー - {e}")

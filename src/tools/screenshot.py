@@ -116,12 +116,14 @@ def register_tools(mcp: FastMCP) -> None:
         screenshots = []
         for f in files:
             stat = f.stat()
-            screenshots.append({
-                "filename": f.name,
-                "path": str(f),
-                "size_bytes": stat.st_size,
-                "modified_at": stat.st_mtime,
-            })
+            screenshots.append(
+                {
+                    "filename": f.name,
+                    "path": str(f),
+                    "size_bytes": stat.st_size,
+                    "modified_at": stat.st_mtime,
+                }
+            )
 
         return {
             "success": True,
@@ -238,8 +240,7 @@ def register_tools(mcp: FastMCP) -> None:
             return {
                 "success": False,
                 "error": (
-                    "スクリーンショットディレクトリ外への参照は許可されていません: "
-                    f"{latest.name}"
+                    f"スクリーンショットディレクトリ外への参照は許可されていません: {latest.name}"
                 ),
             }
         if latest.is_symlink():

@@ -1,5 +1,6 @@
 """tools/helpers.py のテスト。"""
 
+import fcntl
 import json
 from datetime import datetime
 from pathlib import Path
@@ -197,10 +198,27 @@ class TestCheckToolPermission:
         result = check_tool_permission(app_ctx, "init_tmux_workspace", None)
         assert result is None
 
-    def test_bootstrap_tool_create_agent_allows_none(self, app_ctx):
-        """create_agent は BOOTSTRAP_TOOLS なので None でも許可。"""
+    def test_create_agent_requires_caller(self, app_ctx):
+        """create_agent は caller_agent_id 必須（bootstrap bypass 禁止）。"""
         result = check_tool_permission(app_ctx, "create_agent", None)
-        assert result is None
+        assert result is not None
+        assert result["success"] is False
+        assert "caller_agent_id" in result["error"]
+
+    def test_undefined_tool_is_denied(self, app_ctx):
+        """未定義ツールは fail-close で拒否される。"""
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+        )
+        result = check_tool_permission(app_ctx, "undefined_tool", "owner-001")
+        assert result is not None
+        assert result["success"] is False
+        assert "権限定義が存在しない" in result["error"]
 
     def test_non_bootstrap_tool_requires_caller(self, app_ctx):
         """非 BOOTSTRAP ツールで caller_agent_id=None の場合エラー。"""
@@ -389,8 +407,8 @@ class TestCheckToolPermission:
         assert result["success"] is False
         assert "target_agent_id" in result["error"]
 
-    def test_undefined_tool_allows_all_roles(self, app_ctx):
-        """権限が未定義のツールは全ロール許可。"""
+    def test_undefined_tool_is_denied_fail_close(self, app_ctx):
+        """権限が未定義のツールは fail-close で拒否される。"""
         now = datetime.now()
         app_ctx.agents["test-worker"] = Agent(
             id="test-worker",
@@ -400,7 +418,9 @@ class TestCheckToolPermission:
             last_activity=now,
         )
         result = check_tool_permission(app_ctx, "undefined_tool_xyz", "test-worker")
-        assert result is None
+        assert result is not None
+        assert result["success"] is False
+        assert "権限定義が存在しない" in result["error"]
 
 
 class TestAgentFilePersistence:
@@ -487,15 +507,80 @@ class TestAgentFilePersistence:
         assert added == 1
         assert "persist-agent-001" in persistence_ctx.agents
 
-    def test_sync_agents_does_not_overwrite_existing(self, persistence_ctx, sample_agent):
-        """既存のエージェントを上書きしないことをテスト。"""
-        # メモリにエージェントを追加
-        persistence_ctx.agents["persist-agent-001"] = sample_agent
-        # ファイルにも保存
+    def test_sync_agents_overwrites_existing_when_file_differs(self, persistence_ctx, sample_agent):
+        """既存エージェントがファイル内容で更新されることをテスト。"""
+        stale_agent = sample_agent.model_copy(deep=True)
+        stale_agent.status = AgentStatus.BUSY
+        stale_agent.current_task = "stale-task"
+        persistence_ctx.agents["persist-agent-001"] = stale_agent
+
         save_agent_to_file(persistence_ctx, sample_agent)
-        # sync しても追加数は 0
-        added = sync_agents_from_file(persistence_ctx)
-        assert added == 0
+        synced = sync_agents_from_file(persistence_ctx, force=True)
+
+        assert synced == 1
+        assert persistence_ctx.agents["persist-agent-001"].status == AgentStatus.IDLE.value
+        assert persistence_ctx.agents["persist-agent-001"].current_task is None
+
+    def test_sync_agents_cache_is_scoped_by_session(self, settings, git_repo):
+        """同期TTLキャッシュが session ごとに分離されることをテスト。"""
+        from src.tools.helpers_persistence import reset_sync_cache
+
+        reset_sync_cache()
+
+        now = datetime.now()
+        tmux = TmuxManager(settings)
+        ai_cli = AiCliManager(settings)
+        ctx_a = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            project_root=str(git_repo),
+            session_id="session-a",
+        )
+        ctx_b = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            project_root=str(git_repo),
+            session_id="session-b",
+        )
+        agent_a = Agent(
+            id="persist-agent-a",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+            working_dir="/tmp/test-a",
+        )
+        agent_b = Agent(
+            id="persist-agent-b",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            created_at=now,
+            last_activity=now,
+            working_dir="/tmp/test-b",
+        )
+
+        assert save_agent_to_file(ctx_a, agent_a) is True
+        assert save_agent_to_file(ctx_b, agent_b) is True
+
+        synced_a = sync_agents_from_file(ctx_a)
+        synced_b = sync_agents_from_file(ctx_b)
+
+        assert synced_a == 1
+        assert synced_b == 1
+        assert "persist-agent-a" in ctx_a.agents
+        assert "persist-agent-b" in ctx_b.agents
+
+    def test_save_agent_to_file_uses_agents_file_lock(self, persistence_ctx, sample_agent):
+        """save 時に agents.json 更新ロックを取得することをテスト。"""
+        with patch("src.tools.helpers_persistence.fcntl.flock") as mock_flock:
+            result = save_agent_to_file(persistence_ctx, sample_agent)
+
+        assert result is True
+        lock_modes = [c.args[1] for c in mock_flock.call_args_list]
+        assert fcntl.LOCK_EX in lock_modes
+        assert fcntl.LOCK_UN in lock_modes
 
     def test_remove_agent_from_file(self, persistence_ctx, sample_agent):
         """エージェントをファイルから削除できることをテスト。"""
@@ -512,6 +597,18 @@ class TestAgentFilePersistence:
         result = remove_agent_from_file(persistence_ctx, "nonexistent-id")
         assert result is False
 
+    def test_remove_agent_from_file_uses_agents_file_lock(self, persistence_ctx, sample_agent):
+        """remove 時に agents.json 更新ロックを取得することをテスト。"""
+        save_agent_to_file(persistence_ctx, sample_agent)
+
+        with patch("src.tools.helpers_persistence.fcntl.flock") as mock_flock:
+            result = remove_agent_from_file(persistence_ctx, "persist-agent-001")
+
+        assert result is True
+        lock_modes = [c.args[1] for c in mock_flock.call_args_list]
+        assert fcntl.LOCK_EX in lock_modes
+        assert fcntl.LOCK_UN in lock_modes
+
 
 class TestHelpersImportCompat:
     """helpers.py 分割後の import 互換性テスト。
@@ -522,6 +619,7 @@ class TestHelpersImportCompat:
     def test_git_helpers_reexport(self):
         """helpers_git のシンボルが helpers から import 可能。"""
         from src.tools.helpers import resolve_main_repo_root
+
         assert callable(resolve_main_repo_root)
 
     def test_registry_helpers_reexport(self):
@@ -538,6 +636,7 @@ class TestHelpersImportCompat:
             remove_agents_by_owner,
             save_agent_to_registry,
         )
+
         assert callable(save_agent_to_registry)
         assert callable(get_project_root_from_registry)
         assert callable(get_session_id_from_registry)
@@ -557,6 +656,7 @@ class TestHelpersImportCompat:
             save_agent_to_file,
             sync_agents_from_file,
         )
+
         assert callable(save_agent_to_file)
         assert callable(load_agents_from_file)
         assert callable(sync_agents_from_file)
@@ -576,6 +676,7 @@ class TestHelpersImportCompat:
             get_worktree_manager,
             search_memory_context,
         )
+
         assert callable(get_worktree_manager)
         assert callable(get_gtrconfig_manager)
         assert callable(ensure_ipc_manager)
@@ -593,6 +694,7 @@ class TestHelpersImportCompat:
         from src.tools.helpers_managers import ensure_ipc_manager
         from src.tools.helpers_persistence import save_agent_to_file
         from src.tools.helpers_registry import save_agent_to_registry
+
         assert callable(resolve_main_repo_root)
         assert callable(save_agent_to_registry)
         assert callable(save_agent_to_file)
@@ -608,6 +710,7 @@ class TestHelpersImportCompat:
             get_agent_role,
             resolve_project_root,
         )
+
         assert callable(check_tool_permission)
         assert callable(resolve_project_root)
         assert callable(ensure_project_root_from_caller)
@@ -735,9 +838,7 @@ class TestEnsureDashboardManager:
         manager = ensure_dashboard_manager(app_ctx)
 
         assert manager.workspace_id == "new-session"
-        assert str(manager.dashboard_dir).endswith(
-            ".multi-agent-mcp/new-session/dashboard"
-        )
+        assert str(manager.dashboard_dir).endswith(".multi-agent-mcp/new-session/dashboard")
         assert app_ctx.workspace_id == "new-session"
 
 
@@ -768,10 +869,12 @@ class TestCodexPromptDetection:
     def test_pending_codex_prompt_detects_prefix_match(self):
         from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
 
-        output = "\n".join([
-            "some logs...",
-            "› [IPC] 新しいメッセージ: task_progress from worker-001",
-        ])
+        output = "\n".join(
+            [
+                "some logs...",
+                "› [IPC] 新しいメッセージ: task_progress from worker-001",
+            ]
+        )
         command = "[IPC] 新しいメッセージ: task_progress from worker-001"
 
         assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is True
@@ -780,11 +883,13 @@ class TestCodexPromptDetection:
         """'tab to queue message' ヒントが表示中は未確定と判定する。"""
         from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
 
-        output = "\n".join([
-            "processed",
-            "›",
-            "tab to queue message",
-        ])
+        output = "\n".join(
+            [
+                "processed",
+                "›",
+                "tab to queue message",
+            ]
+        )
         command = "[IPC] 新しいメッセージ: task_progress from worker-001"
 
         # "tab to queue message" はCodexが入力バッファにテキストがある状態を示す
@@ -794,10 +899,12 @@ class TestCodexPromptDetection:
         """入力確定後（プロンプト復帰・ヒントなし）は False を返す。"""
         from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
 
-        output = "\n".join([
-            "processed",
-            "›",
-        ])
+        output = "\n".join(
+            [
+                "processed",
+                "›",
+            ]
+        )
         command = "[IPC] 新しいメッセージ: task_progress from worker-001"
 
         assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is False
@@ -875,3 +982,60 @@ class TestCodexPromptConfirmation:
             call("send-keys", "-t", "main:0.1", "C-c"),
         ]
         manager._send_enter_key.assert_not_awaited()
+
+
+class TestTmuxRateLimit:
+    """TmuxWorkspaceMixin のレート制御送信テスト。"""
+
+    from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin as _TmuxWorkspaceMixin
+
+    class _DummyTmux(_TmuxWorkspaceMixin):
+        def __init__(self, cooldown: float = 1.0):
+            self.settings = SimpleNamespace(send_cooldown_seconds=cooldown)
+
+    @pytest.mark.asyncio
+    async def test_send_with_rate_limit_waits_when_cooldown_remaining(self):
+        """直近送信からクールダウン未満なら待機してから送信する。"""
+        manager = self._DummyTmux(cooldown=1.0)
+        manager._last_send_at = 10.0
+        manager.send_and_confirm_to_pane = AsyncMock(return_value=True)
+
+        sleep_mock = AsyncMock()
+        with patch(
+            "src.managers.tmux_workspace_mixin.time.monotonic",
+            side_effect=[10.2, 11.0],
+        ), patch("src.managers.tmux_workspace_mixin.asyncio.sleep", new=sleep_mock):
+            success = await manager.send_with_rate_limit_to_pane(
+                session="main",
+                window=0,
+                pane=1,
+                command="echo test",
+            )
+
+        assert success is True
+        sleep_mock.assert_awaited_once()
+        assert abs(sleep_mock.await_args.args[0] - 0.8) < 1e-9
+        manager.send_and_confirm_to_pane.assert_awaited_once()
+        assert manager._last_send_at == 11.0
+
+    @pytest.mark.asyncio
+    async def test_send_with_rate_limit_skips_wait_without_previous_send(self):
+        """初回送信時は待機せず即時送信する。"""
+        manager = self._DummyTmux(cooldown=1.0)
+        manager.send_and_confirm_to_pane = AsyncMock(return_value=True)
+
+        sleep_mock = AsyncMock()
+        with patch(
+            "src.managers.tmux_workspace_mixin.time.monotonic",
+            side_effect=[20.0, 20.1],
+        ), patch("src.managers.tmux_workspace_mixin.asyncio.sleep", new=sleep_mock):
+            success = await manager.send_with_rate_limit_to_pane(
+                session="main",
+                window=0,
+                pane=1,
+                command="echo first",
+            )
+
+        assert success is True
+        sleep_mock.assert_not_awaited()
+        manager.send_and_confirm_to_pane.assert_awaited_once()

@@ -56,10 +56,10 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
     if dashboard:
         tasks = dashboard.list_tasks()
         for task in tasks:
-            if (
-                task.assigned_agent_id == agent_id
-                and task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED]
-            ):
+            if task.assigned_agent_id == agent_id and task.status not in [
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+            ]:
                 reassigned_tasks.append(task)
 
     if not old_branch:
@@ -94,11 +94,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
             "message": f"エージェント {agent_id} の復旧は {status} で終了しました",
         }
 
-    if (
-        old_session_name is not None
-        and old_window_index is not None
-        and old_pane_index is not None
-    ):
+    if old_session_name is not None and old_window_index is not None and old_pane_index is not None:
         try:
             window_name = tmux._get_window_name(old_window_index)
             target = f"{old_session_name}:{window_name}.{old_pane_index}"
@@ -158,11 +154,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
     new_agent_id = agent_id
     agents.pop(agent_id, None)
     tmux_session = None
-    if (
-        old_session_name is not None
-        and old_window_index is not None
-        and old_pane_index is not None
-    ):
+    if old_session_name is not None and old_window_index is not None and old_pane_index is not None:
         tmux_session = f"{old_session_name}:{old_window_index}.{old_pane_index}"
     new_agent = Agent(
         id=new_agent_id,
@@ -222,8 +214,11 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
             except Exception as e:
                 logger.warning(f"タスク再割り当てに失敗: {e}")
 
+    task_ids = [t.id for t in reassigned_tasks if t.id]
+    notification_sent = False
+
     # Admin に復旧完了通知を送信（タスク再送信が必要であることを伝える）
-    if reassigned_tasks:
+    if task_ids:
         try:
             from src.tools.helpers import ensure_ipc_manager, find_agents_by_role
 
@@ -231,7 +226,6 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
             from src.models.message import MessagePriority, MessageType
 
             admin_ids = find_agents_by_role(app_ctx, "admin")
-            task_ids = [t.id for t in reassigned_tasks if t.id]
             notification_content = (
                 f"Worker {agent_id} を復旧しました（新ID: {new_agent_id}）。\n"
                 f"以下のタスクの再送信が必要です: {', '.join(task_ids)}\n"
@@ -253,6 +247,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                         "worktree_path": new_worktree_path or old_working_dir,
                     },
                 )
+            notification_sent = True
             logger.info(
                 "full_recovery 完了通知を Admin に送信: tasks=%s",
                 task_ids,
@@ -260,16 +255,30 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         except Exception as e:
             logger.warning("full_recovery 完了通知の送信に失敗: %s", e)
 
+    recovery_status = "recovered"
+    message = (
+        f"エージェント {agent_id} を {new_agent_id} として"
+        f"復旧しました（タスク: {len(reassigned_tasks)} 件再割り当て）"
+    )
+    if task_ids:
+        recovery_status = "resume_pending"
+        message = (
+            f"エージェント {agent_id} を {new_agent_id} として復旧しましたが、"
+            f"タスク再開待ちです（再送信対象: {len(task_ids)} 件）"
+        )
+
     return {
         "success": True,
+        "recovery_status": recovery_status,
         "old_agent_id": agent_id,
         "new_agent_id": new_agent_id,
         "new_worktree_path": new_worktree_path or old_working_dir,
         "reassigned_tasks": [t.id for t in reassigned_tasks],
-        "message": (
-            f"エージェント {agent_id} を {new_agent_id} として"
-            f"復旧しました（タスク: {len(reassigned_tasks)} 件再割り当て）"
-        ),
+        "resume_required": bool(task_ids),
+        "resume_confirmed": not bool(task_ids),
+        "resume_required_task_ids": task_ids,
+        "resume_notification_sent": notification_sent,
+        "message": message,
     }
 
 

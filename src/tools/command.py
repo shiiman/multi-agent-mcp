@@ -1,6 +1,7 @@
 """コマンド実行ツール。"""
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,47 @@ from src.tools.task_templates import generate_admin_task
 
 logger = logging.getLogger(__name__)
 
+_DANGEROUS_COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(^|\s)rm\s+-rf\b", re.IGNORECASE), "rm -rf"),
+    (re.compile(r"(^|\s)(shutdown|reboot|poweroff|halt)\b", re.IGNORECASE), "power operation"),
+    (re.compile(r"(^|\s)mkfs(\.| )", re.IGNORECASE), "filesystem format"),
+    (re.compile(r"(^|\s)dd\s+if=", re.IGNORECASE), "raw disk write"),
+    (re.compile(r":\s*\(\)\s*\{\s*:\s*\|\s*:\s*;\s*\}", re.IGNORECASE), "fork bomb"),
+]
+
+
+def _detect_dangerous_command_reason(command: str) -> str | None:
+    """危険コマンドに該当する理由を返す。"""
+    normalized = command.strip()
+    for pattern, reason in _DANGEROUS_COMMAND_PATTERNS:
+        if pattern.search(normalized):
+            return reason
+    return None
+
+
+def _audit_command_guard(
+    *,
+    tool_name: str,
+    caller_agent_id: str | None,
+    command: str,
+    reason: str,
+    allowed: bool,
+    target: str | None = None,
+    role_filter: str | None = None,
+) -> None:
+    """危険コマンド判定の監査ログを出力する。"""
+    action = "allowed" if allowed else "blocked"
+    payload = {
+        "tool": tool_name,
+        "action": action,
+        "caller_agent_id": caller_agent_id,
+        "target": target,
+        "role_filter": role_filter,
+        "reason": reason,
+        "command": command,
+    }
+    logger.warning("command_guard=%s", payload)
+
 
 def register_tools(mcp: FastMCP) -> None:
     """コマンド実行ツールを登録する。"""
@@ -44,6 +86,7 @@ def register_tools(mcp: FastMCP) -> None:
     async def send_command(
         agent_id: str,
         command: str,
+        allow_dangerous: bool = False,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -54,6 +97,7 @@ def register_tools(mcp: FastMCP) -> None:
         Args:
             agent_id: 対象エージェントID
             command: 実行するコマンド
+            allow_dangerous: 危険判定コマンドを明示許可するか
             caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
@@ -82,6 +126,35 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
             }
+
+        dangerous_reason = _detect_dangerous_command_reason(command)
+        if dangerous_reason and not allow_dangerous:
+            _audit_command_guard(
+                tool_name="send_command",
+                caller_agent_id=caller_agent_id,
+                command=command,
+                reason=dangerous_reason,
+                allowed=False,
+                target=agent_id,
+            )
+            return {
+                "success": False,
+                "agent_id": agent_id,
+                "command": command,
+                "error": (
+                    "危険なコマンドをブロックしました。"
+                    f" reason={dangerous_reason}, allow_dangerous=True で明示許可してください。"
+                ),
+            }
+        if dangerous_reason:
+            _audit_command_guard(
+                tool_name="send_command",
+                caller_agent_id=caller_agent_id,
+                command=command,
+                reason=dangerous_reason,
+                allowed=True,
+                target=agent_id,
+            )
 
         agent_cli_name = (
             agent.ai_cli.value
@@ -207,16 +280,20 @@ def register_tools(mcp: FastMCP) -> None:
         return resolved
 
     async def _prepare_worker_worktree(
-        app_ctx, agent, project_root, branch_name, worker_no, effective_task_id,
+        app_ctx,
+        agent,
+        project_root,
+        branch_name,
+        worker_no,
+        effective_task_id,
     ):
         """Worker 用の worktree を準備する。"""
         worktree_manager = get_worktree_manager(app_ctx, str(project_root))
         base_branch = await worktree_manager.get_current_branch(str(project_root))
         if not base_branch:
             base_branch = "main"
-        generated_branch = (
-            branch_name
-            or build_worker_task_branch(base_branch, worker_no, effective_task_id)
+        generated_branch = branch_name or build_worker_task_branch(
+            base_branch, worker_no, effective_task_id
         )
         wt_path, wt_error = await _create_worktree_for_worker(
             app_ctx=app_ctx,
@@ -228,12 +305,18 @@ def register_tools(mcp: FastMCP) -> None:
         return wt_path, wt_error, generated_branch
 
     def _assign_task_to_dashboard(
-        dashboard, effective_task_id, agent_id, dispatch_branch, dispatch_worktree_path, enable_wt,
+        dashboard,
+        effective_task_id,
+        agent_id,
+        dispatch_branch,
+        dispatch_worktree_path,
+        enable_wt,
     ) -> dict | None:
         """dashboard にタスクを割り当てる。失敗時はエラー dict を返す。"""
         try:
             assigned, _ = dashboard.assign_task(
-                task_id=effective_task_id, agent_id=agent_id,
+                task_id=effective_task_id,
+                agent_id=agent_id,
                 branch=dispatch_branch or None,
                 worktree_path=dispatch_worktree_path if enable_wt else None,
             )
@@ -252,8 +335,16 @@ def register_tools(mcp: FastMCP) -> None:
         return None
 
     async def _send_task_to_worker_via_command(
-        app_ctx, agent, agent_id, task_content, session_id,
-        auto_enhance, branch_name, project_root, profile_settings, caller_agent_id,
+        app_ctx,
+        agent,
+        agent_id,
+        task_content,
+        session_id,
+        auto_enhance,
+        branch_name,
+        project_root,
+        profile_settings,
+        caller_agent_id,
     ) -> dict[str, Any]:
         """Worker へのタスク送信処理。"""
         dashboard = ensure_dashboard_manager(app_ctx)
@@ -265,14 +356,19 @@ def register_tools(mcp: FastMCP) -> None:
 
         try:
             worker_no = resolve_worker_number_from_slot(
-                app_ctx.settings, agent.window_index, agent.pane_index,
+                app_ctx.settings,
+                agent.window_index,
+                agent.pane_index,
             )
         except Exception as e:
             logger.debug("Worker 番号の解決に失敗: %s", e)
             worker_no = 1
 
         effective_task_id, selected_task = await _resolve_worker_task_id(
-            app_ctx, agent, agent_id, dashboard,
+            app_ctx,
+            agent,
+            agent_id,
+            dashboard,
         )
         if not effective_task_id:
             return {
@@ -287,7 +383,12 @@ def register_tools(mcp: FastMCP) -> None:
 
         if enable_wt:
             wt_path, wt_error, generated_branch = await _prepare_worker_worktree(
-                app_ctx, agent, project_root, branch_name, worker_no, effective_task_id,
+                app_ctx,
+                agent,
+                project_root,
+                branch_name,
+                worker_no,
+                effective_task_id,
             )
             if wt_error or not wt_path:
                 return {"success": False, "error": wt_error or "worktree 作成に失敗しました"}
@@ -296,8 +397,12 @@ def register_tools(mcp: FastMCP) -> None:
             agent.working_dir = wt_path
 
         assign_err = _assign_task_to_dashboard(
-            dashboard, effective_task_id, agent_id,
-            dispatch_branch, dispatch_wt, enable_wt,
+            dashboard,
+            effective_task_id,
+            agent_id,
+            dispatch_branch,
+            dispatch_wt,
+            enable_wt,
         )
         if assign_err:
             return assign_err
@@ -310,28 +415,46 @@ def register_tools(mcp: FastMCP) -> None:
         dashboard.update_agent_summary(agent)
 
         send_result = await _send_task_to_worker(
-            app_ctx=app_ctx, agent=agent, task_content=task_content,
-            task_id=effective_task_id, branch=dispatch_branch,
-            worktree_path=dispatch_wt, session_id=session_id,
+            app_ctx=app_ctx,
+            agent=agent,
+            task_content=task_content,
+            task_id=effective_task_id,
+            branch=dispatch_branch,
+            worktree_path=dispatch_wt,
+            session_id=session_id,
             worker_index=max(worker_no - 1, 0),
-            enable_worktree=enable_wt, profile_settings=profile_settings,
+            enable_worktree=enable_wt,
+            profile_settings=profile_settings,
             caller_agent_id=caller_agent_id,
         )
         ok = bool(send_result.get("task_sent"))
         return {
-            "success": ok, "agent_id": agent_id, "agent_role": agent.role,
-            "session_id": session_id, "task_file": send_result.get("task_file"),
-            "command_sent": send_result.get("command_sent"), "auto_enhanced": auto_enhance,
+            "success": ok,
+            "agent_id": agent_id,
+            "agent_role": agent.role,
+            "session_id": session_id,
+            "task_file": send_result.get("task_file"),
+            "command_sent": send_result.get("command_sent"),
+            "auto_enhanced": auto_enhance,
             "dispatch_mode": send_result.get("dispatch_mode", "none"),
-            "dispatch_error": send_result.get("dispatch_error"), "assignment_error": None,
+            "dispatch_error": send_result.get("dispatch_error"),
+            "assignment_error": None,
             "branch_name": dispatch_branch or None,
             "worktree_path": dispatch_wt if enable_wt else None,
             "message": "タスクを送信しました" if ok else "タスク送信に失敗しました",
         }
 
     async def _send_task_to_admin_via_command(
-        app_ctx, agent, agent_id, final_task_content, session_id,
-        auto_enhance, branch_name, project_root, profile_settings, agent_enable_git,
+        app_ctx,
+        agent,
+        agent_id,
+        final_task_content,
+        session_id,
+        auto_enhance,
+        branch_name,
+        project_root,
+        profile_settings,
+        agent_enable_git,
     ) -> dict[str, Any]:
         """Admin へのタスク送信処理。"""
         tmux = app_ctx.tmux
@@ -341,7 +464,11 @@ def register_tools(mcp: FastMCP) -> None:
         else:
             agent_label = agent.id
         task_file = dashboard.write_task_file(
-            project_root, session_id, session_id, agent_label, final_task_content,
+            project_root,
+            session_id,
+            session_id,
+            agent_label,
+            final_task_content,
         )
 
         agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
@@ -373,8 +500,11 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         success = await tmux.send_with_rate_limit_to_pane(
-            agent.session_name, agent.window_index, agent.pane_index,
-            read_command, confirm_codex_prompt=str(agent_cli).lower() == "codex",
+            agent.session_name,
+            agent.window_index,
+            agent.pane_index,
+            read_command,
+            confirm_codex_prompt=str(agent_cli).lower() == "codex",
         )
         if success:
             agent.status = AgentStatus.BUSY
@@ -384,9 +514,11 @@ def register_tools(mcp: FastMCP) -> None:
             dashboard.save_markdown_dashboard(project_root, session_id)
             try:
                 dashboard.record_api_call(
-                    ai_cli=agent_cli, model=agent_model,
+                    ai_cli=agent_cli,
+                    model=agent_model,
                     estimated_tokens=thinking_tokens,
-                    agent_id=agent_id, task_id=session_id,
+                    agent_id=agent_id,
+                    task_id=session_id,
                 )
             except Exception as e:
                 logger.debug(f"コスト記録をスキップ: {e}")
@@ -406,8 +538,14 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     def _enhance_admin_task(
-        app_ctx, agent_id, task_content, branch_name,
-        session_id, project_root, effective_worker_count, agent_enable_git,
+        app_ctx,
+        agent_id,
+        task_content,
+        branch_name,
+        session_id,
+        project_root,
+        effective_worker_count,
+        agent_enable_git,
     ):
         """Admin 用タスク内容を自動拡張する。"""
         memory_context = search_memory_context(app_ctx, task_content)
@@ -416,7 +554,8 @@ def register_tools(mcp: FastMCP) -> None:
         settings_for_agent = app_ctx.settings.model_copy(deep=True)
         settings_for_agent.enable_git = agent_enable_git
         return generate_admin_task(
-            session_id=session_id, agent_id=agent_id,
+            session_id=session_id,
+            agent_id=agent_id,
             plan_content=task_content,
             branch_name=actual_branch,
             worker_count=effective_worker_count,
@@ -429,9 +568,13 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def send_task(
-        agent_id: str, task_content: str, session_id: str,
-        auto_enhance: bool = True, branch_name: str | None = None,
-        caller_agent_id: str | None = None, ctx: Context = None,
+        agent_id: str,
+        task_content: str,
+        session_id: str,
+        auto_enhance: bool = True,
+        branch_name: str | None = None,
+        caller_agent_id: str | None = None,
+        ctx: Context = None,
     ) -> dict[str, Any]:
         """タスク指示をファイル経由でエージェントに送信する。※ Owner と Admin のみ使用可能。
 
@@ -514,23 +657,45 @@ def register_tools(mcp: FastMCP) -> None:
 
         if not is_admin:
             return await _send_task_to_worker_via_command(
-                app_ctx, agent, agent_id, task_content, effective_session_id,
-                auto_enhance, branch_name, project_root, profile_settings, caller_agent_id,
+                app_ctx,
+                agent,
+                agent_id,
+                task_content,
+                effective_session_id,
+                auto_enhance,
+                branch_name,
+                project_root,
+                profile_settings,
+                caller_agent_id,
             )
 
         final_task_content = task_content
         if auto_enhance:
             try:
                 final_task_content = _enhance_admin_task(
-                app_ctx, agent_id, task_content, branch_name, effective_session_id,
-                project_root, profile_settings["max_workers"], agent_enable_git,
+                    app_ctx,
+                    agent_id,
+                    task_content,
+                    branch_name,
+                    effective_session_id,
+                    project_root,
+                    profile_settings["max_workers"],
+                    agent_enable_git,
                 )
             except InvalidConfigError as e:
                 return {"success": False, "error": str(e)}
 
         result = await _send_task_to_admin_via_command(
-            app_ctx, agent, agent_id, final_task_content, effective_session_id,
-            auto_enhance, branch_name, project_root, profile_settings, agent_enable_git,
+            app_ctx,
+            agent,
+            agent_id,
+            final_task_content,
+            effective_session_id,
+            auto_enhance,
+            branch_name,
+            project_root,
+            profile_settings,
+            agent_enable_git,
         )
 
         caller = app_ctx.agents.get(caller_agent_id) if caller_agent_id else None
@@ -599,9 +764,7 @@ def register_tools(mcp: FastMCP) -> None:
             "session": agent.session_name,
             "pane": f"{agent.window_index}.{agent.pane_index}",
             "message": (
-                "ターミナルでセッションを開きました"
-                if success
-                else "セッションを開けませんでした"
+                "ターミナルでセッションを開きました" if success else "セッションを開けませんでした"
             ),
         }
 
@@ -609,6 +772,7 @@ def register_tools(mcp: FastMCP) -> None:
     async def broadcast_command(
         command: str,
         role: str | None = None,
+        allow_dangerous: bool = False,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -619,6 +783,7 @@ def register_tools(mcp: FastMCP) -> None:
         Args:
             command: 実行するコマンド
             role: 対象の役割（省略時は全員、有効: owner/admin/worker）
+            allow_dangerous: 危険判定コマンドを明示許可するか
             caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
@@ -643,6 +808,35 @@ def register_tools(mcp: FastMCP) -> None:
                     "success": False,
                     "error": f"無効な役割です: {role}（有効: owner, admin, worker）",
                 }
+
+        dangerous_reason = _detect_dangerous_command_reason(command)
+        if dangerous_reason and not allow_dangerous:
+            _audit_command_guard(
+                tool_name="broadcast_command",
+                caller_agent_id=caller_agent_id,
+                command=command,
+                reason=dangerous_reason,
+                allowed=False,
+                role_filter=role,
+            )
+            return {
+                "success": False,
+                "command": command,
+                "role_filter": role,
+                "error": (
+                    "危険なコマンドをブロックしました。"
+                    f" reason={dangerous_reason}, allow_dangerous=True で明示許可してください。"
+                ),
+            }
+        if dangerous_reason:
+            _audit_command_guard(
+                tool_name="broadcast_command",
+                caller_agent_id=caller_agent_id,
+                command=command,
+                reason=dangerous_reason,
+                allowed=True,
+                role_filter=role,
+            )
 
         results: dict[str, bool] = {}
         now = datetime.now()
