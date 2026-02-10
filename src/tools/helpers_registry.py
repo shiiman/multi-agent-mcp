@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # ========== グローバルレジストリ ==========
 
 
+class InvalidConfigError(ValueError):
+    """config.json が破損していることを示す例外。"""
+
+
 def _get_global_mcp_dir() -> Path:
     """グローバルな MCP ディレクトリを取得する。"""
     return Path.home() / ".multi-agent-mcp"
@@ -173,14 +177,19 @@ def get_project_root_from_config(
 # ========== config.json ヘルパー ==========
 
 
-def _get_from_config(key: str, working_dir: str | None = None) -> object | None:
+def _get_from_config(
+    key: str,
+    working_dir: str | None = None,
+    strict: bool = False,
+) -> object | None:
     """config.json から指定キーの値を取得する。
 
-    working_dir → worktree のメインリポジトリ → カレントディレクトリの順で探索する。
+    working_dir → worktree のメインリポジトリの順で探索する。
 
     Args:
         key: 取得するキー名
         working_dir: 探索開始ディレクトリ（オプション）
+        strict: True の場合、config.json 破損時に例外を送出する
 
     Returns:
         値が見つかった場合はその値、見つからない場合は None
@@ -188,16 +197,16 @@ def _get_from_config(key: str, working_dir: str | None = None) -> object | None:
     search_dirs: list[Path] = []
 
     if working_dir:
-        search_dirs.append(Path(working_dir))
+        resolved_working_dir = Path(working_dir).expanduser().resolve()
+        search_dirs.append(resolved_working_dir)
         try:
             main_repo = resolve_main_repo_root(working_dir)
-            if main_repo != working_dir:
-                search_dirs.append(Path(main_repo))
+            resolved_main_repo = Path(main_repo).expanduser().resolve()
+            if resolved_main_repo != resolved_working_dir:
+                search_dirs.append(resolved_main_repo)
         except ValueError:
             # 非gitディレクトリの場合は working_dir のみ探索する
             pass
-
-    search_dirs.append(Path.cwd())
 
     for base_dir in search_dirs:
         config_file = base_dir / get_mcp_dir() / "config.json"
@@ -210,51 +219,67 @@ def _get_from_config(key: str, working_dir: str | None = None) -> object | None:
                     logger.debug(f"config.json から {key} を取得: {value}")
                     return value
             except (OSError, json.JSONDecodeError) as e:
+                if strict:
+                    raise InvalidConfigError(
+                        f"invalid_config: {config_file} の読み込みに失敗しました: {e}"
+                    ) from e
                 logger.warning(f"config.json の読み込みに失敗: {e}")
 
     return None
 
 
-def get_mcp_tool_prefix_from_config(working_dir: str | None = None) -> str:
+def get_mcp_tool_prefix_from_config(
+    working_dir: str | None = None,
+    strict: bool = False,
+) -> str:
     """config.json から mcp_tool_prefix を取得する。
 
     Args:
         working_dir: 探索開始ディレクトリ（オプション）
+        strict: True の場合、config.json 破損時に例外を送出する
 
     Returns:
         MCP ツールの完全名プレフィックス
     """
-    value = _get_from_config("mcp_tool_prefix", working_dir)
+    value = _get_from_config("mcp_tool_prefix", working_dir, strict=strict)
     if isinstance(value, str) and value:
         return value
     return "mcp__multi-agent-mcp__"
 
 
-def get_session_id_from_config(working_dir: str | None = None) -> str | None:
+def get_session_id_from_config(
+    working_dir: str | None = None,
+    strict: bool = False,
+) -> str | None:
     """config.json から session_id を取得する。
 
     Args:
         working_dir: 探索開始ディレクトリ（オプション）
+        strict: True の場合、config.json 破損時に例外を送出する
 
     Returns:
         セッションID、見つからない場合は None
     """
-    value = _get_from_config("session_id", working_dir)
+    value = _get_from_config("session_id", working_dir, strict=strict)
     if isinstance(value, str) and value:
         return value
     return None
 
 
-def get_enable_git_from_config(working_dir: str | None = None) -> bool | None:
+def get_enable_git_from_config(
+    working_dir: str | None = None,
+    strict: bool = False,
+) -> bool | None:
     """config.json から enable_git を取得する。
 
     Args:
         working_dir: 探索開始ディレクトリ（オプション）
+        strict: True の場合、config.json 破損時に例外を送出する
 
     Returns:
         enable_git の真偽値、未設定時は None
     """
-    value = _get_from_config("enable_git", working_dir)
+    value = _get_from_config("enable_git", working_dir, strict=strict)
     if value is None:
         return None
     if isinstance(value, bool):

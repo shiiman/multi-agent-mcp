@@ -167,13 +167,13 @@ get_dashboard_summary(caller_agent_id=owner_id)
 |--------|------|
 | `init_tmux_workspace` | tmux ワークスペース初期化・セッション作成 |
 | `create_agent(role="owner")` | Owner エージェント作成（自分自身） |
-| `switch_model_profile` | モデルプロファイル切替 |
 
 #### 初期化フェーズ（caller_agent_id 必要）
 
 | ツール | 用途 |
 |--------|------|
 | `create_agent(role="admin")` | Admin エージェント作成 |
+| `switch_model_profile` | モデルプロファイル切替 |
 
 #### 委譲フェーズ
 

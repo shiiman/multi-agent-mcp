@@ -8,8 +8,10 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import load_effective_settings_for_project
+from src.managers import tmux_shared
 from src.managers.tmux_manager import get_project_name
 from src.tools.helpers import (
+    InvalidConfigError,
     get_enable_git_from_config,
     get_gtrconfig_manager,
     get_worktree_manager,
@@ -265,8 +267,16 @@ def register_tools(mcp: FastMCP) -> None:
             detected_project_root = working_dir_path
             is_git_repo = False
 
-        config_enable_git = get_enable_git_from_config(working_dir_path)
-        project_settings = load_effective_settings_for_project(detected_project_root)
+        try:
+            config_enable_git = get_enable_git_from_config(working_dir_path, strict=True)
+            project_settings = load_effective_settings_for_project(
+                detected_project_root, strict_config=True
+            )
+        except (InvalidConfigError, ValueError) as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
         effective_enable_git = (
             enable_git
             if enable_git is not None
@@ -291,8 +301,38 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx.tmux.settings.enable_git = effective_enable_git
         app_ctx.ai_cli.settings.enable_git = effective_enable_git
 
-        # 既存の tmux セッションが存在するかチェック（重複起動防止）
+        # 旧命名（suffix なし）セッションを新命名（suffix 付き）へ自動移行
         project_name = get_project_name(working_dir, enable_git=effective_enable_git)
+        legacy_project_name = tmux_shared.get_legacy_project_name(
+            working_dir,
+            enable_git=effective_enable_git,
+        )
+        if legacy_project_name and legacy_project_name != project_name:
+            legacy_exists = await tmux.session_exists(legacy_project_name)
+            new_exists = await tmux.session_exists(project_name)
+            if legacy_exists and not new_exists:
+                logger.info(
+                    "旧 tmux セッション名を移行します: %s -> %s",
+                    legacy_project_name,
+                    project_name,
+                )
+                renamed = await tmux.rename_session(legacy_project_name, project_name)
+                if not renamed:
+                    return {
+                        "success": False,
+                        "error": (
+                            "旧 tmux セッション名から新命名への移行に失敗しました: "
+                            f"{legacy_project_name} -> {project_name}"
+                        ),
+                    }
+            elif legacy_exists and new_exists:
+                logger.warning(
+                    "旧/新 tmux セッションが両方存在するため新命名を優先します: old=%s new=%s",
+                    legacy_project_name,
+                    project_name,
+                )
+
+        # 既存の tmux セッションが存在するかチェック（重複起動防止）
         session_exists = await tmux.session_exists(project_name)
         if session_exists:
             # 既存セッションのリカバリ: 古いリソースをクリーンアップして再初期化
@@ -391,12 +431,18 @@ def register_tools(mcp: FastMCP) -> None:
                 logger.warning(f"gtr 設定確認に失敗: {e}")
 
         # MCP ディレクトリと .env ファイルのセットアップ
-        mcp_setup = _setup_mcp_directories(
-            working_dir,
-            settings=project_settings,
-            session_id=session_id,
-            enable_git_override=effective_enable_git,
-        )
+        try:
+            mcp_setup = _setup_mcp_directories(
+                working_dir,
+                settings=project_settings,
+                session_id=session_id,
+                enable_git_override=effective_enable_git,
+            )
+        except ValueError as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
         logger.info(
             f"MCP ディレクトリをセットアップしました: "
             f"作成={mcp_setup['created_dirs']}, env_created={mcp_setup['env_created']}"

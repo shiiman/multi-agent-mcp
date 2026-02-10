@@ -37,9 +37,10 @@ def _normalize_project_root_for_persistence(
     """永続化用の project_root を正規化する。"""
     if not project_root:
         return None
+    resolved_root = str(Path(project_root).expanduser().resolve())
     if not enable_git:
-        return project_root
-    return resolve_main_repo_root(project_root)
+        return resolved_root
+    return resolve_main_repo_root(resolved_root)
 
 
 def reset_sync_cache() -> None:

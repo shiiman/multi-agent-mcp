@@ -88,13 +88,14 @@ MCP_COST_WARNING_THRESHOLD_USD=10.0
 | ---- | ---- |
 | パス | `{project}/.multi-agent-mcp/config.json` |
 | フォーマット | JSON |
-| 用途 | MCP ツール設定（session_id など） |
+| 用途 | MCP ツール設定（`session_id`, `enable_git` など） |
 | 読み込み | 各ツール実行時 |
 | 書き込み | `init_tmux_workspace` で初期作成 |
 
 ```json
 {
   "mcp_tool_prefix": "mcp__multi-agent-mcp__",
+  "enable_git": true,
   "session_id": "issue-123"
 }
 ```

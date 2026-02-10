@@ -1092,6 +1092,63 @@ class TestSendTask:
         assert state["session_id"] == "issue-owner-wait"
 
     @pytest.mark.asyncio
+    async def test_send_task_fails_with_invalid_config(self, command_mock_ctx, git_repo):
+        """config.json 破損時は invalid_config エラーを返す。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        mcp_dir = git_repo / app_ctx.settings.mcp_dir
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        (mcp_dir / "config.json").write_text("{invalid", encoding="utf-8")
+
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="test task",
+            session_id="issue-invalid-config",
+            auto_enhance=False,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "invalid_config" in result["error"]
+
+    @pytest.mark.asyncio
     async def test_send_task_blocked_while_owner_wait_locked(self, command_mock_ctx, git_repo):
         """Owner 待機ロック中に send_task が拒否されることをテスト。"""
         from mcp.server.fastmcp import FastMCP

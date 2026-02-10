@@ -175,7 +175,7 @@ Admin にメッセージを送る際は以下を使用：
 #### 3. 進捗報告
 
 1. Admin に定期的に進捗報告を送信
-2. `update_task_status` で進捗パーセンテージを更新
+2. `report_task_progress` で進捗パーセンテージを更新
 3. ブロッカーは即座に報告
 
 #### 4. タスク完了（必須手順）
@@ -294,7 +294,7 @@ get_role_guide(role="worker")
 
 - [ ] `send_message` で Admin に報告できる
 - [ ] `read_messages` で Admin からの指示を読める
-- [ ] `update_task_status` でタスク進捗を更新できる
+- [ ] `report_task_progress` でタスク進捗を更新できる
 - [ ] `get_task` でタスク詳細を確認できる
 
 ### 4. 状態確認（正データを使用）

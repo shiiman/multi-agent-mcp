@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import re
+import shlex
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -22,6 +24,8 @@ get_project_name = tmux_shared.get_project_name
 
 class TmuxManager(TmuxWorkspaceMixin):
     """tmuxセッションを管理するクラス。"""
+
+    _SESSION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
 
     def __init__(self, settings: "Settings") -> None:
         self.settings = settings
@@ -95,6 +99,13 @@ class TmuxManager(TmuxWorkspaceMixin):
             logger.warning(f"セッション終了エラー（既に終了している可能性）: {stderr}")
         return code == 0
 
+    async def rename_session(self, old_name: str, new_name: str) -> bool:
+        """tmux セッション名を変更する。"""
+        code, _, stderr = await self._run("rename-session", "-t", old_name, new_name)
+        if code != 0:
+            logger.error("セッション名変更エラー: %s", stderr)
+        return code == 0
+
     async def list_sessions(self) -> list[str]:
         code, stdout, _ = await self._run("list-sessions", "-F", "#{session_name}")
         if code != 0:
@@ -139,8 +150,11 @@ class TmuxManager(TmuxWorkspaceMixin):
         session: str,
         terminal: TerminalApp | None = None,
     ) -> bool:
-        session_name = session
-        attach_cmd = f"tmux attach -t {session_name}"
+        session_name = session.strip()
+        if not session_name or not self._SESSION_NAME_PATTERN.fullmatch(session_name):
+            logger.error("無効な tmux セッション名です: %r", session)
+            return False
+        attach_cmd = f"tmux attach -t -- {shlex.quote(session_name)}"
         openers = {
             TerminalApp.GHOSTTY: self._open_in_ghostty,
             TerminalApp.ITERM2: self._open_in_iterm2,
@@ -155,7 +169,6 @@ class TmuxManager(TmuxWorkspaceMixin):
         return False
 
     async def _open_in_ghostty(self, attach_cmd: str) -> bool:
-        import shlex
         import shutil
         from pathlib import Path
 

@@ -18,7 +18,9 @@ from src.tools.agent_helpers import (
 )
 from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 from src.tools.helpers import (
+    InvalidConfigError,
     ensure_dashboard_manager,
+    get_enable_git_from_config,
     get_mcp_tool_prefix_from_config,
     get_worktree_manager,
     mark_owner_waiting_for_admin,
@@ -188,6 +190,16 @@ def register_tools(mcp: FastMCP) -> None:
                 effective_task_id = selected_task.id
         return effective_task_id, selected_task
 
+    def _resolve_agent_enable_git(app_ctx, agent, strict: bool = False) -> bool:
+        """対象エージェント基準の enable_git を解決する。"""
+        config_base = agent.worktree_path or agent.working_dir or app_ctx.project_root
+        if not config_base:
+            return app_ctx.settings.enable_git
+        resolved = get_enable_git_from_config(config_base, strict=strict)
+        if resolved is None:
+            return app_ctx.settings.enable_git
+        return resolved
+
     async def _prepare_worker_worktree(
         app_ctx, agent, project_root, branch_name, worker_no, effective_task_id,
     ):
@@ -312,7 +324,7 @@ def register_tools(mcp: FastMCP) -> None:
 
     async def _send_task_to_admin_via_command(
         app_ctx, agent, agent_id, final_task_content, session_id,
-        auto_enhance, branch_name, project_root, profile_settings,
+        auto_enhance, branch_name, project_root, profile_settings, agent_enable_git,
     ) -> dict[str, Any]:
         """Admin へのタスク送信処理。"""
         tmux = app_ctx.tmux
@@ -339,7 +351,7 @@ def register_tools(mcp: FastMCP) -> None:
                 model=agent_model,
                 role="admin",
                 role_template_path=str(
-                    get_role_template_path("admin", enable_git=app_ctx.settings.enable_git)
+                    get_role_template_path("admin", enable_git=agent_enable_git)
                 ),
                 thinking_tokens=thinking_tokens,
                 reasoning_effort=reasoning_effort,
@@ -387,12 +399,14 @@ def register_tools(mcp: FastMCP) -> None:
 
     def _enhance_admin_task(
         app_ctx, agent_id, task_content, branch_name,
-        session_id, project_root, effective_worker_count,
+        session_id, project_root, effective_worker_count, agent_enable_git,
     ):
         """Admin 用タスク内容を自動拡張する。"""
         memory_context = search_memory_context(app_ctx, task_content)
-        mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
+        mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root), strict=True)
         actual_branch = branch_name or f"feature/{session_id}"
+        settings_for_agent = app_ctx.settings.model_copy(deep=True)
+        settings_for_agent.enable_git = agent_enable_git
         return generate_admin_task(
             session_id=session_id, agent_id=agent_id,
             plan_content=task_content,
@@ -402,7 +416,7 @@ def register_tools(mcp: FastMCP) -> None:
             project_name=project_root.name,
             working_dir=str(project_root),
             mcp_tool_prefix=mcp_prefix,
-            settings=app_ctx.settings,
+            settings=settings_for_agent,
         )
 
     @mcp.tool()
@@ -433,14 +447,18 @@ def register_tools(mcp: FastMCP) -> None:
         agent = agents.get(agent_id)
         if not agent:
             return {"success": False, "error": f"エージェント {agent_id} が見つかりません"}
+        try:
+            agent_enable_git = _resolve_agent_enable_git(app_ctx, agent, strict=True)
+        except InvalidConfigError as e:
+            return {"success": False, "error": str(e)}
 
         if agent.worktree_path:
-            if app_ctx.settings.enable_git:
+            if agent_enable_git:
                 project_root = Path(resolve_main_repo_root(agent.worktree_path))
             else:
                 project_root = Path(agent.worktree_path).expanduser()
         elif agent.working_dir:
-            if app_ctx.settings.enable_git:
+            if agent_enable_git:
                 project_root = Path(resolve_main_repo_root(agent.working_dir))
             else:
                 project_root = Path(agent.working_dir).expanduser()
@@ -460,14 +478,17 @@ def register_tools(mcp: FastMCP) -> None:
 
         final_task_content = task_content
         if auto_enhance:
-            final_task_content = _enhance_admin_task(
+            try:
+                final_task_content = _enhance_admin_task(
                 app_ctx, agent_id, task_content, branch_name, session_id,
-                project_root, profile_settings["max_workers"],
-            )
+                project_root, profile_settings["max_workers"], agent_enable_git,
+                )
+            except InvalidConfigError as e:
+                return {"success": False, "error": str(e)}
 
         result = await _send_task_to_admin_via_command(
             app_ctx, agent, agent_id, final_task_content, session_id,
-            auto_enhance, branch_name, project_root, profile_settings,
+            auto_enhance, branch_name, project_root, profile_settings, agent_enable_git,
         )
 
         caller = app_ctx.agents.get(caller_agent_id) if caller_agent_id else None
