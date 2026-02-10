@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.config.settings import Settings
+from src.config.settings import Settings, TerminalApp
 from src.managers.tmux_manager import TmuxManager
 
 
@@ -67,3 +67,29 @@ class TestTmuxManagerTerminalOpen:
         script = manager._run_exec.await_args.args[2]
         assert "if (count of windows) > 0 then" in script
         assert "tell front window" in script
+
+    @pytest.mark.asyncio
+    async def test_open_session_in_terminal_uses_safe_attach_target(self):
+        """tmux attach は `-t -- <target>` 形式で実行文字列を構築する。"""
+        manager = TmuxManager(Settings())
+        manager._open_in_iterm2 = AsyncMock(return_value=True)
+
+        success = await manager.open_session_in_terminal(
+            "project-abc123", terminal=TerminalApp.ITERM2
+        )
+
+        assert success is True
+        manager._open_in_iterm2.assert_awaited_once_with(
+            "tmux attach -t -- project-abc123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_open_session_in_terminal_rejects_invalid_session_name(self):
+        """不正なセッション名は拒否する。"""
+        manager = TmuxManager(Settings())
+        manager._open_in_ghostty = AsyncMock(return_value=True)
+
+        success = await manager.open_session_in_terminal("bad;rm -rf /")
+
+        assert success is False
+        manager._open_in_ghostty.assert_not_called()

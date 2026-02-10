@@ -20,6 +20,7 @@ from src.tools.helpers import (
     ensure_dashboard_manager,
     ensure_ipc_manager,
     ensure_persona_manager,
+    get_enable_git_from_config,
     get_mcp_tool_prefix_from_config,
     resolve_main_repo_root,
     save_agent_to_file,
@@ -110,6 +111,21 @@ def _resolve_agent_cli_name(agent: Agent, app_ctx: AppContext) -> str:
     if agent.ai_cli:
         return agent.ai_cli.value if hasattr(agent.ai_cli, "value") else str(agent.ai_cli)
     return str(app_ctx.ai_cli.get_default_cli().value)
+
+
+def _resolve_agent_enable_git(
+    app_ctx: AppContext,
+    agent: Agent,
+    strict: bool = False,
+) -> bool:
+    """対象エージェント基準の enable_git を解決する。"""
+    config_base = agent.worktree_path or agent.working_dir or app_ctx.project_root
+    if not config_base:
+        return app_ctx.settings.enable_git
+    resolved = get_enable_git_from_config(config_base, strict=strict)
+    if resolved is None:
+        return app_ctx.settings.enable_git
+    return resolved
 
 
 def _build_change_directory_command(cli_name: str, worktree_path: str) -> str:
@@ -464,7 +480,8 @@ def _prepare_worker_task_content(
     Returns:
         (project_root, task_file)
     """
-    if app_ctx.settings.enable_git:
+    agent_enable_git = _resolve_agent_enable_git(app_ctx, agent, strict=True)
+    if agent_enable_git:
         project_root = Path(resolve_main_repo_root(worktree_path))
     else:
         project_root = Path(worktree_path).expanduser()
@@ -477,7 +494,7 @@ def _prepare_worker_task_content(
     persona = persona_manager.get_optimal_persona(task_content)
 
     # 7セクション構造のタスクを生成
-    mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root))
+    mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root), strict=True)
     final_task_content = generate_7section_task(
         task_id=task_id,
         agent_id=agent.id,
@@ -490,7 +507,7 @@ def _prepare_worker_task_content(
         branch_name=branch,
         admin_id=caller_agent_id,
         mcp_tool_prefix=mcp_prefix,
-        enable_git=app_ctx.settings.enable_git,
+        enable_git=agent_enable_git,
     )
 
     # タスクファイル作成
@@ -530,6 +547,7 @@ async def _dispatch_bootstrap_command(
     thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
     reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
 
+    agent_enable_git = _resolve_agent_enable_git(app_ctx, agent)
     bootstrap_command = app_ctx.ai_cli.build_stdin_command(
         cli=agent_cli_name,
         task_file_path=str(task_file),
@@ -538,7 +556,7 @@ async def _dispatch_bootstrap_command(
         model=worker_model,
         role="worker",
         role_template_path=str(
-            get_role_template_path("worker", enable_git=app_ctx.settings.enable_git)
+            get_role_template_path("worker", enable_git=agent_enable_git)
         ),
         thinking_tokens=thinking_tokens,
         reasoning_effort=reasoning_effort,

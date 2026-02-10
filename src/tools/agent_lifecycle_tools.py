@@ -20,6 +20,8 @@ from src.tools.agent_helpers import (
     resolve_worker_number_from_slot,
 )
 from src.tools.helpers import (
+    InvalidConfigError,
+    get_enable_git_from_config,
     refresh_app_settings,
     require_permission,
     resolve_main_repo_root,
@@ -376,6 +378,15 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "error": f"エージェント {agent_id} に working_dir が設定されていません",
             }
+        try:
+            agent_enable_git = get_enable_git_from_config(working_dir, strict=True)
+        except InvalidConfigError as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
+        if agent_enable_git is None:
+            agent_enable_git = app_ctx.settings.enable_git
 
         # プロンプトの構築
         prompt: str | None = None
@@ -389,7 +400,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 loader = get_template_loader()
                 template_name = get_role_template_name(
                     role_value,
-                    enable_git=app_ctx.settings.enable_git,
+                    enable_git=agent_enable_git,
                 )
                 prompt = loader.load("roles", template_name)
                 prompt_source = f"roles/{template_name}.md"
@@ -456,6 +467,15 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             cli = agent_cli
         else:
             cli = ai_cli_manager.get_default_cli()
+        if not ai_cli_manager.is_available(cli):
+            cli_command = ai_cli_manager.get_command(cli)
+            return {
+                "success": False,
+                "error": (
+                    f"AI CLI '{cli.value}' が利用できません。"
+                    f"コマンド '{cli_command}' が PATH 上に存在するか確認してください。"
+                ),
+            }
 
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
             return {

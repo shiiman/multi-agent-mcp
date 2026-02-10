@@ -4,6 +4,8 @@ import json
 from enum import Enum
 from unittest.mock import patch
 
+import pytest
+
 from src.tools.session_env import (
     _format_env_value,
     _setup_mcp_directories,
@@ -208,3 +210,16 @@ class TestSetupMcpDirectories:
             result = _setup_mcp_directories(str(temp_dir), settings=settings)
 
         assert result["project_root"] == str(temp_dir)
+
+    def test_raises_on_invalid_existing_config(self, temp_dir, settings):
+        """既存 config.json が破損している場合は invalid_config エラーを送出する。"""
+        mcp_dir = temp_dir / settings.mcp_dir
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        (mcp_dir / "config.json").write_text("{invalid", encoding="utf-8")
+
+        with (
+            patch("src.tools.session_env.resolve_main_repo_root", return_value=str(temp_dir)),
+            pytest.raises(ValueError) as exc_info,
+        ):
+            _setup_mcp_directories(str(temp_dir), settings=settings)
+        assert "invalid_config" in str(exc_info.value)

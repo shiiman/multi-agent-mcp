@@ -590,13 +590,17 @@ def load_settings_for_project(project_root: str | os.PathLike[str] | None) -> Se
     return Settings(_env_file=None)
 
 
-def load_effective_settings_for_project(project_root: str | os.PathLike[str] | None) -> Settings:
+def load_effective_settings_for_project(
+    project_root: str | os.PathLike[str] | None,
+    strict_config: bool = False,
+) -> Settings:
     """指定 project_root の有効設定を読み込む。
 
     .env の設定に加えて、config.json の runtime override（enable_git）を適用する。
 
     Args:
         project_root: プロジェクトルートパス
+        strict_config: True の場合、config.json 破損時に例外を送出する
 
     Returns:
         runtime override 適用済み Settings
@@ -615,7 +619,11 @@ def load_effective_settings_for_project(project_root: str | os.PathLike[str] | N
         enable_git = config.get("enable_git")
         if isinstance(enable_git, bool):
             settings.enable_git = enable_git
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        if strict_config:
+            raise ValueError(
+                f"invalid_config: {config_file} の読み込みに失敗しました: {e}"
+            ) from e
         # 設定ファイル破損時は .env 設定を優先して継続
         pass
 

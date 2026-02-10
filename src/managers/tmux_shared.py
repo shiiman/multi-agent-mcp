@@ -15,16 +15,49 @@ def escape_applescript(value: str) -> str:
 
 
 def get_project_name(working_dir: str, enable_git: bool = True) -> str:
-    """作業ディレクトリからプロジェクト名を取得する。"""
+    """作業ディレクトリから tmux セッション名を取得する。"""
     import hashlib
     import subprocess
     from pathlib import Path
 
-    normalized_dir = str(Path(working_dir).expanduser().resolve())
+    normalized_dir = Path(working_dir).expanduser().resolve()
+    hash_source = str(normalized_dir)
+
     if not enable_git:
-        base = Path(normalized_dir).name or "workspace"
-        short_hash = hashlib.sha1(normalized_dir.encode("utf-8")).hexdigest()[:6]
+        base = normalized_dir.name or "workspace"
+        short_hash = hashlib.sha1(hash_source.encode("utf-8")).hexdigest()[:6]
         return f"{base}-{short_hash}"
+
+    result = subprocess.run(
+        ["git", "-C", working_dir, "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"{working_dir} は git リポジトリではありません")
+
+    git_common_dir = Path(result.stdout.strip())
+    if not git_common_dir.is_absolute():
+        git_common_dir = (Path(working_dir) / git_common_dir).resolve()
+    repo_root = git_common_dir.parent.resolve()
+    base = repo_root.name or "workspace"
+    hash_source = str(repo_root)
+    short_hash = hashlib.sha1(hash_source.encode("utf-8")).hexdigest()[:6]
+    return f"{base}-{short_hash}"
+
+
+def get_legacy_project_name(working_dir: str, enable_git: bool = True) -> str | None:
+    """旧仕様の tmux セッション名を返す。
+
+    旧仕様は git モード時のみ suffix なし（repo basename）を採用していた。
+    no-git は既に suffix 付きのため移行対象を持たない。
+    """
+    import subprocess
+    from pathlib import Path
+
+    if not enable_git:
+        return None
 
     result = subprocess.run(
         ["git", "-C", working_dir, "rev-parse", "--git-common-dir"],

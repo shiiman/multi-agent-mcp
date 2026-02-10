@@ -123,7 +123,7 @@ class TestGetMcpToolPrefixFromConfig:
         config_file = mcp_dir / "config.json"
         config_file.write_text(json.dumps({"mcp_tool_prefix": "mcp__custom-server__"}))
 
-        result = get_mcp_tool_prefix_from_config()
+        result = get_mcp_tool_prefix_from_config(working_dir=str(temp_dir))
         assert result == "mcp__custom-server__"
 
     def test_returns_default_when_prefix_missing_in_config(self, temp_dir, monkeypatch):
@@ -136,7 +136,7 @@ class TestGetMcpToolPrefixFromConfig:
         config_file = mcp_dir / "config.json"
         config_file.write_text(json.dumps({"project_root": "/some/path"}))
 
-        result = get_mcp_tool_prefix_from_config()
+        result = get_mcp_tool_prefix_from_config(working_dir=str(temp_dir))
         assert result == "mcp__multi-agent-mcp__"
 
     def test_uses_working_dir_parameter(self, git_repo):
@@ -171,8 +171,21 @@ class TestGetEnableGitFromConfig:
             encoding="utf-8",
         )
 
-        result = get_enable_git_from_config()
+        result = get_enable_git_from_config(working_dir=str(temp_dir))
         assert result is False
+
+    def test_does_not_read_from_cwd_without_working_dir(self, temp_dir, monkeypatch):
+        """working_dir 未指定時は cwd 依存で config を読まない。"""
+        monkeypatch.chdir(temp_dir)
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        (mcp_dir / "config.json").write_text(
+            json.dumps({"enable_git": False}),
+            encoding="utf-8",
+        )
+
+        result = get_enable_git_from_config()
+        assert result is None
 
 
 class TestCheckToolPermission:

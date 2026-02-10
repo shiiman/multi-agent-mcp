@@ -1022,6 +1022,7 @@ class TestCreateWorkersBatchBehavior:
         """事前スロット割り当て失敗時にエラーになることをテスト。"""
         from mcp.server.fastmcp import FastMCP
 
+        from src.managers.tmux_shared import get_project_name
         from src.tools.agent import register_tools
 
         mcp = FastMCP("test")
@@ -1036,6 +1037,7 @@ class TestCreateWorkersBatchBehavior:
 
         app_ctx = mock_ctx.request_context.lifespan_context
         app_ctx.settings.enable_worktree = False
+        session_name = get_project_name(str(git_repo), enable_git=app_ctx.settings.enable_git)
         now = datetime.now()
         app_ctx.agents["owner-001"] = Agent(
             id="owner-001",
@@ -1053,8 +1055,8 @@ class TestCreateWorkersBatchBehavior:
                 id=f"worker-{pane:03d}",
                 role=AgentRole.WORKER,
                 status=AgentStatus.BUSY,
-                tmux_session=f"repo:0.{pane}",
-                session_name="repo",
+                tmux_session=f"{session_name}:0.{pane}",
+                session_name=session_name,
                 window_index=0,
                 pane_index=pane,
                 working_dir=str(git_repo),
@@ -1198,9 +1200,12 @@ class TestInitializeAgent:
             last_activity=now,
         )
 
-        with patch.object(
-            app_ctx.ai_cli, "open_worktree_in_terminal", new_callable=AsyncMock
-        ) as mock_open_terminal:
+        with (
+            patch.object(
+                app_ctx.ai_cli, "open_worktree_in_terminal", new_callable=AsyncMock
+            ) as mock_open_terminal,
+            patch.object(app_ctx.ai_cli, "is_available", return_value=True),
+        ):
             result = await initialize_agent(
                 agent_id="admin-001",
                 prompt_type="custom",
@@ -1267,15 +1272,71 @@ class TestInitializeAgent:
             last_activity=now,
         )
 
-        result = await initialize_agent(
-            agent_id="worker-001",
-            prompt_type="custom",
-            custom_prompt="run",
-            terminal="iterm2",
-            caller_agent_id="owner-001",
-            ctx=mock_ctx,
-        )
+        with patch.object(app_ctx.ai_cli, "is_available", return_value=True):
+            result = await initialize_agent(
+                agent_id="worker-001",
+                prompt_type="custom",
+                custom_prompt="run",
+                terminal="iterm2",
+                caller_agent_id="owner-001",
+                ctx=mock_ctx,
+            )
 
         assert result["success"] is False
         assert "tmux セッション" in result["error"]
         app_ctx.tmux.send_with_rate_limit_to_pane.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_initialize_agent_fails_when_cli_is_unavailable(self, mock_ctx, git_repo):
+        """CLI が利用不可の場合は success=false を返す。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        initialize_agent = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "initialize_agent":
+                initialize_agent = tool.fn
+                break
+        assert initialize_agent is not None
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            ai_cli=AICli.CODEX,
+            created_at=now,
+            last_activity=now,
+        )
+
+        with patch.object(app_ctx.ai_cli, "is_available", return_value=False):
+            result = await initialize_agent(
+                agent_id="worker-001",
+                prompt_type="custom",
+                custom_prompt="run",
+                terminal="iterm2",
+                caller_agent_id="owner-001",
+                ctx=mock_ctx,
+            )
+
+        assert result["success"] is False
+        assert "利用できません" in result["error"]

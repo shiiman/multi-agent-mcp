@@ -1,5 +1,6 @@
 """セッション管理ツールのテスト。"""
 
+import re
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -19,6 +20,7 @@ def session_test_ctx(git_repo, settings):
     mock_tmux = MagicMock(spec=TmuxManager)
     mock_tmux.cleanup_sessions = AsyncMock(return_value=1)
     mock_tmux.cleanup_all_sessions = AsyncMock(return_value=99)
+    mock_tmux.rename_session = AsyncMock(return_value=True)
     mock_tmux.settings = settings
 
     ai_cli = AiCliManager(settings)
@@ -339,3 +341,84 @@ class TestInitTmuxWorkspace:
 
         assert result["success"] is False
         assert "git リポジトリではありません" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_init_tmux_workspace_uses_hashed_session_name_for_git(
+        self, session_mock_ctx, git_repo
+    ):
+        """git モードでも tmux セッション名は常に base-hash 形式を使う。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        app_ctx = session_mock_ctx.request_context.lifespan_context
+        app_ctx.tmux.session_exists = AsyncMock(return_value=False)
+        app_ctx.tmux.create_main_session = AsyncMock(return_value=True)
+
+        result = await init_tmux_workspace(
+            working_dir=str(git_repo),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="issue-900",
+            enable_git=True,
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert re.fullmatch(rf"{re.escape(git_repo.name)}-[0-9a-f]{{6}}", result["session_name"])
+
+    @pytest.mark.asyncio
+    async def test_init_tmux_workspace_migrates_legacy_git_session_name(
+        self, session_mock_ctx, git_repo
+    ):
+        """旧命名（suffix なし）セッションが存在する場合は rename で自動移行する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.managers.tmux_shared import get_project_name
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        app_ctx = session_mock_ctx.request_context.lifespan_context
+        new_name = get_project_name(str(git_repo), enable_git=True)
+        legacy_name = git_repo.name
+
+        async def _session_exists(name: str) -> bool:
+            if name == legacy_name:
+                return True
+            if name == new_name:
+                return False
+            return False
+
+        app_ctx.tmux.session_exists = AsyncMock(side_effect=_session_exists)
+        app_ctx.tmux.create_main_session = AsyncMock(return_value=True)
+
+        result = await init_tmux_workspace(
+            working_dir=str(git_repo),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="issue-901",
+            enable_git=True,
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is True
+        app_ctx.tmux.rename_session.assert_awaited_once_with(legacy_name, new_name)

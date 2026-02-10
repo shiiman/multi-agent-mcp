@@ -242,7 +242,9 @@ def _setup_mcp_directories(
             if isinstance(existing.get("enable_git"), bool):
                 existing_enable_git = existing["enable_git"]
         except Exception as e:
-            logger.warning(f"既存 config.json の読み込みに失敗: {e}")
+            raise ValueError(
+                f"invalid_config: {config_file} の読み込みに失敗しました: {e}"
+            ) from e
 
     effective_enable_git = (
         enable_git_override
@@ -319,7 +321,9 @@ def _setup_mcp_directories(
                     json.dump(existing, f, ensure_ascii=False, indent=2)
                 logger.info(f"config.json を更新しました: {config_file}")
         except Exception as e:
-            logger.warning(f"config.json の読み込みに失敗: {e}")
+            raise ValueError(
+                f"invalid_config: {config_file} の読み込みに失敗しました: {e}"
+            ) from e
 
     return {
         "created_dirs": created_dirs,

@@ -567,6 +567,7 @@ from src.tools.helpers_persistence import (  # noqa: E402, F401
     sync_agents_from_file,
 )
 from src.tools.helpers_registry import (  # noqa: E402, F401
+    InvalidConfigError,
     _get_agent_registry_dir,
     _get_from_config,
     _get_global_mcp_dir,
