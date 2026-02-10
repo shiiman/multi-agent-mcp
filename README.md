@@ -21,7 +21,7 @@ Claude Code + tmux + git worktree（または非gitディレクトリ）を使�
 
 - **Owner** (1体): 全体指揮、タスク分解、Issue作成
 - **Admin** (1体): Worker管理、進捗管理、ダッシュボード更新
-- **Worker** (最大6体): 割り当てられたタスクの実行
+- **Worker** (標準6体 / 最大16体): 割り当てられたタスクの実行
 
 ## 必要条件
 
@@ -135,7 +135,7 @@ claude mcp list
 codex mcp list
 ```
 
-## 提供するTools（86個）
+## 提供するTools（88個）
 
 ### セッション管理（4個）
 
@@ -200,13 +200,14 @@ create_worktree(
 |------|------|
 | `merge_completed_tasks` | 完了タスクの作業ブランチを commit なしで統合ブランチへ展開 |
 
-### IPC/メッセージング（4個）
+### IPC/メッセージング（5個）
 
 | Tool | 説明 |
 |------|------|
 | `send_message` | エージェント間でメッセージを送信 |
 | `read_messages` | エージェントのメッセージを読み取る |
 | `get_unread_count` | 未読メッセージ数を取得 |
+| `unlock_owner_wait` | Owner の待機ロックを手動解除 |
 | `register_agent_to_ipc` | エージェントをIPCシステムに登録 |
 
 ### ダッシュボード/タスク管理（15個）
@@ -364,26 +365,49 @@ init_tmux_workspace("/path/to/project", session_id="issue-123")
 init_tmux_workspace("/path/to/non-git-dir", session_id="issue-123", enable_git=false)
 
 # Ownerエージェントを作成
-create_agent("owner", "/path/to/project")
+create_agent(
+    role="owner",
+    working_dir="/path/to/project",
+)
 
 # Workerエージェントを作成
-create_agent("worker", "/path/to/worktree1")
-create_agent("worker", "/path/to/worktree2")
+create_agent(
+    role="worker",
+    working_dir="/path/to/worktree1",
+    caller_agent_id="admin-or-owner-id",
+)
+create_agent(
+    role="worker",
+    working_dir="/path/to/worktree2",
+    caller_agent_id="admin-or-owner-id",
+)
 
 # エージェント一覧を確認
-list_agents()
+list_agents(caller_agent_id="admin-or-owner-id")
 
 # Workerにコマンドを送信
-send_command("abc12345", "echo 'Hello from Worker'")
+send_command(
+    agent_id="abc12345",
+    command="echo 'Hello from Worker'",
+    caller_agent_id="admin-or-owner-id",
+)
 
 # 出力を取得
-get_output("abc12345", 100)
+get_output(
+    agent_id="abc12345",
+    lines=100,
+    caller_agent_id="admin-or-owner-id",
+)
 
 # 全Workerにコマンドをブロードキャスト
-broadcast_command("git status", "worker")
+broadcast_command(
+    command="git status",
+    role="worker",
+    caller_agent_id="admin-or-owner-id",
+)
 
 # クリーンアップ
-cleanup_workspace()
+cleanup_workspace(caller_agent_id="owner-id")
 ```
 
 ## ドキュメント

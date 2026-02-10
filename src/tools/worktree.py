@@ -210,6 +210,8 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "assign_worktree", caller_agent_id)
         if role_error:
             return role_error
+        if not app_ctx.settings.enable_git:
+            return _git_disabled_error()
 
         agents = app_ctx.agents
 

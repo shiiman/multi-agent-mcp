@@ -738,6 +738,79 @@ class TestBroadcastCommand:
         assert result["success"] is False
         assert "無効な役割" in result["error"]
 
+    @pytest.mark.asyncio
+    async def test_broadcast_syncs_agents_before_target_selection(
+        self, command_mock_ctx, git_repo
+    ):
+        """配信対象決定前に同期し、他インスタンス追加の agent を取り込むことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        broadcast_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "broadcast_command":
+                broadcast_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            session_name=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        def _inject_worker(_ctx):
+            _ctx.agents["worker-external"] = Agent(
+                id="worker-external",
+                role=AgentRole.WORKER,
+                status=AgentStatus.IDLE,
+                tmux_session="test:0.3",
+                session_name="test",
+                window_index=0,
+                pane_index=3,
+                working_dir=str(git_repo),
+                created_at=now,
+                last_activity=now,
+            )
+            return 1
+
+        with patch("src.tools.command.sync_agents_from_file") as mock_sync:
+            mock_sync.side_effect = _inject_worker
+
+            result = await broadcast_command(
+                command="echo hello",
+                role="worker",
+                caller_agent_id="admin-001",
+                ctx=command_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert "worker-external" in result["results"]
+        assert result["results"]["worker-external"] is True
+        mock_sync.assert_called_once_with(app_ctx)
+
 
 class TestSendTask:
     """send_task ツールのテスト。"""
@@ -1500,3 +1573,60 @@ class TestSendTask:
         assert result["success"] is True
         assert app_ctx.session_id == "issue-1234"
         assert "/.multi-agent-mcp/issue-1234/tasks/" in result["task_file"]
+
+    @pytest.mark.asyncio
+    async def test_send_task_prioritizes_pre_permission_session_over_registry_sync(
+        self, command_mock_ctx, git_repo
+    ):
+        """権限チェック時のレジストリ再同期より事前 session_id を優先する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "issue-preserved"
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="preserve pre-permission session",
+            session_id="task-id-like-ffff",
+            auto_enhance=False,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert app_ctx.session_id == "issue-preserved"
+        assert "/.multi-agent-mcp/issue-preserved/tasks/" in result["task_file"]

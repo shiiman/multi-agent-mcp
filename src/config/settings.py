@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -491,6 +491,31 @@ class Settings(BaseSettings):
         default=0.01,
         description="未定義モデル向け汎用単価（USD/1K tokens）",
     )
+
+    @field_validator("mcp_dir")
+    @classmethod
+    def validate_mcp_dir(cls, value: str) -> str:
+        """MCP ディレクトリ名を安全な相対単一ディレクトリ名に制限する。"""
+        candidate = value.strip()
+        base_error = (
+            "MCP_MCP_DIR は相対の単一ディレクトリ名を指定してください"
+            "（例: .multi-agent-mcp）"
+        )
+
+        if not candidate:
+            raise ValueError(f"{base_error}: 空文字は許可されません")
+        if os.path.isabs(candidate):
+            raise ValueError(f"{base_error}: 絶対パスは許可されません")
+        if "/" in candidate or "\\" in candidate:
+            raise ValueError(f"{base_error}: 区切り文字を含むパスは許可されません")
+        if ".." in candidate:
+            raise ValueError(f"{base_error}: '..' を含む値は許可されません")
+        if candidate in {".", ".."}:
+            raise ValueError(f"{base_error}: '.' や '..' は許可されません")
+        if ":" in candidate:
+            raise ValueError(f"{base_error}: ':' を含む値は許可されません")
+
+        return candidate
 
     def get_cli_default_models(self) -> dict[str, dict[str, str]]:
         """CLI別のデフォルトモデルマッピングを返す。"""

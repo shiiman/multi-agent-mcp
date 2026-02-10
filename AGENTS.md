@@ -5,6 +5,7 @@
 ## Project Overview
 
 このプロジェクトは、tmux と git worktree を使って複数 AI エージェントを並列実行する MCP (Model Context Protocol) サーバーです。
+`MCP_ENABLE_GIT=false` を設定すると、non-git ディレクトリでも同等のワークフローを実行できます。
 Codex は主に以下を担当します。
 
 - 仕様に沿った機能追加・修正

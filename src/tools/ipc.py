@@ -8,6 +8,7 @@ from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from src.config.role_permissions import requires_worker_admin_receiver
 from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus, normalize_task_id
 from src.models.message import Message, MessagePriority, MessageType
@@ -205,6 +206,23 @@ def _task_context_text(title: str, description: str, metadata: dict | None = Non
     return f"{title} {requested} {description}".lower()
 
 
+def _get_requires_playwright(metadata: dict | None) -> bool | None:
+    """metadata.requires_playwright を bool として解釈する。"""
+    if not isinstance(metadata, dict):
+        return None
+
+    raw_value = metadata.get("requires_playwright")
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
 def _is_quality_task(title: str, description: str, metadata: dict | None = None) -> bool:
     text = _task_context_text(title, description, metadata)
     keywords = ("qa", "quality", "test", "e2e", "検証", "テスト", "品質", "playwright")
@@ -212,13 +230,21 @@ def _is_quality_task(title: str, description: str, metadata: dict | None = None)
 
 
 def _is_playwright_task(title: str, description: str, metadata: dict | None = None) -> bool:
+    metadata_flag = _get_requires_playwright(metadata)
+    if metadata_flag is not None:
+        return metadata_flag
+
     text = _task_context_text(title, description, metadata)
     return "playwright" in text
 
 
 def _is_ui_related_task(title: str, description: str, metadata: dict | None = None) -> bool:
+    metadata_flag = _get_requires_playwright(metadata)
+    if metadata_flag is not None:
+        return metadata_flag
+
     text = _task_context_text(title, description, metadata)
-    keywords = ("ui", "frontend", "画面", "表示", "フロント", "browser", "e2e")
+    keywords = ("ui", "frontend", "画面", "表示", "フロント", "browser")
     return any(keyword in text for keyword in keywords)
 
 
@@ -588,14 +614,29 @@ def register_tools(mcp: FastMCP) -> None:
         if sender_id not in ipc.get_all_agent_ids():
             ipc.register_agent(sender_id)
 
+        sender_agent = app_ctx.agents.get(sender_id)
+        sender_role = str(getattr(sender_agent, "role", ""))
         original_receiver_id = receiver_id
         rerouted_receiver_id: str | None = None
+        receiver_agent = None
+
+        if (
+            sender_role == AgentRole.WORKER.value
+            and requires_worker_admin_receiver("send_message")
+            and receiver_id is None
+        ):
+            return {
+                "success": False,
+                "error": (
+                    "Worker は send_message をブロードキャストできません。"
+                    "Admin の agent_id を receiver_id に指定してください。"
+                ),
+            }
+
         if receiver_id:
             sync_agents_from_file(app_ctx)
             receiver_agent = app_ctx.agents.get(receiver_id)
             if not receiver_agent:
-                sender_agent = app_ctx.agents.get(sender_id)
-                sender_role = str(getattr(sender_agent, "role", ""))
                 is_worker_request = (
                     msg_type == MessageType.REQUEST
                     and sender_role == AgentRole.WORKER.value
@@ -622,6 +663,17 @@ def register_tools(mcp: FastMCP) -> None:
                     return {
                         "success": False,
                         "error": f"受信者 {receiver_id} が見つかりません",
+                    }
+
+            if sender_role == AgentRole.WORKER.value:
+                receiver_agent = app_ctx.agents.get(receiver_id)
+                if str(getattr(receiver_agent, "role", "")) != AgentRole.ADMIN.value:
+                    return {
+                        "success": False,
+                        "error": (
+                            "Worker は Admin にのみ send_message を送信できます。"
+                            f" receiver_id={receiver_id}"
+                        ),
                     }
 
             if receiver_id not in ipc.get_all_agent_ids():
@@ -788,8 +840,12 @@ def register_tools(mcp: FastMCP) -> None:
         owner_wait_state: dict[str, Any] | None = None
         if is_owner_caller and caller_agent_id:
             owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
-            if owner_wait_state.get("waiting_for_admin") and ipc.get_unread_count(agent_id) == 0:
-                return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+            if owner_wait_state.get("waiting_for_admin"):
+                # Owner 待機中は自身 inbox の通知待機のみ許可する。
+                if agent_id != caller_agent_id:
+                    return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+                if ipc.get_unread_count(caller_agent_id) == 0:
+                    return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
 
         messages = ipc.read_messages(
             agent_id=agent_id,
@@ -910,8 +966,12 @@ def register_tools(mcp: FastMCP) -> None:
         is_owner_caller = caller_role in (AgentRole.OWNER.value, "owner")
         if is_owner_caller and caller_agent_id:
             owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
-            if owner_wait_state.get("waiting_for_admin") and count == 0:
-                return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+            if owner_wait_state.get("waiting_for_admin"):
+                # Owner 待機中は自身 inbox の通知待機のみ許可する。
+                if agent_id != caller_agent_id:
+                    return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+                if count == 0:
+                    return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
 
         return {
             "success": True,

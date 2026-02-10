@@ -13,6 +13,17 @@ from src.tools.helpers import ensure_dashboard_manager, require_permission
 logger = logging.getLogger(__name__)
 
 
+def _git_disabled_error(tool_name: str) -> dict[str, Any]:
+    """git 機能無効時の共通エラー。"""
+    return {
+        "success": False,
+        "error": (
+            f"MCP_ENABLE_GIT=false のため {tool_name} は実行できません。"
+            " git を使用する場合は init_tmux_workspace(enable_git=true) で初期化してください。"
+        ),
+    }
+
+
 def _run_git(repo_path: str, args: list[str]) -> tuple[bool, str]:
     """git コマンドを実行する。"""
     try:
@@ -69,12 +80,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
         if not app_ctx.settings.enable_git:
-            return {
-                "success": False,
-                "error": (
-                    "MCP_ENABLE_GIT=false のため merge_completed_tasks は実行できません。"
-                ),
-            }
+            return _git_disabled_error("merge_completed_tasks")
 
         if strategy not in ("merge", "squash", "rebase"):
             return {

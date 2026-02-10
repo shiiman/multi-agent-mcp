@@ -1,5 +1,6 @@
 """ヘルスチェック管理ツールのテスト。"""
 
+import shlex
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -443,3 +444,149 @@ class TestFullRecovery:
         recovered = app_ctx.agents[worker.id]
         assert recovered.working_dir == str(git_repo)
         assert recovered.worktree_path is None
+
+    @pytest.mark.asyncio
+    async def test_execute_full_recovery_quotes_cd_path_for_tmux_send_keys(
+        self, healthcheck_mock_ctx, git_repo
+    ):
+        """full_recovery の cd コマンドは特殊文字パスを quote して送信する。"""
+        from src.tools.healthcheck import execute_full_recovery
+
+        app_ctx = healthcheck_mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_git = False
+
+        now = datetime.now()
+        special_path = str(git_repo / "dir with space/it's;danger")
+        worker = Agent(
+            id="worker-quoted-path",
+            role=AgentRole.WORKER,
+            status=AgentStatus.ERROR,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=special_path,
+            worktree_path=None,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents[worker.id] = worker
+
+        result = await execute_full_recovery(app_ctx, worker.id)
+
+        assert result["success"] is True
+        expected_target = "test:window-0.1"
+        expected_command = f"cd {shlex.quote(special_path)}"
+        app_ctx.tmux._run.assert_any_await(
+            "send-keys", "-t", expected_target, expected_command, "Enter"
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_full_recovery_worktree_create_failure_returns_failed(
+        self, healthcheck_mock_ctx, git_repo, monkeypatch
+    ):
+        """worktree 作成が両方失敗した場合、fallback せず failed を返す。"""
+        from src.tools.healthcheck import execute_full_recovery
+
+        app_ctx = healthcheck_mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_git = True
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-create-fail",
+            role=AgentRole.WORKER,
+            status=AgentStatus.ERROR,
+            tmux_session=None,
+            session_name=None,
+            window_index=None,
+            pane_index=None,
+            working_dir=str(git_repo / "worker-create-fail"),
+            worktree_path=str(git_repo / "worker-create-fail"),
+            branch="worker-create-fail",
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents[worker.id] = worker
+
+        class StubWorktreeManager:
+            create_calls = 0
+
+            def __init__(self, _repo_path: str) -> None:
+                pass
+
+            async def remove_worktree(self, _path: str, force: bool = False) -> tuple[bool, str]:
+                return True, "removed"
+
+            async def create_worktree(
+                self,
+                path: str,
+                branch: str,
+                create_branch: bool = True,
+                base_branch: str | None = None,
+            ) -> tuple[bool, str, str | None]:
+                _ = (path, branch, create_branch, base_branch)
+                StubWorktreeManager.create_calls += 1
+                return False, "create failed", None
+
+        monkeypatch.setattr(
+            "src.managers.worktree_manager.WorktreeManager",
+            StubWorktreeManager,
+        )
+
+        result = await execute_full_recovery(app_ctx, worker.id)
+
+        assert result["success"] is False
+        assert result["status"] == "failed"
+        assert result["new_worktree_path"] is None
+        assert "project_root" not in result.get("error", "")
+        assert StubWorktreeManager.create_calls == 2
+        assert worker.id in app_ctx.agents
+        assert app_ctx.agents[worker.id].worktree_path == str(git_repo / "worker-create-fail")
+
+    @pytest.mark.asyncio
+    async def test_execute_full_recovery_worktree_exception_returns_blocked(
+        self, healthcheck_mock_ctx, git_repo, monkeypatch
+    ):
+        """worktree 操作例外時は blocked を返し、fallback しない。"""
+        from src.tools.healthcheck import execute_full_recovery
+
+        app_ctx = healthcheck_mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_git = True
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-worktree-error",
+            role=AgentRole.WORKER,
+            status=AgentStatus.ERROR,
+            tmux_session=None,
+            session_name=None,
+            window_index=None,
+            pane_index=None,
+            working_dir=str(git_repo / "worker-worktree-error"),
+            worktree_path=str(git_repo / "worker-worktree-error"),
+            branch="worker-worktree-error",
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents[worker.id] = worker
+
+        class StubWorktreeManager:
+            def __init__(self, _repo_path: str) -> None:
+                pass
+
+            async def remove_worktree(self, _path: str, force: bool = False) -> tuple[bool, str]:
+                _ = force
+                raise RuntimeError("boom")
+
+        monkeypatch.setattr(
+            "src.managers.worktree_manager.WorktreeManager",
+            StubWorktreeManager,
+        )
+
+        result = await execute_full_recovery(app_ctx, worker.id)
+
+        assert result["success"] is False
+        assert result["status"] == "blocked"
+        assert result["new_worktree_path"] is None
+        assert "worktree 操作に失敗しました" in result["error"]
+        assert worker.id in app_ctx.agents

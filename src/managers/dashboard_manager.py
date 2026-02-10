@@ -10,6 +10,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -53,19 +54,19 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
             dashboard = Dashboard(
                 workspace_id=self.workspace_id,
                 workspace_path=self.workspace_path,
+                session_started_at=datetime.now(),
             )
             self._write_dashboard(dashboard)
         logger.info(f"ダッシュボード環境を初期化しました: {self.dashboard_dir}")
 
     def cleanup(self) -> None:
-        """ダッシュボード環境をクリーンアップする。"""
-        for path in (self._get_dashboard_path(), self._get_messages_path()):
-            if path.exists():
-                try:
-                    path.unlink()
-                except OSError as e:
-                    logger.warning(f"ダッシュボードファイル削除エラー: {e}")
-        logger.info("ダッシュボード環境をクリーンアップしました")
+        """ダッシュボード環境をクリーンアップする。
+
+        dashboard.md / messages.md はセッション履歴として永続保持するため削除しない。
+        """
+        logger.info(
+            "ダッシュボード環境をクリーンアップしました（dashboard/messages は保持）"
+        )
 
     def _get_dashboard_path(self) -> Path:
         return self.dashboard_dir / "dashboard.md"

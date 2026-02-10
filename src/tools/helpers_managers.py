@@ -40,18 +40,44 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
     Raises:
         ValueError: project_root が設定されていない場合
     """
-    if app_ctx.ipc_manager is None:
-        from src.tools.helpers import resolve_project_root
+    from src.tools.helpers import resolve_project_root
 
+    try:
         base_dir = resolve_project_root(app_ctx)
-        # session_id を確保（必須）
-        session_id = ensure_session_id(app_ctx)
-        if not session_id:
-            raise ValueError(
-                "session_id が設定されていません。"
-                "init_tmux_workspace で session_id を指定してください。"
+    except ValueError:
+        # 非 git テスト環境などでは app_ctx.project_root をそのまま使用する
+        # （IPC パス解決にメインリポジトリ判定は必須ではない）
+        if app_ctx.project_root:
+            base_dir = app_ctx.project_root
+        else:
+            raise
+    # session_id を確保（必須）
+    session_id = ensure_session_id(app_ctx)
+    if not session_id:
+        raise ValueError(
+            "session_id が設定されていません。"
+            "init_tmux_workspace で session_id を指定してください。"
+        )
+
+    ipc_dir = os.path.join(base_dir, app_ctx.settings.mcp_dir, session_id, "ipc")
+    ipc_dir_abs = os.path.realpath(os.path.abspath(ipc_dir))
+
+    reuse_current = False
+    if app_ctx.ipc_manager is not None:
+        current_dir_abs = os.path.realpath(os.path.abspath(str(app_ctx.ipc_manager.ipc_dir)))
+        is_session_scoped_ipc = (
+            f"{os.sep}{app_ctx.settings.mcp_dir}{os.sep}" in current_dir_abs
+            and current_dir_abs.endswith(f"{os.sep}ipc")
+        )
+        reuse_current = current_dir_abs == ipc_dir_abs or not is_session_scoped_ipc
+        if not reuse_current:
+            logger.info(
+                "IPCManager の参照先を再同期します: %s -> %s",
+                current_dir_abs,
+                ipc_dir_abs,
             )
-        ipc_dir = os.path.join(base_dir, app_ctx.settings.mcp_dir, session_id, "ipc")
+
+    if not reuse_current:
         app_ctx.ipc_manager = IPCManager(ipc_dir)
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager

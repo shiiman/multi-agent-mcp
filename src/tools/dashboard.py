@@ -16,6 +16,7 @@ from src.tools.helpers import (
     ensure_memory_manager,
     find_agents_by_role,
     get_admin_poll_state,
+    get_owner_wait_state,
     notify_agent_via_tmux,
     require_permission,
     save_agent_to_file,
@@ -83,6 +84,36 @@ def _polling_blocked_response() -> dict[str, Any]:
         ),
         "next_action": "wait_for_ipc_notification",
     }
+
+
+def _owner_polling_blocked_response(waiting_admin_id: str | None) -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": (
+            "polling_blocked: Owner は Admin からの通知待機中のため、"
+            "unread=0 の監視呼び出しはできません"
+        ),
+        "next_action": "wait_for_user_input_or_unlock_owner_wait",
+        "waiting_for_admin_id": waiting_admin_id,
+    }
+
+
+def _normalize_owner_wait_error(
+    app_ctx: Any,
+    caller_agent_id: str | None,
+    role_error: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not role_error:
+        return None
+
+    error_text = str(role_error.get("error", ""))
+    if "owner_wait_locked" not in error_text:
+        return role_error
+
+    waiting_admin_id = role_error.get("waiting_for_admin_id")
+    if waiting_admin_id is None and caller_agent_id:
+        waiting_admin_id = get_owner_wait_state(app_ctx, caller_agent_id).get("admin_id")
+    return _owner_polling_blocked_response(waiting_admin_id)
 
 
 async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
@@ -371,7 +402,7 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx, role_error = require_permission(ctx, "list_tasks", caller_agent_id)
         if role_error:
-            return role_error
+            return _normalize_owner_wait_error(app_ctx, caller_agent_id, role_error)
 
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
@@ -445,7 +476,23 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"無効な進捗率です: {progress}（有効: 0-100）",
             }
 
+        dashboard = ensure_dashboard_manager(app_ctx)
         normalized_task_id = normalize_task_id(task_id)
+        task = dashboard.get_task(task_id)
+        if not task:
+            return {
+                "success": False,
+                "error": f"タスク {task_id} が見つかりません",
+            }
+        if task.assigned_agent_id != caller_agent_id:
+            return {
+                "success": False,
+                "error": (
+                    "タスクの割り当て先と caller_agent_id が一致しません: "
+                    f"assigned={task.assigned_agent_id}, caller={caller_agent_id}"
+                ),
+            }
+
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
         actual_progress = progress or 0
         worker_cost_snapshot = None
@@ -462,44 +509,64 @@ def register_tools(mcp: FastMCP) -> None:
 
         # Admin にも進捗を通知（IPC メッセージ）
         admin_notified = False
+        notification_sent = False
+        admin_ids = find_agents_by_role(app_ctx, "admin")
+        if not admin_ids:
+            return {
+                "success": False,
+                "error": "Admin エージェントが見つかりません",
+            }
+
         try:
-            admin_ids = find_agents_by_role(app_ctx, "admin")
-            if admin_ids:
-                ipc = ensure_ipc_manager(app_ctx)
-                ipc.send_message(
-                    sender_id=caller_agent_id,
-                    receiver_id=admin_ids[0],
-                    message_type=MessageType.TASK_PROGRESS,
-                    subject=f"進捗報告: {task_id} ({actual_progress}%)",
-                    content=message or f"タスク {task_id} の進捗: {actual_progress}%",
-                    priority=MessagePriority.NORMAL,
-                    metadata={
-                        "task_id": task_id,
-                        "normalized_task_id": normalized_task_id,
-                        "progress": actual_progress,
-                        "checklist": checklist,
-                        "message": message,
-                        "reporter": caller_agent_id,
-                        "cost_snapshot": worker_cost_snapshot,
-                    },
-                )
-                admin_notified = True
+            ipc = ensure_ipc_manager(app_ctx)
+            ipc.send_message(
+                sender_id=caller_agent_id,
+                receiver_id=admin_ids[0],
+                message_type=MessageType.TASK_PROGRESS,
+                subject=f"進捗報告: {task_id} ({actual_progress}%)",
+                content=message or f"タスク {task_id} の進捗: {actual_progress}%",
+                priority=MessagePriority.NORMAL,
+                metadata={
+                    "task_id": task_id,
+                    "normalized_task_id": normalized_task_id,
+                    "progress": actual_progress,
+                    "checklist": checklist,
+                    "message": message,
+                    "reporter": caller_agent_id,
+                    "cost_snapshot": worker_cost_snapshot,
+                },
+            )
+            admin_notified = True
         except Exception as e:
             logger.warning(f"Admin への進捗通知に失敗: {e}")
+            return {
+                "success": False,
+                "error": f"Admin への進捗通知に失敗しました: {e}",
+            }
 
         # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
         if admin_notified and admin_ids:
             sync_agents_from_file(app_ctx)
             admin_agent = app_ctx.agents.get(admin_ids[0])
-            await notify_agent_via_tmux(
+            notification_sent = await notify_agent_via_tmux(
                 app_ctx, admin_agent, "task_progress", caller_agent_id
             )
+            if not notification_sent:
+                return {
+                    "success": False,
+                    "error": "Admin への tmux 通知に失敗しました",
+                    "task_id": task_id,
+                    "progress": actual_progress,
+                    "admin_notified": admin_notified,
+                    "notification_sent": False,
+                }
 
         return {
             "success": True,
             "task_id": task_id,
             "progress": actual_progress,
             "admin_notified": admin_notified,
+            "notification_sent": notification_sent,
             "cost_snapshot": worker_cost_snapshot,
             "message": f"進捗 {actual_progress}% を報告しました",
         }
@@ -557,6 +624,22 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         normalized_task_id = normalize_task_id(task_id)
+        dashboard = ensure_dashboard_manager(app_ctx)
+        task = dashboard.get_task(task_id)
+        if not task:
+            return {
+                "success": False,
+                "error": f"タスク {task_id} が見つかりません",
+            }
+        if task.assigned_agent_id != caller_agent_id:
+            return {
+                "success": False,
+                "error": (
+                    "タスクの割り当て先と caller_agent_id が一致しません: "
+                    f"assigned={task.assigned_agent_id}, caller={caller_agent_id}"
+                ),
+            }
+
         # Worker は Dashboard を直接更新しない（Admin が IPC 経由で更新する）
         worker_cost_snapshot = None
         worker_agent = app_ctx.agents.get(caller_agent_id) if caller_agent_id else None
@@ -602,6 +685,17 @@ def register_tools(mcp: FastMCP) -> None:
         notification_sent = await notify_agent_via_tmux(
             app_ctx, admin_agent, msg_type.value, caller_agent_id
         )
+        if not notification_sent:
+            return {
+                "success": False,
+                "error": "Admin への tmux 通知に失敗しました",
+                "task_id": task_id,
+                "normalized_task_id": normalized_task_id,
+                "message_id": completion_message.id,
+                "reported_status": status,
+                "notification_sent": False,
+                "cost_snapshot": worker_cost_snapshot,
+            }
 
         # 🔴 Worker 自身を IDLE にリセット
         if caller_agent_id:
@@ -721,7 +815,7 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx, role_error = require_permission(ctx, "get_dashboard", caller_agent_id)
         if role_error:
-            return role_error
+            return _normalize_owner_wait_error(app_ctx, caller_agent_id, role_error)
 
         dashboard = ensure_dashboard_manager(app_ctx)
 
@@ -763,7 +857,7 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx, role_error = require_permission(ctx, "get_dashboard_summary", caller_agent_id)
         if role_error:
-            return role_error
+            return _normalize_owner_wait_error(app_ctx, caller_agent_id, role_error)
 
         dashboard = ensure_dashboard_manager(app_ctx)
 

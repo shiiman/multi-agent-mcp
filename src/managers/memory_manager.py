@@ -17,6 +17,7 @@
 import logging
 import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -227,15 +228,83 @@ class MemoryManager:
             logger.error(f"エントリの保存に失敗 ({file_path}): {e}")
             raise
 
+    def _get_load_limit(self) -> int | None:
+        """起動時ロード件数の上限を取得する。"""
+        if self.max_entries <= 0:
+            return None
+        return self.max_entries
+
+    def _collect_entry_files(self) -> list[Path]:
+        """読み込み対象のエントリファイル一覧を更新日時順で取得する。"""
+        if not self.storage_dir:
+            return []
+
+        files = [
+            file_path
+            for file_path in self.storage_dir.glob("*.md")
+            if file_path.name != "README.md"
+        ]
+
+        try:
+            files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        except OSError as e:
+            logger.warning(f"エントリファイルのソートに失敗: {e}")
+
+        return files
+
+    def _archive_overflow_files(self, overflow_files: list[Path]) -> int:
+        """上限超過したエントリファイルをアーカイブに移動する。"""
+        if not overflow_files or not self.archive_dir:
+            return 0
+
+        moved_count = 0
+        try:
+            self.archive_dir.mkdir(parents=True, exist_ok=True)
+            for file_path in overflow_files:
+                archive_path = self.archive_dir / file_path.name
+                if archive_path.exists():
+                    archive_path = self.archive_dir / (
+                        f"{file_path.stem}_{int(datetime.now().timestamp())}.md"
+                    )
+                shutil.move(str(file_path), str(archive_path))
+                moved_count += 1
+        except OSError as e:
+            logger.warning(f"上限超過ファイルのアーカイブに失敗: {e}")
+
+        return moved_count
+
     def _load_from_dir(self) -> None:
-        """ディレクトリから全メモリエントリを読み込む。"""
+        """ディレクトリからメモリエントリを上限付きで読み込む。"""
         if not self.storage_dir or not self.storage_dir.exists():
             return
 
         try:
-            for file_path in self.storage_dir.glob("*.md"):
-                if file_path.name == "README.md":
-                    continue
+            all_files = self._collect_entry_files()
+            load_limit = self._get_load_limit()
+            files_to_load = all_files
+            overflow_files: list[Path] = []
+
+            if load_limit is not None and len(all_files) > load_limit:
+                files_to_load = all_files[:load_limit]
+                overflow_files = all_files[load_limit:]
+
+                if self.auto_prune:
+                    archived_files = self._archive_overflow_files(overflow_files)
+                    if archived_files > 0:
+                        logger.info(
+                            "起動時ロード件数超過をアーカイブ: %s ファイル (上限=%s)",
+                            archived_files,
+                            load_limit,
+                        )
+                else:
+                    logger.info(
+                        "起動時ロード件数を制限: %s/%s ファイルを読み込み (上限=%s)",
+                        len(files_to_load),
+                        len(all_files),
+                        load_limit,
+                    )
+
+            for file_path in files_to_load:
                 entry = self._parse_markdown_entry(file_path)
                 if entry:
                     self.entries[entry.key] = entry
@@ -382,9 +451,6 @@ class MemoryManager:
             if query_lower in entry.content.lower() or query_lower in entry.key.lower():
                 results.append(entry)
 
-            if len(results) >= limit:
-                break
-
         # 更新日時でソート（新しい順）
         results.sort(key=lambda x: x.updated_at, reverse=True)
         return results[:limit]
@@ -500,7 +566,8 @@ class MemoryManager:
             # 既存エントリの更新
             entry = self.entries[key]
             entry.content = content
-            entry.tags = tags or entry.tags
+            if tags is not None:
+                entry.tags = tags
             entry.updated_at = now
             if metadata:
                 entry.metadata.update(metadata)
@@ -563,9 +630,6 @@ class MemoryManager:
             # コンテンツ検索
             if query_lower in entry.content.lower() or query_lower in entry.key.lower():
                 results.append(entry)
-
-            if len(results) >= limit:
-                break
 
         # 更新日時でソート（新しい順）
         results.sort(key=lambda x: x.updated_at, reverse=True)

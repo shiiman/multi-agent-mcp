@@ -3,7 +3,8 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -740,6 +741,27 @@ class TestEnsureDashboardManager:
         assert app_ctx.workspace_id == "new-session"
 
 
+class TestEnsureIpcManager:
+    """ensure_ipc_manager のセッション切替挙動テスト。"""
+
+    def test_recreate_ipc_manager_on_session_switch(self, app_ctx, git_repo):
+        from src.managers.ipc_manager import IPCManager
+        from src.tools.helpers_managers import ensure_ipc_manager
+
+        app_ctx.project_root = str(git_repo)
+        app_ctx.session_id = "old-session"
+        old_ipc_dir = git_repo / ".multi-agent-mcp" / "old-session" / "ipc"
+        app_ctx.ipc_manager = IPCManager(str(old_ipc_dir))
+        app_ctx.ipc_manager.initialize()
+
+        app_ctx.session_id = "new-session"
+        manager = ensure_ipc_manager(app_ctx)
+
+        assert manager is app_ctx.ipc_manager
+        assert str(manager.ipc_dir).endswith(".multi-agent-mcp/new-session/ipc")
+        assert manager.ipc_dir != old_ipc_dir
+
+
 class TestCodexPromptDetection:
     """Codex 入力残留判定のテスト。"""
 
@@ -779,3 +801,77 @@ class TestCodexPromptDetection:
         command = "[IPC] 新しいメッセージ: task_progress from worker-001"
 
         assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is False
+
+
+class TestCodexPromptConfirmation:
+    """Codex 送信確定処理のテスト。"""
+
+    from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin as _TmuxWorkspaceMixin
+
+    class _DummyTmux(_TmuxWorkspaceMixin):
+        """TmuxWorkspaceMixin の送信確認ロジックを単体検証するダミー。"""
+
+        def __init__(self):
+            self.settings = SimpleNamespace(
+                codex_enter_retry_max=2,
+                codex_enter_retry_interval_ms=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_send_and_confirm_recovers_queue_mode_then_resends(self):
+        """queue ヒント検知時は Esc 復帰してコマンド再送する。"""
+        manager = self._DummyTmux()
+        manager.send_keys_to_pane = AsyncMock(side_effect=[True, True])
+        manager.capture_pane_by_index = AsyncMock(
+            side_effect=[
+                "processed\n›\ntab to queue message\n",
+                "processed\n›\n",
+            ]
+        )
+        manager._send_enter_key = AsyncMock(return_value=True)
+        manager._run = AsyncMock(return_value=(0, "", ""))
+
+        with patch("src.managers.tmux_workspace_mixin.asyncio.sleep", new=AsyncMock()):
+            success = await manager.send_and_confirm_to_pane(
+                session="main",
+                window=0,
+                pane=1,
+                command="[IPC] 新しいメッセージ",
+                confirm_codex_prompt=True,
+            )
+
+        assert success is True
+        assert manager.send_keys_to_pane.await_count == 2
+        manager._run.assert_awaited_once_with("send-keys", "-t", "main:0.1", "Escape")
+        manager._send_enter_key.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_and_confirm_fallbacks_to_ctrl_c_when_escape_fails(self):
+        """Esc が失敗した場合は C-c で復帰して再送する。"""
+        manager = self._DummyTmux()
+        manager.send_keys_to_pane = AsyncMock(side_effect=[True, True])
+        manager.capture_pane_by_index = AsyncMock(
+            side_effect=[
+                "processed\n›\ntab to queue message\n",
+                "processed\n›\n",
+            ]
+        )
+        manager._send_enter_key = AsyncMock(return_value=True)
+        manager._run = AsyncMock(side_effect=[(1, "", "escape failed"), (0, "", "")])
+
+        with patch("src.managers.tmux_workspace_mixin.asyncio.sleep", new=AsyncMock()):
+            success = await manager.send_and_confirm_to_pane(
+                session="main",
+                window=0,
+                pane=1,
+                command="[IPC] 新しいメッセージ",
+                confirm_codex_prompt=True,
+            )
+
+        assert success is True
+        assert manager.send_keys_to_pane.await_count == 2
+        assert manager._run.await_args_list == [
+            call("send-keys", "-t", "main:0.1", "Escape"),
+            call("send-keys", "-t", "main:0.1", "C-c"),
+        ]
+        manager._send_enter_key.assert_not_awaited()

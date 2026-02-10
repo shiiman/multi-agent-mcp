@@ -53,12 +53,14 @@ class DashboardMarkdownMixin:
         """
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         session_started = self._format_dashboard_time(dashboard.session_started_at)
+        session_finished = self._format_dashboard_time(dashboard.session_finished_at)
 
         lines = [
             "# Multi-Agent Dashboard",
             "",
             f"**開始時刻**: {session_started}",
             f"**更新時刻**: {now}",
+            f"**終了時刻**: {session_finished}",
         ]
 
         lines.extend(self._generate_agent_table(dashboard))
@@ -436,16 +438,12 @@ class DashboardMarkdownMixin:
 
     def _generate_stats_section(self, dashboard: Dashboard) -> list[str]:
         """統計・コスト情報セクションを生成する。"""
-        session_started = self._format_dashboard_time(dashboard.session_started_at)
-        session_finished = self._format_dashboard_time(dashboard.session_finished_at)
         lines = [
             "",
             "---",
             "",
             "## 統計",
             "",
-            f"- **セッション開始**: {session_started}",
-            f"- **セッション終了**: {session_finished}",
             f"- **総エージェント数**: {dashboard.total_agents}",
             f"- **アクティブエージェント**: {dashboard.active_agents}",
             f"- **総タスク数**: {dashboard.total_tasks}",

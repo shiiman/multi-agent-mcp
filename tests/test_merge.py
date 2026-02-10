@@ -95,6 +95,26 @@ class TestMergeCompletedTasks:
         assert "strategy は merge / squash / rebase" in result["error"]
 
     @pytest.mark.asyncio
+    async def test_returns_error_when_git_disabled(self, mock_mcp_context, git_repo):
+        """enable_git=false のとき merge_completed_tasks がエラーになることをテスト。"""
+        merge_completed_tasks = self._get_merge_tool()
+        app_ctx = mock_mcp_context.request_context.lifespan_context
+        app_ctx.project_root = str(git_repo)
+        app_ctx.settings.enable_git = False
+
+        result = await merge_completed_tasks(
+            session_id="issue-no-git",
+            repo_path=str(git_repo),
+            base_branch="main",
+            strategy="merge",
+            caller_agent_id="agent-001",
+            ctx=mock_mcp_context,
+        )
+
+        assert result["success"] is False
+        assert "MCP_ENABLE_GIT=false" in result["error"]
+
+    @pytest.mark.asyncio
     async def test_applies_preview_diff_without_commit(
         self, mock_mcp_context, git_repo
     ):

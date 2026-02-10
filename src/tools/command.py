@@ -443,29 +443,39 @@ def register_tools(mcp: FastMCP) -> None:
             branch_name: 作業ブランチ名（Admin 用、省略時は feature/{session_id}）
             caller_agent_id: 呼び出し元エージェントID（必須）
         """
+        pre_permission_session_id: str | None = None
+        if ctx is not None:
+            request_ctx = getattr(ctx, "request_context", None)
+            lifespan_ctx = getattr(request_ctx, "lifespan_context", None)
+            pre_permission_session_id = getattr(lifespan_ctx, "session_id", None)
+
         app_ctx, role_error = require_permission(ctx, "send_task", caller_agent_id)
         if role_error:
             return role_error
 
         agents = app_ctx.agents
         requested_session_id = session_id
-        effective_session_id = app_ctx.session_id or requested_session_id
+        current_session_id = pre_permission_session_id or app_ctx.session_id
+        effective_session_id = current_session_id or requested_session_id
         if (
-            app_ctx.session_id
-            and app_ctx.session_id.startswith("provisional-")
-            and requested_session_id != app_ctx.session_id
+            current_session_id
+            and current_session_id.startswith("provisional-")
+            and requested_session_id != current_session_id
         ):
             app_ctx.session_id = requested_session_id
             effective_session_id = requested_session_id
-        elif app_ctx.session_id and requested_session_id != app_ctx.session_id:
+        elif current_session_id and requested_session_id != current_session_id:
+            app_ctx.session_id = current_session_id
             logger.warning(
                 "send_task の session_id が現在セッションと不一致のため、"
                 " 既存セッションを優先します: requested=%s current=%s",
                 requested_session_id,
-                app_ctx.session_id,
+                current_session_id,
             )
-        elif not app_ctx.session_id:
+        elif not current_session_id:
             app_ctx.session_id = requested_session_id
+        else:
+            app_ctx.session_id = current_session_id
         sync_agents_from_file(app_ctx)
 
         agent = agents.get(agent_id)
@@ -617,6 +627,9 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "broadcast_command", caller_agent_id)
         if role_error:
             return role_error
+
+        # 他インスタンスで追加されたエージェントを取り込んでから配信対象を決定する
+        sync_agents_from_file(app_ctx)
 
         tmux = app_ctx.tmux
         agents = app_ctx.agents

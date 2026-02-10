@@ -73,10 +73,9 @@ async def test_healthcheck_daemon_auto_stops_on_idle(temp_dir, settings):
     started = await start_healthcheck_daemon(app_ctx)
     assert started is True
 
-    for _ in range(20):
-        if not is_healthcheck_daemon_running(app_ctx):
-            break
-        await asyncio.sleep(0.1)
+    daemon_task = app_ctx.healthcheck_daemon_task
+    assert daemon_task is not None
+    await asyncio.wait_for(daemon_task, timeout=2.0)
 
     assert is_healthcheck_daemon_running(app_ctx) is False
 

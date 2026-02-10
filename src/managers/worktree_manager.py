@@ -225,7 +225,10 @@ class WorktreeManager:
         return True, f"worktreeを作成しました: {path}", path
 
     async def remove_worktree(
-        self, path_or_branch: str, force: bool = False
+        self,
+        path_or_branch: str,
+        force: bool = False,
+        managed_branch_names: set[str] | None = None,
     ) -> tuple[bool, str]:
         """worktreeを削除する。
 
@@ -234,6 +237,8 @@ class WorktreeManager:
         Args:
             path_or_branch: 削除するworktreeのパスまたはブランチ名
             force: 強制削除するか
+            managed_branch_names: セッション管理下ブランチ名の集合。
+                指定時、native 削除後のブランチ削除はこの集合への厳密一致のみ許可する。
 
         Returns:
             (成功フラグ, メッセージ) のタプル
@@ -243,7 +248,11 @@ class WorktreeManager:
         if use_gtr:
             return await self._remove_worktree_gtr(path_or_branch, force)
         else:
-            return await self._remove_worktree_native(path_or_branch, force)
+            return await self._remove_worktree_native(
+                path_or_branch,
+                force,
+                managed_branch_names=managed_branch_names,
+            )
 
     async def _remove_worktree_gtr(
         self, path_or_branch: str, force: bool = False
@@ -288,8 +297,30 @@ class WorktreeManager:
             return True
         return bool(re.match(r"^feature/.+-worker-\d+-[0-9a-z]+$", branch_name))
 
+    @classmethod
+    def _should_delete_branch(
+        cls,
+        branch_name: str | None,
+        managed_branch_names: set[str] | None = None,
+    ) -> bool:
+        """ブランチ削除可否を判定する。
+
+        Args:
+            branch_name: 削除候補ブランチ名
+            managed_branch_names: セッション管理下ブランチ名の集合。
+                指定時は厳密一致のみ許可する。
+        """
+        if not branch_name:
+            return False
+        if managed_branch_names is not None:
+            return branch_name in managed_branch_names
+        return cls._is_worker_branch(branch_name)
+
     async def _remove_worktree_native(
-        self, path: str, force: bool = False
+        self,
+        path: str,
+        force: bool = False,
+        managed_branch_names: set[str] | None = None,
     ) -> tuple[bool, str]:
         """通常のgit worktreeコマンドでworktreeを削除する。
 
@@ -298,6 +329,8 @@ class WorktreeManager:
         Args:
             path: worktreeのパス
             force: 強制削除するか
+            managed_branch_names: セッション管理下ブランチ名の集合。
+                指定時、ブランチ削除は厳密一致のみ許可する。
 
         Returns:
             (成功フラグ, メッセージ) のタプル
@@ -332,7 +365,7 @@ class WorktreeManager:
 
         # ブランチも削除（gtr と同様の動作）
         branch_deleted = False
-        if self._is_worker_branch(branch_name):
+        if self._should_delete_branch(branch_name, managed_branch_names):
             delete_args = ["branch", "-D", branch_name]
             branch_code, _, branch_stderr = await self._run_git(*delete_args)
             if branch_code == 0:
