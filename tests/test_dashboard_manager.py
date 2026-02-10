@@ -1,6 +1,7 @@
 """DashboardManagerのテスト。"""
 
 import json
+import re
 from datetime import datetime
 
 from src.managers.dashboard_manager import DashboardManager
@@ -561,7 +562,7 @@ class TestMarkdownDashboard:
 
         md_content = dashboard_manager.generate_markdown_dashboard()
         assert "| ID | 名前 | 役割 | 状態 | 現在のタスク |" in md_content
-        assert "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |" in md_content
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 | worktree |" in md_content
         assert "`worker-001`" in md_content
         assert "<code>worktrees/feature-worker-1</code>" in md_content
         assert str(temp_dir) not in md_content
@@ -577,8 +578,8 @@ class TestMarkdownDashboard:
         )
 
         md_content = dashboard_manager.generate_markdown_dashboard()
-        assert "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |" not in md_content
-        assert "| ID | タイトル | 状態 | 担当 | 進捗 |" in md_content
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 | worktree |" not in md_content
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 |" in md_content
 
     def test_task_worktree_column_hidden_when_git_disabled(
         self, dashboard_manager, temp_dir, monkeypatch
@@ -592,8 +593,32 @@ class TestMarkdownDashboard:
         )
 
         md_content = dashboard_manager.generate_markdown_dashboard()
-        assert "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |" not in md_content
-        assert "| ID | タイトル | 状態 | 担当 | 進捗 |" in md_content
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 | worktree |" not in md_content
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 |" in md_content
+
+    def test_task_table_renders_start_and_end_times_in_hhmmss(
+        self, dashboard_manager, monkeypatch
+    ):
+        """タスク表で開始/終了時刻を HH:mm:ss 形式で表示することをテスト。"""
+        monkeypatch.setenv("MCP_ENABLE_WORKTREE", "false")
+
+        timed_task = dashboard_manager.create_task(title="Timed Task")
+        pending_task = dashboard_manager.create_task(title="Pending Task")
+        dashboard = dashboard_manager.get_dashboard()
+        timed = dashboard.get_task(timed_task.id)
+        pending = dashboard.get_task(pending_task.id)
+        assert timed is not None
+        assert pending is not None
+
+        timed.started_at = datetime(2026, 2, 10, 9, 8, 7)
+        timed.completed_at = datetime(2026, 2, 10, 10, 11, 12)
+        dashboard_manager._write_dashboard(dashboard)
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 |" in md_content
+        timed_pattern = r"\| `[^`]+` \| Timed Task \| .* \| 0% \| 09:08:07 \| 10:11:12 \|"
+        assert re.search(timed_pattern, md_content)
+        assert re.search(r"\| `[^`]+` \| Pending Task \| .* \| 0% \| - \| - \|", md_content)
 
     def test_task_assignee_is_rendered_as_agent_label(self, dashboard_manager, temp_dir):
         """タスク担当が agent_id ではなく表示名で描画されることをテスト。"""

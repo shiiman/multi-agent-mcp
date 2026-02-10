@@ -122,8 +122,14 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
 def ensure_scheduler_manager(app_ctx: AppContext) -> SchedulerManager:
     """SchedulerManagerが初期化されていることを確認する。"""
     if app_ctx.scheduler_manager is None:
+        from src.tools.helpers_persistence import save_agent_to_file
+
         dashboard = ensure_dashboard_manager(app_ctx)
-        app_ctx.scheduler_manager = SchedulerManager(dashboard, app_ctx.agents)
+        app_ctx.scheduler_manager = SchedulerManager(
+            dashboard,
+            app_ctx.agents,
+            persist_agent_state=lambda agent: save_agent_to_file(app_ctx, agent),
+        )
     return app_ctx.scheduler_manager
 
 

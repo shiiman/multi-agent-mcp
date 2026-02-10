@@ -208,13 +208,13 @@ class DashboardMarkdownMixin:
         ]
         if show_worktree:
             lines.extend([
-                "| ID | タイトル | 状態 | 担当 | 進捗 | worktree |",
-                "|:---|:---|:---|:---|:---|:---|",
+                "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 | worktree |",
+                "|:---|:---|:---|:---|:---|:---|:---|:---|",
             ])
         else:
             lines.extend([
-                "| ID | タイトル | 状態 | 担当 | 進捗 |",
-                "|:---|:---|:---|:---|:---|",
+                "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 |",
+                "|:---|:---|:---|:---|:---|:---|:---|",
             ])
         agent_labels = self._build_agent_label_map(dashboard)
 
@@ -225,6 +225,8 @@ class DashboardMarkdownMixin:
                 agent_labels,
                 with_id=False,
             ) if task.assigned_agent_id else "-"
+            started_at = self._format_task_time(task.started_at)
+            completed_at = self._format_task_time(task.completed_at)
             if show_worktree:
                 worktree = self._format_worktree_path(
                     task.worktree_path, dashboard.workspace_path
@@ -236,15 +238,22 @@ class DashboardMarkdownMixin:
                 )
                 lines.append(
                     f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
-                    f"`{assigned}` | {task.progress}% | {worktree_cell} |"
+                    f"`{assigned}` | {task.progress}% | {started_at} | {completed_at} | "
+                    f"{worktree_cell} |"
                 )
             else:
                 lines.append(
                     f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
-                    f"`{assigned}` | {task.progress}% |"
+                    f"`{assigned}` | {task.progress}% | {started_at} | {completed_at} |"
                 )
 
         return lines
+
+    def _format_task_time(self, value: datetime | None) -> str:
+        """タスク時刻を表表示向けに整形する。"""
+        if value is None:
+            return "-"
+        return value.strftime("%H:%M:%S")
 
     def _generate_task_details(self, dashboard: Dashboard) -> list[str]:
         """進行中/失敗タスクの詳細セクションを生成する。"""

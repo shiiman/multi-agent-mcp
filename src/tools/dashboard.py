@@ -561,7 +561,11 @@ def register_tools(mcp: FastMCP) -> None:
         ipc = ensure_ipc_manager(app_ctx)
 
         # タスク完了報告を送信
-        msg_type = MessageType.TASK_COMPLETE if status == "completed" else MessageType.ERROR
+        msg_type = (
+            MessageType.TASK_COMPLETE
+            if status == "completed"
+            else MessageType.TASK_FAILED
+        )
         completion_message = ipc.send_message(
             sender_id=caller_agent_id,
             receiver_id=admin_id,

@@ -916,6 +916,87 @@ class TestReportTaskCompletion:
         session_memory = MemoryManager(str(session_memory_dir))
         assert session_memory.get(key) is None
 
+    @pytest.mark.asyncio
+    async def test_reports_failed_completion_with_task_failed_message_type(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """失敗報告時は task_failed メッセージ種別で Admin に通知することをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        report_task_completion = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "report_task_completion":
+                report_task_completion = tool.fn
+                break
+        assert report_task_completion is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "issue-001"
+        app_ctx.project_root = str(git_repo)
+
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+            current_task="task-002",
+        )
+
+        with (
+            patch(
+                "src.tools.dashboard.capture_claude_actual_cost_for_agent",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.tools.dashboard.notify_agent_via_tmux",
+                AsyncMock(return_value=True),
+            ),
+        ):
+            result = await report_task_completion(
+                task_id="task-002",
+                status="failed",
+                message="失敗しました",
+                caller_agent_id="worker-001",
+                ctx=dashboard_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["reported_status"] == "failed"
+        assert result["notification_sent"] is True
+
+        messages = app_ctx.ipc_manager.read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            mark_as_read=False,
+        )
+        assert len(messages) == 1
+        assert messages[0].message_type == MessageType.TASK_FAILED
+
 
 class TestCostTools:
     """コスト関連ツールのテスト。"""

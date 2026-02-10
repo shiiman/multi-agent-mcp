@@ -47,7 +47,12 @@ Admin ID: `{agent_id}`
   caller_agent_id="{agent_id}"
 )
 {mcp_tool_prefix}create_agent(role="worker", working_dir="/path/to/worktree", caller_agent_id="{agent_id}")
-{mcp_tool_prefix}create_worktree(branch_name="xxx", caller_agent_id="{agent_id}")
+{mcp_tool_prefix}create_worktree(
+  repo_path="{project_path}",
+  worktree_path="/path/to/worktree",
+  branch="feature/xxx",
+  caller_agent_id="{agent_id}"
+)
 {mcp_tool_prefix}send_task(agent_id="xxx", task_content="内容", session_id="{session_id}", caller_agent_id="{agent_id}")
 ```
 

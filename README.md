@@ -179,6 +179,21 @@ codex mcp list
 | `check_gtr_available` | gtr (git-worktree-runner) の利用可否を確認（git有効時のみ） |
 | `open_worktree_with_ai` | gtr aiでworktreeをAIツールで開く（git有効時のみ） |
 
+#### create_worktree の引数契約
+
+`create_worktree` は以下の引数契約です（`branch_name` 引数は存在しません）。
+
+```python
+create_worktree(
+    repo_path="/path/to/repo",
+    worktree_path="/path/to/worktree",
+    branch="feature/xxx",
+    create_branch=True,
+    base_branch="main",
+    caller_agent_id="admin-or-owner-id",
+)
+```
+
 ### マージ（1個）
 
 | Tool | 説明 |
@@ -321,9 +336,9 @@ codex mcp list
 
 #### switch_model_profile の方針
 
-- `switch_model_profile` は **`.env` のアクティブプロファイル設定を更新する運用**を推奨します。
-- `config.json` はセッション設定（`session_id`, `enable_git` など）専用とし、
-  モデルプロファイルの正本としては扱いません。
+- モデルプロファイルの正準保存先は **`.multi-agent-mcp/.env`**（`MCP_MODEL_PROFILE_ACTIVE`）です。
+- `switch_model_profile` は `.env` のみを更新し、`config.json` へは保存しません。
+- `config.json` はセッション設定（`session_id`, `enable_git` など）専用です。
 
 ### 主要フィールド（公開I/F）
 

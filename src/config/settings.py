@@ -595,6 +595,9 @@ def load_effective_settings_for_project(
 
     .env の設定に加えて、config.json の runtime override（enable_git）を適用する。
 
+    モデルプロファイル関連（model_profile_active など）の正準保存先は
+    `.multi-agent-mcp/.env` とし、config.json からは読み込まない。
+
     Args:
         project_root: プロジェクトルートパス
         strict_config: True の場合、config.json 破損時に例外を送出する
@@ -613,6 +616,8 @@ def load_effective_settings_for_project(
     try:
         with open(config_file, encoding="utf-8") as f:
             config = json.load(f)
+        # config.json の runtime override は enable_git のみを許可する。
+        # モデルプロファイル関連キーは意図的に無視し、.env を正準とする。
         enable_git = config.get("enable_git")
         if isinstance(enable_git, bool):
             settings.enable_git = enable_git
