@@ -135,6 +135,7 @@ class DashboardTasksMixin:
         Returns:
             作成されたTaskInfo
         """
+
         def _create(dashboard: Dashboard) -> TaskInfo:
             task_metadata = metadata.copy() if metadata else {}
             if description:
@@ -201,6 +202,7 @@ class DashboardTasksMixin:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
+
         def _update(dashboard: Dashboard) -> tuple[bool, str]:
             task = self._resolve_task(dashboard, task_id)
             if not task:
@@ -290,6 +292,7 @@ class DashboardTasksMixin:
             now = datetime.now()
             old_status = task.status
             task.status = TaskStatus.PENDING
+            task.started_at = None
             task.completed_at = None
             task.error_message = None
             if reset_progress:
@@ -327,6 +330,7 @@ class DashboardTasksMixin:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
+
         def _assign(dashboard: Dashboard) -> tuple[bool, str]:
             task = self._resolve_task(dashboard, task_id)
             if not task:
@@ -374,6 +378,7 @@ class DashboardTasksMixin:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
+
         def _remove(dashboard: Dashboard) -> tuple[bool, str]:
             task = self._resolve_task(dashboard, task_id)
             if not task:
@@ -445,6 +450,7 @@ class DashboardTasksMixin:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
+
         def _update_checklist(dashboard: Dashboard) -> tuple[bool, str]:
             task = self._resolve_task(dashboard, task_id)
             if not task:
@@ -480,6 +486,7 @@ class DashboardTasksMixin:
         Args:
             agent: Agentオブジェクト
         """
+
         def _update_agent(dashboard: Dashboard) -> None:
             # 既存のサマリーを検索
             existing = dashboard.get_agent(agent.id)
@@ -497,11 +504,7 @@ class DashboardTasksMixin:
 
             if existing:
                 # 既存のサマリーを更新
-                idx = next(
-                    i
-                    for i, a in enumerate(dashboard.agents)
-                    if a.agent_id == agent.id
-                )
+                idx = next(i for i, a in enumerate(dashboard.agents) if a.agent_id == agent.id)
                 dashboard.agents[idx] = summary
             else:
                 # 新規追加
@@ -517,10 +520,9 @@ class DashboardTasksMixin:
         Args:
             agent_id: エージェントID
         """
+
         def _remove_agent(dashboard: Dashboard) -> None:
-            dashboard.agents = [
-                a for a in dashboard.agents if a.agent_id != agent_id
-            ]
+            dashboard.agents = [a for a in dashboard.agents if a.agent_id != agent_id]
             dashboard.calculate_stats()
 
         self._mutate_dashboard(_remove_agent)
@@ -548,9 +550,7 @@ class DashboardTasksMixin:
                 if t.worktree_path
                 and t.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
             }
-            dashboard.active_worktrees = len(
-                [wt for wt in worktrees if wt.path in assigned_paths]
-            )
+            dashboard.active_worktrees = len([wt for wt in worktrees if wt.path in assigned_paths])
             dashboard.calculate_stats()
 
         self._mutate_dashboard(_update_worktree)
@@ -561,6 +561,7 @@ class DashboardTasksMixin:
         Args:
             agent_manager: AgentManager インスタンス
         """
+
         def _sync(dashboard: Dashboard) -> None:
             dashboard.agents = []
 
@@ -610,12 +611,10 @@ class DashboardTasksMixin:
             "total_worktrees": dashboard.total_worktrees,
             "active_worktrees": dashboard.active_worktrees,
             "session_started_at": (
-                dashboard.session_started_at.isoformat()
-                if dashboard.session_started_at else None
+                dashboard.session_started_at.isoformat() if dashboard.session_started_at else None
             ),
             "session_finished_at": (
-                dashboard.session_finished_at.isoformat()
-                if dashboard.session_finished_at else None
+                dashboard.session_finished_at.isoformat() if dashboard.session_finished_at else None
             ),
             "process_crash_count": dashboard.process_crash_count,
             "process_recovery_count": dashboard.process_recovery_count,
@@ -638,9 +637,7 @@ class DashboardTasksMixin:
         if role == "admin":
             return "admin"
         cli = (
-            agent.ai_cli.value
-            if hasattr(agent.ai_cli, "value")
-            else str(agent.ai_cli or "worker")
+            agent.ai_cli.value if hasattr(agent.ai_cli, "value") else str(agent.ai_cli or "worker")
         )
         return self._build_worker_name(
             agent.id,
@@ -662,6 +659,7 @@ class DashboardTasksMixin:
         content: str,
     ) -> None:
         """Dashboard 表示用メッセージを messages.md に追記保存する。"""
+
         def _append(dashboard: Dashboard) -> None:
             message = MessageSummary(
                 sender_id=sender_id,
@@ -740,6 +738,7 @@ class DashboardTasksMixin:
 
     def increment_process_crash_count(self) -> int:
         """プロセスクラッシュ回数を1件加算する。"""
+
         def _increment(dashboard: Dashboard) -> int:
             dashboard.process_crash_count += 1
             dashboard.calculate_stats()
@@ -749,6 +748,7 @@ class DashboardTasksMixin:
 
     def increment_process_recovery_count(self) -> int:
         """プロセス復旧回数を1件加算する。"""
+
         def _increment(dashboard: Dashboard) -> int:
             dashboard.process_recovery_count += 1
             dashboard.calculate_stats()
@@ -758,6 +758,7 @@ class DashboardTasksMixin:
 
     def mark_session_finished(self) -> None:
         """セッション終了時刻を現在時刻で記録する。"""
+
         def _mark(dashboard: Dashboard) -> None:
             dashboard.session_finished_at = datetime.now()
             dashboard.calculate_stats()

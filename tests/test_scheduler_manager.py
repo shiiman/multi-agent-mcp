@@ -1,5 +1,6 @@
 """SchedulerManagerのテスト。"""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from src.managers.scheduler_manager import SchedulerManager, TaskPriority
@@ -164,3 +165,37 @@ class TestSchedulerManager:
 
         assert assignments == [(first_task.id, "agent-002")]
         assert sample_agents["agent-002"].status == "busy"
+
+    def test_get_next_task_uses_dashboard_snapshot_once(self):
+        """依存判定で Dashboard のスナップショットを 1 回だけ使うことをテスト。"""
+        dashboard = MagicMock()
+        dashboard.list_tasks.return_value = [
+            SimpleNamespace(id="dep-1", status="completed"),
+        ]
+        scheduler = SchedulerManager(dashboard, {})
+        scheduler.enqueue_task("task-1", TaskPriority.HIGH, dependencies=["dep-1"])
+
+        task_id = scheduler.get_next_task()
+
+        assert task_id == "task-1"
+        dashboard.list_tasks.assert_called_once()
+        dashboard.get_task.assert_not_called()
+
+    def test_get_queue_status_uses_snapshot_for_dependency_flags(self):
+        """キュー状態生成時に依存判定をスナップショットで行うことをテスト。"""
+        dashboard = MagicMock()
+        dashboard.list_tasks.return_value = [
+            SimpleNamespace(id="dep-ok", status="completed"),
+            SimpleNamespace(id="dep-ng", status="pending"),
+        ]
+        scheduler = SchedulerManager(dashboard, {})
+        scheduler.enqueue_task("task-ok", TaskPriority.HIGH, dependencies=["dep-ok"])
+        scheduler.enqueue_task("task-ng", TaskPriority.MEDIUM, dependencies=["dep-ng"])
+
+        status = scheduler.get_queue_status()
+
+        by_task_id = {entry["task_id"]: entry for entry in status["pending_tasks"]}
+        assert by_task_id["task-ok"]["dependencies_satisfied"] is True
+        assert by_task_id["task-ng"]["dependencies_satisfied"] is False
+        dashboard.list_tasks.assert_called_once()
+        dashboard.get_task.assert_not_called()

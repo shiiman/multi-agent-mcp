@@ -14,6 +14,60 @@ _CONSECUTIVE_ERROR_STOP_THRESHOLD = 5
 _FATAL_EXCEPTIONS = (ImportError, AttributeError, TypeError)
 
 
+async def _notify_daemon_stopped(
+    app_ctx,
+    stop_reason: str,
+    detail: str | None = None,
+) -> None:
+    """healthcheck daemon 停止を Dashboard/IPC に通知する。"""
+    subject = "healthcheck daemon stopped"
+    content = f"healthcheck daemon が停止しました: {stop_reason}"
+    if detail:
+        content = f"{content} ({detail})"
+
+    try:
+        from pathlib import Path
+
+        from src.models.message import MessagePriority, MessageType
+        from src.tools.helpers import find_agents_by_role, sync_agents_from_file
+        from src.tools.helpers_managers import ensure_dashboard_manager, ensure_ipc_manager
+
+        sync_agents_from_file(app_ctx)
+
+        dashboard = app_ctx.dashboard_manager or ensure_dashboard_manager(app_ctx)
+        dashboard.add_message(
+            sender_id="healthcheck-daemon",
+            receiver_id=None,
+            message_type=MessageType.SYSTEM.value,
+            subject=subject,
+            content=content,
+        )
+        if app_ctx.project_root and app_ctx.session_id:
+            dashboard.save_markdown_dashboard(Path(app_ctx.project_root), app_ctx.session_id)
+
+        ipc = ensure_ipc_manager(app_ctx)
+        recipients = list(
+            dict.fromkeys(
+                find_agents_by_role(app_ctx, AgentRole.OWNER.value)
+                + find_agents_by_role(app_ctx, AgentRole.ADMIN.value)
+            )
+        )
+        for receiver_id in recipients:
+            if receiver_id not in ipc.get_all_agent_ids():
+                ipc.register_agent(receiver_id)
+            ipc.send_message(
+                sender_id="healthcheck-daemon",
+                receiver_id=receiver_id,
+                message_type=MessageType.SYSTEM,
+                subject=subject,
+                content=content,
+                priority=MessagePriority.HIGH,
+                metadata={"stop_reason": stop_reason, "detail": detail or ""},
+            )
+    except Exception as e:
+        logger.debug("healthcheck daemon 停止通知の送信に失敗: %s", e)
+
+
 def is_healthcheck_daemon_running(app_ctx) -> bool:
     """health check daemon が稼働中かどうか。"""
     task = app_ctx.healthcheck_daemon_task
@@ -72,10 +126,14 @@ def _should_auto_stop(app_ctx) -> bool:
 async def _run_healthcheck_loop(app_ctx) -> None:
     """health check の常駐ループ本体。"""
     consecutive_errors = 0
+    stop_reason = "unknown"
+    stop_detail: str | None = None
+    notify_stop = False
     try:
         while True:
             stop_event = app_ctx.healthcheck_daemon_stop_event
             if stop_event is None or stop_event.is_set():
+                stop_reason = "stop_requested"
                 break
 
             try:
@@ -98,9 +156,10 @@ async def _run_healthcheck_loop(app_ctx) -> None:
                 consecutive_errors = 0
             except _FATAL_EXCEPTIONS as e:
                 # 致命的例外: 即座に daemon 停止
-                logger.error(
-                    "healthcheck daemon 致命的エラーにより停止: %s", e
-                )
+                logger.error("healthcheck daemon 致命的エラーにより停止: %s", e)
+                stop_reason = "fatal_error"
+                stop_detail = str(e)
+                notify_stop = True
                 break
             except Exception as e:
                 consecutive_errors += 1
@@ -114,6 +173,9 @@ async def _run_healthcheck_loop(app_ctx) -> None:
                         "healthcheck daemon を停止: 連続 %d 回エラー",
                         consecutive_errors,
                     )
+                    stop_reason = "consecutive_errors"
+                    stop_detail = f"count={consecutive_errors}"
+                    notify_stop = True
                     break
                 if consecutive_errors >= _CONSECUTIVE_ERROR_REINIT_THRESHOLD:
                     logger.warning(
@@ -123,17 +185,28 @@ async def _run_healthcheck_loop(app_ctx) -> None:
                     # healthcheck_manager をリセットして再初期化を促す
                     app_ctx.healthcheck_manager = None
 
-            if _should_auto_stop(app_ctx):
+            try:
+                should_stop = _should_auto_stop(app_ctx)
+            except Exception as e:
+                logger.error("healthcheck daemon auto-stop 判定エラー: %s", e)
+                stop_reason = "auto_stop_check_failed"
+                stop_detail = str(e)
+                notify_stop = True
+                break
+
+            if should_stop:
                 app_ctx.healthcheck_idle_cycles += 1
                 if (
                     app_ctx.healthcheck_idle_cycles
                     >= app_ctx.settings.healthcheck_idle_stop_consecutive
                 ):
                     logger.info(
-                        "healthcheck daemon auto-stopped "
-                        "(idle_count=%s)",
+                        "healthcheck daemon auto-stopped (idle_count=%s)",
                         app_ctx.healthcheck_idle_cycles,
                     )
+                    stop_reason = "auto_stop_idle"
+                    stop_detail = f"idle_count={app_ctx.healthcheck_idle_cycles}"
+                    notify_stop = True
                     break
             else:
                 app_ctx.healthcheck_idle_cycles = 0
@@ -144,6 +217,8 @@ async def _run_healthcheck_loop(app_ctx) -> None:
             except asyncio.TimeoutError:
                 pass
     finally:
+        if notify_stop:
+            await _notify_daemon_stopped(app_ctx, stop_reason=stop_reason, detail=stop_detail)
         app_ctx.healthcheck_daemon_task = None
         app_ctx.healthcheck_daemon_stop_event = None
         app_ctx.healthcheck_idle_cycles = 0

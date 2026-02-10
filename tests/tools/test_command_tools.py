@@ -232,6 +232,112 @@ class TestSendCommand:
         assert result["success"] is False
         assert "tmux ペインに配置されていません" in result["error"]
 
+    @pytest.mark.asyncio
+    async def test_send_command_blocks_dangerous_command_by_default(
+        self, command_mock_ctx, git_repo
+    ):
+        """危険コマンドはデフォルトでブロックされることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_command":
+                send_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_command(
+            agent_id="worker-001",
+            command="rm -rf /tmp/sandbox",
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "危険なコマンドをブロックしました" in result["error"]
+        app_ctx.tmux.send_with_rate_limit_to_pane.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_command_allows_dangerous_command_with_explicit_flag(
+        self, command_mock_ctx, git_repo
+    ):
+        """明示フラグで危険コマンド送信を許可できることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_command":
+                send_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_command(
+            agent_id="worker-001",
+            command="rm -rf /tmp/sandbox",
+            allow_dangerous=True,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        app_ctx.tmux.send_with_rate_limit_to_pane.assert_awaited_once()
+
 
 class TestGetOutput:
     """get_output ツールのテスト。"""
@@ -810,6 +916,61 @@ class TestBroadcastCommand:
         assert "worker-external" in result["results"]
         assert result["results"]["worker-external"] is True
         mock_sync.assert_called_once_with(app_ctx)
+
+    @pytest.mark.asyncio
+    async def test_broadcast_blocks_dangerous_command_by_default(
+        self, command_mock_ctx, git_repo
+    ):
+        """危険コマンドのブロードキャストはデフォルトで拒否されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        broadcast_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "broadcast_command":
+                broadcast_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await broadcast_command(
+            command="rm -rf /tmp/sandbox",
+            caller_agent_id="admin-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "危険なコマンドをブロックしました" in result["error"]
+        app_ctx.tmux.send_with_rate_limit_to_pane.assert_not_awaited()
 
 
 class TestSendTask:

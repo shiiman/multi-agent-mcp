@@ -152,7 +152,7 @@ end tell
 
     async def _maximize_window(self) -> None:
         """Ghostty ウィンドウを画面サイズに合わせる（fill arrange）。"""
-        applescript = '''
+        applescript = """
 tell application "System Events"
     tell process "Ghostty"
         if exists window 1 then
@@ -174,7 +174,7 @@ tell application "System Events"
         end if
     end tell
 end tell
-'''
+"""
         try:
             await self._run_osascript(applescript)
         except Exception as e:

@@ -79,9 +79,7 @@ def _should_block_admin_dashboard_polling(app_ctx: Any, admin_id: str) -> bool:
 def _polling_blocked_response() -> dict[str, Any]:
     return {
         "success": False,
-        "error": (
-            "polling_blocked: IPC 通知待機中のため連続ダッシュボード参照はできません"
-        ),
+        "error": ("polling_blocked: IPC 通知待機中のため連続ダッシュボード参照はできません"),
         "next_action": "wait_for_ipc_notification",
     }
 
@@ -151,9 +149,7 @@ async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
     # Markdown ダッシュボードを保存
     if app_ctx.session_id and app_ctx.project_root:
         try:
-            dashboard.save_markdown_dashboard(
-                app_ctx.project_root, app_ctx.session_id
-            )
+            dashboard.save_markdown_dashboard(app_ctx.project_root, app_ctx.session_id)
         except Exception as e:
             logger.warning(f"Dashboard ファイル更新に失敗: {e}")
 
@@ -400,15 +396,35 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             タスク一覧（success, tasks, count または error）
         """
-        app_ctx, role_error = require_permission(ctx, "list_tasks", caller_agent_id)
+        permission_target_agent_id = agent_id or caller_agent_id
+        app_ctx, role_error = require_permission(
+            ctx,
+            "list_tasks",
+            caller_agent_id,
+            target_agent_id=permission_target_agent_id,
+        )
         if role_error:
             return _normalize_owner_wait_error(app_ctx, caller_agent_id, role_error)
 
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
+        is_worker = caller_role in (AgentRole.WORKER.value, "worker")
         is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
-        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
-            app_ctx, caller_agent_id
+        if is_worker:
+            if agent_id and caller_agent_id and agent_id != caller_agent_id:
+                return {
+                    "success": False,
+                    "error": (
+                        "Worker は list_tasks を自分自身の agent_id でのみ実行できます。"
+                        f" caller_agent_id={caller_agent_id}, agent_id={agent_id}"
+                    ),
+                }
+            # Worker は常に self-scope（自分に割り当てられたタスクのみ）
+            agent_id = caller_agent_id
+        if (
+            is_admin
+            and caller_agent_id
+            and _should_block_admin_dashboard_polling(app_ctx, caller_agent_id)
         ):
             return _polling_blocked_response()
 
@@ -657,11 +673,7 @@ def register_tools(mcp: FastMCP) -> None:
         ipc = ensure_ipc_manager(app_ctx)
 
         # タスク完了報告を送信
-        msg_type = (
-            MessageType.TASK_COMPLETE
-            if status == "completed"
-            else MessageType.TASK_FAILED
-        )
+        msg_type = MessageType.TASK_COMPLETE if status == "completed" else MessageType.TASK_FAILED
         status_label = _task_status_label_ja(status)
         completion_message = ipc.send_message(
             sender_id=caller_agent_id,
@@ -751,7 +763,12 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             タスク詳細（success, task または error）
         """
-        app_ctx, role_error = require_permission(ctx, "get_task", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx,
+            "get_task",
+            caller_agent_id,
+            target_agent_id=caller_agent_id,
+        )
         if role_error:
             return role_error
 
@@ -762,6 +779,18 @@ def register_tools(mcp: FastMCP) -> None:
             return {
                 "success": False,
                 "error": f"タスク {task_id} が見つかりません",
+            }
+
+        caller = app_ctx.agents.get(caller_agent_id)
+        caller_role = getattr(caller, "role", None)
+        is_worker = caller_role in (AgentRole.WORKER.value, "worker")
+        if is_worker and task.assigned_agent_id != caller_agent_id:
+            return {
+                "success": False,
+                "error": (
+                    "Worker は自分に割り当てられたタスクのみ取得できます。"
+                    f" assigned={task.assigned_agent_id}, caller={caller_agent_id}"
+                ),
             }
 
         return {
@@ -824,11 +853,16 @@ def register_tools(mcp: FastMCP) -> None:
         caller_role = getattr(caller, "role", None)
         is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
         is_admin_or_owner = caller_role in (
-            AgentRole.ADMIN.value, AgentRole.OWNER.value, "admin", "owner",
+            AgentRole.ADMIN.value,
+            AgentRole.OWNER.value,
+            "admin",
+            "owner",
         )
 
-        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
-            app_ctx, caller_agent_id
+        if (
+            is_admin
+            and caller_agent_id
+            and _should_block_admin_dashboard_polling(app_ctx, caller_agent_id)
         ):
             return _polling_blocked_response()
 
@@ -866,11 +900,16 @@ def register_tools(mcp: FastMCP) -> None:
         caller_role = getattr(caller, "role", None)
         is_admin = caller_role in (AgentRole.ADMIN.value, "admin")
         is_admin_or_owner = caller_role in (
-            AgentRole.ADMIN.value, AgentRole.OWNER.value, "admin", "owner",
+            AgentRole.ADMIN.value,
+            AgentRole.OWNER.value,
+            "admin",
+            "owner",
         )
 
-        if is_admin and caller_agent_id and _should_block_admin_dashboard_polling(
-            app_ctx, caller_agent_id
+        if (
+            is_admin
+            and caller_agent_id
+            and _should_block_admin_dashboard_polling(app_ctx, caller_agent_id)
         ):
             return _polling_blocked_response()
 

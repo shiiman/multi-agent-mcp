@@ -4,6 +4,7 @@
 YAML Front Matter 付き Markdown で統一管理。
 """
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -46,6 +47,15 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
         self.settings = settings or load_settings_for_project(workspace_path)
         self._dashboard_lock_timeout_seconds = 1.0
 
+    @staticmethod
+    def _is_event_loop_running() -> bool:
+        """現在スレッドで event loop が実行中か判定する。"""
+        try:
+            asyncio.get_running_loop()
+            return True
+        except RuntimeError:
+            return False
+
     def initialize(self) -> None:
         """ダッシュボード環境を初期化する。"""
         self.dashboard_dir.mkdir(parents=True, exist_ok=True)
@@ -64,9 +74,7 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
 
         dashboard.md / messages.md はセッション履歴として永続保持するため削除しない。
         """
-        logger.info(
-            "ダッシュボード環境をクリーンアップしました（dashboard/messages は保持）"
-        )
+        logger.info("ダッシュボード環境をクリーンアップしました（dashboard/messages は保持）")
 
     def _get_dashboard_path(self) -> Path:
         return self.dashboard_dir / "dashboard.md"
@@ -85,6 +93,7 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
         lock_path = self._get_dashboard_lock_path()
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         started_at = time.monotonic()
+        running_in_event_loop = self._is_event_loop_running()
 
         with open(lock_path, "a+", encoding="utf-8") as lock_file:
             while True:
@@ -92,6 +101,9 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
                 except BlockingIOError as e:
+                    if running_in_event_loop:
+                        msg = f"dashboard lock busy in event loop context: {lock_path}"
+                        raise TimeoutError(msg) from e
                     elapsed = time.monotonic() - started_at
                     if elapsed >= self._dashboard_lock_timeout_seconds:
                         msg = (
@@ -138,9 +150,7 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
             )
             content = f"---\n{yaml_str}---\n\n{md_content}"
             dashboard_path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(dashboard_path.parent), suffix=".tmp"
-            )
+            fd, tmp_path = tempfile.mkstemp(dir=str(dashboard_path.parent), suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write(content)

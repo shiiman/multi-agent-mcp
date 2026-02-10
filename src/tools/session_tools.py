@@ -98,9 +98,7 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
-        results = await cleanup_session_resources(
-            app_ctx, remove_worktrees=False
-        )
+        results = await cleanup_session_resources(app_ctx, remove_worktrees=False)
 
         return {
             "success": True,
@@ -294,9 +292,7 @@ def register_tools(mcp: FastMCP) -> None:
                 ),
             }
 
-        resolved_project_root = (
-            detected_project_root if effective_enable_git else working_dir_path
-        )
+        resolved_project_root = detected_project_root if effective_enable_git else working_dir_path
         app_ctx.settings.enable_git = effective_enable_git
         app_ctx.tmux.settings.enable_git = effective_enable_git
         app_ctx.ai_cli.settings.enable_git = effective_enable_git
@@ -376,16 +372,12 @@ def register_tools(mcp: FastMCP) -> None:
             app_ctx.session_id = session_id
             if app_ctx.ipc_manager is not None:
                 expected_ipc_dir = (
-                    Path(resolved_project_root)
-                    / app_ctx.settings.mcp_dir
-                    / session_id
-                    / "ipc"
+                    Path(resolved_project_root) / app_ctx.settings.mcp_dir / session_id / "ipc"
                 )
                 current_ipc_dir = Path(app_ctx.ipc_manager.ipc_dir)
-                is_session_scoped_ipc = (
-                    f"/{app_ctx.settings.mcp_dir}/" in str(current_ipc_dir)
-                    and str(current_ipc_dir).endswith("/ipc")
-                )
+                is_session_scoped_ipc = f"/{app_ctx.settings.mcp_dir}/" in str(
+                    current_ipc_dir
+                ) and str(current_ipc_dir).endswith("/ipc")
                 if (
                     is_session_scoped_ipc
                     and current_ipc_dir.resolve() != expected_ipc_dir.resolve()

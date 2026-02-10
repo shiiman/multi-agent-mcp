@@ -157,11 +157,36 @@ class SchedulerManager:
         Returns:
             全て完了している場合True
         """
+        if not dependencies:
+            return True
+
         for dep_id in dependencies:
             task = self.dashboard_manager.get_task(dep_id)
             if not task or task.status != "completed":
                 return False
         return True
+
+    def _build_task_status_snapshot(self) -> dict[str, str]:
+        """Dashboard からタスク状態のスナップショットを作成する。
+
+        Returns:
+            task_id -> status の辞書
+        """
+        snapshot: dict[str, str] = {}
+        for task in self.dashboard_manager.list_tasks():
+            status = task.status.value if hasattr(task.status, "value") else str(task.status)
+            snapshot[task.id] = status
+        return snapshot
+
+    def _dependencies_satisfied_with_snapshot(
+        self,
+        dependencies: list[str],
+        status_snapshot: dict[str, str],
+    ) -> bool:
+        """スナップショットを使って依存タスク完了判定を行う。"""
+        if not dependencies:
+            return True
+        return all(status_snapshot.get(dep_id) == "completed" for dep_id in dependencies)
 
     def get_next_task(self) -> str | None:
         """次に実行すべきタスクを取得する（依存関係考慮）。
@@ -169,10 +194,11 @@ class SchedulerManager:
         Returns:
             タスクID、なければNone
         """
+        status_snapshot = self._build_task_status_snapshot()
         for scheduled in sorted(self._task_queue):
             if scheduled.task_id in self._assigned_tasks:
                 continue
-            if self._dependencies_satisfied(scheduled.dependencies):
+            if self._dependencies_satisfied_with_snapshot(scheduled.dependencies, status_snapshot):
                 return scheduled.task_id
         return None
 
@@ -301,23 +327,24 @@ class SchedulerManager:
         Returns:
             状態情報の辞書
         """
+        status_snapshot = self._build_task_status_snapshot()
         pending = []
         for scheduled in sorted(self._task_queue):
             if scheduled.task_id not in self._assigned_tasks:
-                pending.append({
-                    "task_id": scheduled.task_id,
-                    "priority": TaskPriority(scheduled.priority).name,
-                    "created_at": scheduled.created_at.isoformat(),
-                    "dependencies": scheduled.dependencies,
-                    "dependencies_satisfied": self._dependencies_satisfied(
-                        scheduled.dependencies
-                    ),
-                })
+                pending.append(
+                    {
+                        "task_id": scheduled.task_id,
+                        "priority": TaskPriority(scheduled.priority).name,
+                        "created_at": scheduled.created_at.isoformat(),
+                        "dependencies": scheduled.dependencies,
+                        "dependencies_satisfied": self._dependencies_satisfied_with_snapshot(
+                            scheduled.dependencies,
+                            status_snapshot,
+                        ),
+                    }
+                )
 
-        assigned = [
-            {"task_id": tid, "worker_id": wid}
-            for tid, wid in self._assigned_tasks.items()
-        ]
+        assigned = [{"task_id": tid, "worker_id": wid} for tid, wid in self._assigned_tasks.items()]
 
         return {
             "pending_count": len(pending),

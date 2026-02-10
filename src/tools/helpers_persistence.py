@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -26,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 # sync_agents_from_file のキャッシュ TTL（秒）
 _SYNC_CACHE_TTL_SECONDS = 2.0
-# 最終同期時刻を保持するグローバル変数
-_last_sync_time: float = 0.0
+# scope（session/path）ごとの最終同期時刻を保持する
+_last_sync_times: dict[str, float] = {}
 
 
 def _normalize_project_root_for_persistence(
@@ -45,13 +48,10 @@ def _normalize_project_root_for_persistence(
 
 def reset_sync_cache() -> None:
     """sync_agents_from_file のキャッシュをリセットする（テスト用）。"""
-    global _last_sync_time
-    _last_sync_time = 0.0
+    _last_sync_times.clear()
 
 
-def _get_agents_file_path(
-    project_root: str | None, session_id: str | None = None
-) -> Path | None:
+def _get_agents_file_path(project_root: str | None, session_id: str | None = None) -> Path | None:
     """エージェント情報ファイルのパスを取得する。
 
     Args:
@@ -70,6 +70,71 @@ def _get_agents_file_path(
     return Path(project_root) / get_mcp_dir() / session_id / "agents.json"
 
 
+def _resolve_agents_file_path(
+    app_ctx: AppContext,
+    *,
+    working_dir_fallback: str | None = None,
+) -> Path | None:
+    """AppContext から agents.json の実体パスを解決する。"""
+    project_root = app_ctx.project_root
+    if not project_root:
+        project_root = get_project_root_from_config()
+    if not project_root and working_dir_fallback:
+        project_root = working_dir_fallback
+
+    project_root = _normalize_project_root_for_persistence(
+        project_root, app_ctx.settings.enable_git
+    )
+    session_id = ensure_session_id(app_ctx)
+    return _get_agents_file_path(project_root, session_id)
+
+
+def _get_sync_cache_key(agents_file: Path | None) -> str:
+    """同期キャッシュのキーを返す（agents.json パス単位）。"""
+    if agents_file is None:
+        return "none"
+    try:
+        return str(agents_file.expanduser().resolve())
+    except OSError:
+        return str(agents_file.expanduser())
+
+
+def _get_agents_lock_path(agents_file: Path) -> Path:
+    """agents.json 用の排他ロックファイルパスを返す。"""
+    return agents_file.with_name(f"{agents_file.stem}.lock")
+
+
+@contextmanager
+def _agents_file_lock(agents_file: Path) -> Iterator[None]:
+    """agents.json の更新時に排他ロックを取得する。"""
+    lock_path = _get_agents_lock_path(agents_file)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _atomic_write_json(file_path: Path, payload: dict[str, Any]) -> None:
+    """JSON payload をアトミックに書き込む。"""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    content = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    fd, tmp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, str(file_path))
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def save_agent_to_file(app_ctx: AppContext, agent: Agent) -> bool:
     """エージェント情報をファイルに保存する。
 
@@ -84,58 +149,25 @@ def save_agent_to_file(app_ctx: AppContext, agent: Agent) -> bool:
         成功した場合 True
     """
 
-    # project_root を決定（複数のソースから取得を試みる）
-    project_root = app_ctx.project_root
-
-    # config.json から取得（init_tmux_workspace で設定される）
-    if not project_root:
-        project_root = get_project_root_from_config()
-
-    # エージェントの working_dir から取得
-    if not project_root and agent.working_dir:
-        project_root = agent.working_dir
-
-    # worktree の場合はメインリポジトリのパスを使用
-    project_root = _normalize_project_root_for_persistence(
-        project_root, app_ctx.settings.enable_git
-    )
-
-    # session_id を確保（config.json から読み取り）
-    session_id = ensure_session_id(app_ctx)
-    agents_file = _get_agents_file_path(project_root, session_id)
+    agents_file = _resolve_agents_file_path(app_ctx, working_dir_fallback=agent.working_dir)
 
     if not agents_file:
         logger.debug("project_root が設定されていないため、エージェント情報を保存できません")
         return False
 
     try:
-        # 既存のエージェント情報を読み込み
-        agents_data: dict[str, Any] = {}
-        if agents_file.exists():
-            with open(agents_file, encoding="utf-8") as f:
-                agents_data = json.load(f)
+        with _agents_file_lock(agents_file):
+            # 既存のエージェント情報を読み込み
+            agents_data: dict[str, Any] = {}
+            if agents_file.exists():
+                with open(agents_file, encoding="utf-8") as f:
+                    agents_data = json.load(f)
 
-        # エージェント情報を追加/更新
-        agents_data[agent.id] = agent.model_dump(mode="json")
+            # エージェント情報を追加/更新
+            agents_data[agent.id] = agent.model_dump(mode="json")
 
-        # ディレクトリ作成
-        agents_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # アトミック書き込み（tmpfile + os.replace）
-        content = json.dumps(agents_data, ensure_ascii=False, indent=2, default=str)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(agents_file.parent), suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-            os.replace(tmp_path, str(agents_file))
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+            # アトミック書き込み（tmpfile + os.replace）
+            _atomic_write_json(agents_file, agents_data)
 
         logger.debug(f"エージェント {agent.id} を {agents_file} に保存しました")
         return True
@@ -145,7 +177,7 @@ def save_agent_to_file(app_ctx: AppContext, agent: Agent) -> bool:
         return False
 
 
-def load_agents_from_file(app_ctx: AppContext) -> dict[str, Agent]:
+def load_agents_from_file(app_ctx: AppContext, agents_file: Path | None = None) -> dict[str, Agent]:
     """ファイルからエージェント情報を読み込む。
 
     Args:
@@ -156,25 +188,13 @@ def load_agents_from_file(app_ctx: AppContext) -> dict[str, Agent]:
     """
     from src.models.agent import Agent  # 循環インポート回避
 
-    # project_root を決定（app_ctx → config.json の順）
-    project_root = app_ctx.project_root
-    if not project_root:
-        project_root = get_project_root_from_config()
+    resolved_agents_file = agents_file or _resolve_agents_file_path(app_ctx)
 
-    # worktree の場合はメインリポジトリのパスを使用
-    project_root = _normalize_project_root_for_persistence(
-        project_root, app_ctx.settings.enable_git
-    )
-
-    # session_id を確保（config.json から読み取り）
-    session_id = ensure_session_id(app_ctx)
-    agents_file = _get_agents_file_path(project_root, session_id)
-
-    if not agents_file or not agents_file.exists():
+    if not resolved_agents_file or not resolved_agents_file.exists():
         return {}
 
     try:
-        with open(agents_file, encoding="utf-8") as f:
+        with open(resolved_agents_file, encoding="utf-8") as f:
             agents_data = json.load(f)
 
         agents: dict[str, Agent] = {}
@@ -189,7 +209,9 @@ def load_agents_from_file(app_ctx: AppContext) -> dict[str, Agent]:
             except (KeyError, ValueError, TypeError) as e:
                 logger.warning(f"エージェント {agent_id} のパースに失敗: {e}")
 
-        logger.debug(f"{len(agents)} 件のエージェント情報を {agents_file} から読み込みました")
+        logger.debug(
+            f"{len(agents)} 件のエージェント情報を {resolved_agents_file} から読み込みました"
+        )
         return agents
 
     except (OSError, json.JSONDecodeError) as e:
@@ -208,29 +230,36 @@ def sync_agents_from_file(app_ctx: AppContext, force: bool = False) -> int:
         force: TTL を無視して強制同期するか
 
     Returns:
-        追加されたエージェント数
+        追加または更新されたエージェント数
     """
-    global _last_sync_time
+    agents_file = _resolve_agents_file_path(app_ctx)
+    cache_key = _get_sync_cache_key(agents_file)
 
     if not force:
         now = time.monotonic()
-        if (now - _last_sync_time) < _SYNC_CACHE_TTL_SECONDS:
+        last_sync_time = _last_sync_times.get(cache_key, 0.0)
+        if (now - last_sync_time) < _SYNC_CACHE_TTL_SECONDS:
             return 0
 
-    file_agents = load_agents_from_file(app_ctx)
-    added = 0
+    file_agents = load_agents_from_file(app_ctx, agents_file=agents_file)
+    synced = 0
 
     for agent_id, agent in file_agents.items():
-        if agent_id not in app_ctx.agents:
+        current = app_ctx.agents.get(agent_id)
+        if current is None:
             app_ctx.agents[agent_id] = agent
-            added += 1
+            synced += 1
+            continue
+        if current.model_dump(mode="json") != agent.model_dump(mode="json"):
+            app_ctx.agents[agent_id] = agent
+            synced += 1
 
-    _last_sync_time = time.monotonic()
+    _last_sync_times[cache_key] = time.monotonic()
 
-    if added > 0:
-        logger.info(f"ファイルから {added} 件のエージェント情報を同期しました")
+    if synced > 0:
+        logger.info(f"ファイルから {synced} 件のエージェント情報を同期しました")
 
-    return added
+    return synced
 
 
 def delete_agents_file(app_ctx: AppContext) -> bool:
@@ -272,51 +301,22 @@ def remove_agent_from_file(app_ctx: AppContext, agent_id: str) -> bool:
     Returns:
         成功した場合 True
     """
-    # project_root を決定（複数のソースから取得を試みる）
-    project_root = app_ctx.project_root
-
-    # config.json から取得（init_tmux_workspace で設定される）
-    if not project_root:
-        project_root = get_project_root_from_config()
-
-    # worktree の場合はメインリポジトリのパスを使用
-    project_root = _normalize_project_root_for_persistence(
-        project_root, app_ctx.settings.enable_git
-    )
-
-    # session_id を確保（config.json から読み取り）
-    session_id = ensure_session_id(app_ctx)
-    agents_file = _get_agents_file_path(project_root, session_id)
+    agents_file = _resolve_agents_file_path(app_ctx)
 
     if not agents_file or not agents_file.exists():
         return False
 
     try:
-        with open(agents_file, encoding="utf-8") as f:
-            agents_data = json.load(f)
+        with _agents_file_lock(agents_file):
+            with open(agents_file, encoding="utf-8") as f:
+                agents_data = json.load(f)
 
-        if agent_id in agents_data:
-            del agents_data[agent_id]
+            if agent_id in agents_data:
+                del agents_data[agent_id]
+                _atomic_write_json(agents_file, agents_data)
 
-            content = json.dumps(
-                agents_data, ensure_ascii=False, indent=2, default=str
-            )
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(agents_file.parent), suffix=".tmp"
-            )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(content)
-                os.replace(tmp_path, str(agents_file))
-            except BaseException:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
-
-            logger.debug(f"エージェント {agent_id} を {agents_file} から削除しました")
-            return True
+                logger.debug(f"エージェント {agent_id} を {agents_file} から削除しました")
+                return True
 
         return False
 

@@ -47,6 +47,7 @@ def _check_completion_status(app_ctx: AppContext) -> dict[str, Any]:
         "failed_tasks": failed,
     }
 
+
 def _reset_app_context(app_ctx: AppContext) -> None:
     """アプリケーションコンテキストのインメモリ状態をリセットする。
 
@@ -146,9 +147,7 @@ def _clear_config_session_id(app_ctx: AppContext) -> bool:
         del config["session_id"]
         # アトミック書き込み
         content = json.dumps(config, ensure_ascii=False, indent=2)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(config_file.parent), suffix=".tmp"
-        )
+        fd, tmp_path = tempfile.mkstemp(dir=str(config_file.parent), suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -346,14 +345,10 @@ async def cleanup_session_resources(
     from src.models.agent import AgentRole
     from src.tools.helpers import remove_agents_by_owner
 
-    owner_agent = next(
-        (a for a in agents.values() if a.role == AgentRole.OWNER), None
-    )
+    owner_agent = next((a for a in agents.values() if a.role == AgentRole.OWNER), None)
     if owner_agent:
         results["registry_removed"] = remove_agents_by_owner(owner_agent.id)
-        logger.info(
-            f"レジストリから {results['registry_removed']} エージェントを削除しました"
-        )
+        logger.info(f"レジストリから {results['registry_removed']} エージェントを削除しました")
 
     # ⑦ agents.json 削除
     from src.tools.helpers_persistence import delete_agents_file

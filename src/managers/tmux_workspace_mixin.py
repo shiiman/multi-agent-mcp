@@ -206,9 +206,7 @@ class TmuxWorkspaceMixin:
         for col in range(cols - 1, -1, -1):
             pane_target = f"{target}.{col}"
             for _ in range(rows - 1):
-                code, _, stderr = await self._run(
-                    "split-window", "-v", "-t", pane_target
-                )
+                code, _, stderr = await self._run("split-window", "-v", "-t", pane_target)
                 if code != 0:
                     logger.error(f"垂直分割エラー: {stderr}")
                     return False
@@ -412,9 +410,7 @@ class TmuxWorkspaceMixin:
 
         def _tokenize(text: str) -> set[str]:
             return {
-                token
-                for token in re.findall(r"[a-zA-Z0-9_./:-]+", text.lower())
-                if len(token) >= 2
+                token for token in re.findall(r"[a-zA-Z0-9_./:-]+", text.lower()) if len(token) >= 2
             }
 
         # 直近の Codex 入力プロンプト（› ...）を優先して判定する。
@@ -491,9 +487,7 @@ class TmuxWorkspaceMixin:
                 return True
 
             if "tab to queue message" in output.lower():
-                logger.debug(
-                    "Codex queue モードを検出。復帰後にコマンドを再送します"
-                )
+                logger.debug("Codex queue モードを検出。復帰後にコマンドを再送します")
                 if not await self._recover_codex_queue_mode(target):
                     return False
                 resent = await self.send_keys_to_pane(
@@ -584,9 +578,7 @@ class TmuxWorkspaceMixin:
             return ""
         return stdout
 
-    async def get_pane_current_command(
-        self, session: str, window: int, pane: int
-    ) -> str | None:
+    async def get_pane_current_command(self, session: str, window: int, pane: int) -> str | None:
         """指定ペインで現在実行中のコマンド名を取得する。
 
         Args:
@@ -611,9 +603,7 @@ class TmuxWorkspaceMixin:
         command = stdout.strip()
         return command or None
 
-    async def set_pane_title(
-        self, session: str, window: int, pane: int, title: str
-    ) -> bool:
+    async def set_pane_title(self, session: str, window: int, pane: int, title: str) -> bool:
         """ペインにタイトルを設定する。
 
         Args:
@@ -628,9 +618,7 @@ class TmuxWorkspaceMixin:
         target = self._pane_target(session, window, pane)
 
         # ペインタイトルを設定
-        code, _, stderr = await self._run(
-            "select-pane", "-t", target, "-T", title
-        )
+        code, _, stderr = await self._run("select-pane", "-t", target, "-T", title)
         if code != 0:
             logger.warning(f"ペインタイトル設定警告: {stderr}")
         return code == 0
@@ -779,9 +767,7 @@ class TmuxWorkspaceMixin:
         for app in [TerminalApp.GHOSTTY, TerminalApp.ITERM2, TerminalApp.TERMINAL]:
             executor = executors[app]
             if await executor.is_available():
-                success, msg = await executor.execute_script(
-                    working_dir, script, script_path
-                )
+                success, msg = await executor.execute_script(working_dir, script, script_path)
                 if success:
                     return True, msg
 

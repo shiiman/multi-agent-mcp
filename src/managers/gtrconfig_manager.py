@@ -134,11 +134,13 @@ class GtrconfigManager:
                 include.append(str(rel_path))
 
         # 実際の.envファイルはexclude
-        exclude.extend([
-            "**/.env",
-            "**/.env.local",
-            "**/.env.*.local",
-        ])
+        exclude.extend(
+            [
+                "**/.env",
+                "**/.env.local",
+                "**/.env.*.local",
+            ]
+        )
 
         return include, exclude
 
@@ -162,15 +164,17 @@ class GtrconfigManager:
         config["copy"]["exclude"].extend(env_exclude)
 
         # 標準の除外パターン
-        config["copy"]["exclude"].extend([
-            "**/node_modules/**",
-            "**/__pycache__/**",
-            "**/.git/**",
-            "**/target/**",
-            "**/vendor/**",
-            "**/.venv/**",
-            "**/venv/**",
-        ])
+        config["copy"]["exclude"].extend(
+            [
+                "**/node_modules/**",
+                "**/__pycache__/**",
+                "**/.git/**",
+                "**/target/**",
+                "**/vendor/**",
+                "**/.venv/**",
+                "**/venv/**",
+            ]
+        )
 
         # ドキュメントファイル
         if list(self.project_root.glob("*.md")):
@@ -178,10 +182,9 @@ class GtrconfigManager:
 
         # AI CLI の設定ファイルがあれば include に追加
         for cli_file in ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "CODEX.md", ".cursorrules"]:
-            if (
-                (self.project_root / cli_file).exists()
-                and cli_file not in config["copy"]["include"]
-            ):
+            if (self.project_root / cli_file).exists() and cli_file not in config["copy"][
+                "include"
+            ]:
                 config["copy"]["include"].append(cli_file)
 
         # 重複を除去

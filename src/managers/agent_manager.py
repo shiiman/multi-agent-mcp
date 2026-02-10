@@ -266,9 +266,7 @@ class AgentManager:
         else:
             raise ValueError(f"不明なロール: {role}")
 
-    def is_pane_occupied(
-        self, session_name: str, window_index: int, pane_index: int
-    ) -> bool:
+    def is_pane_occupied(self, session_name: str, window_index: int, pane_index: int) -> bool:
         """指定したペインが使用中か確認する。
 
         Args:
@@ -305,9 +303,7 @@ class AgentManager:
                 assignments[key] = agent.id
         return assignments
 
-    def get_next_worker_slot(
-        self, settings: Settings
-    ) -> tuple[int, int] | None:
+    def get_next_worker_slot(self, settings: Settings) -> tuple[int, int] | None:
         """次に利用可能なWorkerスロット（ウィンドウ, ペイン）を取得する。
 
         Args:
@@ -354,15 +350,15 @@ class AgentManager:
         Returns:
             Worker数
         """
-        return len([
-            a
-            for a in self.agents.values()
-            if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
-        ])
+        return len(
+            [
+                a
+                for a in self.agents.values()
+                if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
+            ]
+        )
 
-    async def ensure_sessions_exist(
-        self, settings: Settings, working_dir: str
-    ) -> tuple[bool, str]:
+    async def ensure_sessions_exist(self, settings: Settings, working_dir: str) -> tuple[bool, str]:
         """メインセッションが存在することを確認し、なければ作成する。
 
         単一セッション方式: 左右50:50分離レイアウト

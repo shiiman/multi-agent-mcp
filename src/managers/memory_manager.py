@@ -42,11 +42,11 @@ def _get_default_ttl_days() -> int:
 def _sanitize_filename(key: str) -> str:
     """キーをファイル名として安全な形式に変換する。"""
     # 危険な文字を置換
-    safe = re.sub(r'[<>:"/\\|?*]', '_', key)
+    safe = re.sub(r'[<>:"/\\|?*]', "_", key)
     # 先頭・末尾の空白とドットを除去
-    safe = safe.strip(' .')
+    safe = safe.strip(" .")
     # 空の場合はデフォルト名
-    return safe or 'entry'
+    return safe or "entry"
 
 
 @dataclass
@@ -189,12 +189,12 @@ class MemoryManager:
                 key=front_matter["key"],
                 content=body,
                 tags=front_matter.get("tags", []),
-                created_at=datetime.fromisoformat(
-                    front_matter["created_at"]
-                ) if "created_at" in front_matter else datetime.now(),
-                updated_at=datetime.fromisoformat(
-                    front_matter["updated_at"]
-                ) if "updated_at" in front_matter else datetime.now(),
+                created_at=datetime.fromisoformat(front_matter["created_at"])
+                if "created_at" in front_matter
+                else datetime.now(),
+                updated_at=datetime.fromisoformat(front_matter["updated_at"])
+                if "updated_at" in front_matter
+                else datetime.now(),
                 metadata=front_matter.get("metadata", {}),
             )
         except (OSError, yaml.YAMLError, KeyError, ValueError) as e:
@@ -218,8 +218,10 @@ class MemoryManager:
 
             # YAML + Markdown を結合
             yaml_str = yaml.dump(
-                front_matter, allow_unicode=True,
-                default_flow_style=False, sort_keys=False,
+                front_matter,
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
             )
             content = f"---\n{yaml_str}---\n\n{entry.content}\n"
 
@@ -350,9 +352,7 @@ class MemoryManager:
 
         # 1. TTL を超えたエントリを収集
         expired_keys = [
-            key
-            for key, entry in self.entries.items()
-            if entry.updated_at < cutoff_date
+            key for key, entry in self.entries.items() if entry.updated_at < cutoff_date
         ]
         for key in expired_keys:
             entries_to_archive.append(self.entries[key])
@@ -644,11 +644,7 @@ class MemoryManager:
         Returns:
             マッチしたメモリエントリのリスト
         """
-        return [
-            entry
-            for entry in self.entries.values()
-            if any(tag in entry.tags for tag in tags)
-        ]
+        return [entry for entry in self.entries.values() if any(tag in entry.tags for tag in tags)]
 
     def list_all(self) -> list[MemoryEntry]:
         """すべてのメモリエントリを取得する。

@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 def _sanitize_filename(value: str) -> str:
     """ファイル名として安全な形式に変換する。"""
-    safe = re.sub(r'[<>:"/\\|?*]', '_', value)
-    safe = safe.strip(' .')
-    return safe or 'message'
+    safe = re.sub(r'[<>:"/\\|?*]', "_", value)
+    safe = safe.strip(" .")
+    return safe or "message"
 
 
 class IPCManager:
@@ -55,6 +55,7 @@ class IPCManager:
         """IPC環境をクリーンアップする。"""
         if self.ipc_dir.exists():
             import shutil
+
             shutil.rmtree(self.ipc_dir)
         logger.info("IPC環境をクリーンアップしました")
 
@@ -97,9 +98,9 @@ class IPCManager:
                 content=body,
                 metadata=front_matter.get("metadata", {}),
                 created_at=datetime.fromisoformat(front_matter["created_at"]),
-                read_at=datetime.fromisoformat(
-                    front_matter["read_at"]
-                ) if front_matter.get("read_at") else None,
+                read_at=datetime.fromisoformat(front_matter["read_at"])
+                if front_matter.get("read_at")
+                else None,
             )
         except (OSError, yaml.YAMLError, KeyError, ValueError) as e:
             logger.warning(f"メッセージの読み込みに失敗 ({file_path}): {e}")
@@ -121,17 +122,17 @@ class IPCManager:
             front_matter["metadata"] = message.metadata
 
         yaml_str = yaml.dump(
-            front_matter, allow_unicode=True,
-            default_flow_style=False, sort_keys=False,
+            front_matter,
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
         )
         return f"---\n{yaml_str}---\n\n{message.content}\n"
 
     def _atomic_write(self, file_path: Path, content: str) -> None:
         """アトミック書き込み（tmpfile + os.replace）でファイルを安全に保存する。"""
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(file_path.parent), suffix=".tmp"
-        )
+        fd, tmp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -181,6 +182,7 @@ class IPCManager:
         agent_dir = self._get_agent_dir(agent_id)
         if agent_dir.exists():
             import shutil
+
             shutil.rmtree(agent_dir)
             logger.info(f"エージェント {agent_id} のディレクトリを削除しました")
 

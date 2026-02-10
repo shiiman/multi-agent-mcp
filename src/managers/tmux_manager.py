@@ -260,9 +260,7 @@ class TmuxManager(TmuxWorkspaceMixin):
         return False
 
     async def _open_in_iterm2(self, attach_cmd: str) -> bool:
-        iterm_check = await self._run_exec(
-            "osascript", "-e", 'application "iTerm" exists'
-        )
+        iterm_check = await self._run_exec("osascript", "-e", 'application "iTerm" exists')
         if iterm_check[0] == 0:
             escaped_cmd = tmux_shared.escape_applescript(attach_cmd)
             applescript = f'''

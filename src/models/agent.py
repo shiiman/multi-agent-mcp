@@ -45,9 +45,7 @@ class Agent(BaseModel):
     id: str = Field(description="エージェントの一意識別子")
     role: AgentRole = Field(description="エージェントの役割")
     status: AgentStatus = Field(default=AgentStatus.IDLE, description="エージェントの状態")
-    tmux_session: str | None = Field(
-        default=None, description="tmuxセッション名（Owner は None）"
-    )
+    tmux_session: str | None = Field(default=None, description="tmuxセッション名（Owner は None）")
     working_dir: str | None = Field(default=None, description="作業ディレクトリのパス")
     worktree_path: str | None = Field(default=None, description="割り当てられたworktreeのパス")
     branch: str | None = Field(default=None, description="現在割り当て中のブランチ")
@@ -60,9 +58,7 @@ class Agent(BaseModel):
         default=None, description="セッション名（command または workers）"
     )
     window_index: int | None = Field(default=None, description="ウィンドウ番号（0, 1, 2, ...）")
-    pane_index: int | None = Field(
-        default=None, description="ウィンドウ内のペインインデックス"
-    )
+    pane_index: int | None = Field(default=None, description="ウィンドウ内のペインインデックス")
     cli_session_name: str | None = Field(
         default=None, description="AI CLI セッション名（必要時のみ）"
     )

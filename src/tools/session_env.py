@@ -15,6 +15,7 @@ from src.tools.helpers_git import resolve_main_repo_root
 
 logger = logging.getLogger(__name__)
 
+
 def _format_env_value(value: object) -> str:
     """Settings の値を .env 形式の文字列に変換する。"""
     import json
@@ -30,7 +31,8 @@ def _format_env_value(value: object) -> str:
 
 
 def _generate_per_worker_env_lines(
-    s: Settings, v: Callable[[object], str],
+    s: Settings,
+    v: Callable[[object], str],
 ) -> str:
     """Worker 1〜16 の per-worker CLI/MODEL 行を生成する。"""
     profile_worker_model = (
@@ -87,12 +89,8 @@ def generate_env_template(settings: Settings | None = None) -> str:
     std_worker_think = v(s.model_profile_standard_worker_thinking_tokens)
     std_admin_effort = v(s.model_profile_standard_admin_reasoning_effort)
     std_worker_effort = v(s.model_profile_standard_worker_reasoning_effort)
-    perf_admin_think = v(
-        s.model_profile_performance_admin_thinking_tokens
-    )
-    perf_worker_think = v(
-        s.model_profile_performance_worker_thinking_tokens
-    )
+    perf_admin_think = v(s.model_profile_performance_admin_thinking_tokens)
+    perf_worker_think = v(s.model_profile_performance_worker_thinking_tokens)
     perf_admin_effort = v(s.model_profile_performance_admin_reasoning_effort)
     perf_worker_effort = v(s.model_profile_performance_worker_reasoning_effort)
 
@@ -272,9 +270,7 @@ def _setup_mcp_directories(
             if isinstance(existing.get("enable_git"), bool):
                 existing_enable_git = existing["enable_git"]
         except Exception as e:
-            raise ValueError(
-                f"invalid_config: {config_file} の読み込みに失敗しました: {e}"
-            ) from e
+            raise ValueError(f"invalid_config: {config_file} の読み込みに失敗しました: {e}") from e
 
     effective_enable_git = (
         enable_git_override
@@ -351,9 +347,7 @@ def _setup_mcp_directories(
                     json.dump(existing, f, ensure_ascii=False, indent=2)
                 logger.info(f"config.json を更新しました: {config_file}")
         except Exception as e:
-            raise ValueError(
-                f"invalid_config: {config_file} の読み込みに失敗しました: {e}"
-            ) from e
+            raise ValueError(f"invalid_config: {config_file} の読み込みに失敗しました: {e}") from e
 
     return {
         "created_dirs": created_dirs,

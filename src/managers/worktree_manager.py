@@ -46,7 +46,9 @@ class WorktreeManager:
         # git gtr --version を実行して確認
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "gtr", "--version",
+                "git",
+                "gtr",
+                "--version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -63,9 +65,7 @@ class WorktreeManager:
 
         return self._gtr_available
 
-    async def _run_command(
-        self, *args: str, cwd: str | None = None
-    ) -> tuple[int, str, str]:
+    async def _run_command(self, *args: str, cwd: str | None = None) -> tuple[int, str, str]:
         """コマンドを実行する。
 
         Args:
@@ -91,9 +91,7 @@ class WorktreeManager:
             logger.error(f"コマンド実行エラー: {e}")
             return 1, "", str(e)
 
-    async def _run_git(
-        self, *args: str, cwd: str | None = None
-    ) -> tuple[int, str, str]:
+    async def _run_git(self, *args: str, cwd: str | None = None) -> tuple[int, str, str]:
         """gitコマンドを実行する。
 
         Args:
@@ -147,9 +145,7 @@ class WorktreeManager:
         if use_gtr:
             return await self._create_worktree_gtr(branch, base_branch)
         else:
-            return await self._create_worktree_native(
-                path, branch, create_branch, base_branch
-            )
+            return await self._create_worktree_native(path, branch, create_branch, base_branch)
 
     async def _create_worktree_gtr(
         self,
@@ -485,9 +481,7 @@ class WorktreeManager:
             ステータス情報の辞書
         """
         # ブランチ名を取得
-        code, branch, _ = await self._run_git(
-            "rev-parse", "--abbrev-ref", "HEAD", cwd=path
-        )
+        code, branch, _ = await self._run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=path)
         branch = branch.strip() if code == 0 else "unknown"
 
         # 変更ファイル数を取得
@@ -496,9 +490,7 @@ class WorktreeManager:
         changed_files = len(lines) if code == 0 else 0
 
         # 最新コミットを取得
-        code, commit, _ = await self._run_git(
-            "rev-parse", "--short", "HEAD", cwd=path
-        )
+        code, commit, _ = await self._run_git("rev-parse", "--short", "HEAD", cwd=path)
         commit = commit.strip() if code == 0 else "unknown"
 
         return {
@@ -530,9 +522,7 @@ class WorktreeManager:
         Returns:
             ブランチ名
         """
-        code, stdout, _ = await self._run_git(
-            "rev-parse", "--abbrev-ref", "HEAD", cwd=path
-        )
+        code, stdout, _ = await self._run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=path)
         return stdout.strip() if code == 0 else ""
 
     async def fetch(self, remote: str = "origin") -> tuple[bool, str]:

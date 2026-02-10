@@ -23,9 +23,7 @@ class Workspace(BaseModel):
     name: str = Field(description="ワークスペース名")
     base_path: str = Field(description="ベースディレクトリのパス")
     repo_path: str = Field(description="メインリポジトリのパス")
-    worktrees: list[WorktreeInfo] = Field(
-        default_factory=list, description="worktree一覧"
-    )
+    worktrees: list[WorktreeInfo] = Field(default_factory=list, description="worktree一覧")
     created_at: datetime = Field(description="作成日時")
 
 

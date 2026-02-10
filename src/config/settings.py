@@ -483,8 +483,8 @@ class Settings(BaseSettings):
 
     model_cost_table_json: str = Field(
         default='{"claude:opus":0.03,"claude:sonnet":0.015,'
-                '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro":0.005,'
-                '"gemini:gemini-3-flash":0.0025}',
+        '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro":0.005,'
+        '"gemini:gemini-3-flash":0.0025}',
         description="モデル別 1K トークン単価テーブル（JSON）",
     )
     model_cost_default_per_1k: float = Field(
@@ -498,8 +498,7 @@ class Settings(BaseSettings):
         """MCP ディレクトリ名を安全な相対単一ディレクトリ名に制限する。"""
         candidate = value.strip()
         base_error = (
-            "MCP_MCP_DIR は相対の単一ディレクトリ名を指定してください"
-            "（例: .multi-agent-mcp）"
+            "MCP_MCP_DIR は相対の単一ディレクトリ名を指定してください（例: .multi-agent-mcp）"
         )
 
         if not candidate:
@@ -550,6 +549,7 @@ class Settings(BaseSettings):
 
     def get_worker_cli(self, worker_index: int) -> AICli:
         """Worker index(1..16) に対する CLI を取得する。"""
+
         def _to_cli(value: str | AICli | None) -> AICli | None:
             if value is None:
                 return None
@@ -648,9 +648,7 @@ def load_effective_settings_for_project(
             settings.enable_git = enable_git
     except (OSError, ValueError, json.JSONDecodeError) as e:
         if strict_config:
-            raise ValueError(
-                f"invalid_config: {config_file} の読み込みに失敗しました: {e}"
-            ) from e
+            raise ValueError(f"invalid_config: {config_file} の読み込みに失敗しました: {e}") from e
         # 設定ファイル破損時は .env 設定を優先して継続
         pass
 

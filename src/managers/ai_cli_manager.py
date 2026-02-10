@@ -448,8 +448,11 @@ class AiCliManager:
             (成功したかどうか, メッセージ) のタプル
         """
         try:
-            cmd = "cd " + shlex.quote(worktree_path) + " && " + " ".join(
-                shlex.quote(arg) for arg in command_args
+            cmd = (
+                "cd "
+                + shlex.quote(worktree_path)
+                + " && "
+                + " ".join(shlex.quote(arg) for arg in command_args)
             )
 
             if await self._is_ghostty_running():
@@ -462,7 +465,9 @@ class AiCliManager:
             # Ghostty(macOS) は -e の後ろを argv として受け取るため、
             # 1つの文字列ではなく引数配列をそのまま渡す必要がある。
             proc = await asyncio.create_subprocess_exec(
-                "open", "-na", "Ghostty.app",
+                "open",
+                "-na",
+                "Ghostty.app",
                 "--args",
                 f"--working-directory={worktree_path}",
                 "-e",
@@ -571,9 +576,7 @@ class AiCliManager:
         except Exception:
             return False
 
-    async def _open_in_iterm2(
-        self, worktree_path: str, command: str
-    ) -> tuple[bool, str]:
+    async def _open_in_iterm2(self, worktree_path: str, command: str) -> tuple[bool, str]:
         """iTerm2 で新しいウィンドウを開いてコマンドを実行する。
 
         Args:
@@ -608,7 +611,9 @@ class AiCliManager:
             '''
 
             proc = await asyncio.create_subprocess_exec(
-                "osascript", "-e", applescript,
+                "osascript",
+                "-e",
+                applescript,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -624,9 +629,7 @@ class AiCliManager:
             logger.error(f"iTerm2 起動エラー: {e}")
             return False, f"iTerm2 起動エラー: {e}"
 
-    async def _open_in_terminal_app(
-        self, worktree_path: str, command: str
-    ) -> tuple[bool, str]:
+    async def _open_in_terminal_app(self, worktree_path: str, command: str) -> tuple[bool, str]:
         """macOS Terminal.app でターミナルを開いてコマンドを実行する。
 
         Args:
@@ -657,7 +660,9 @@ class AiCliManager:
             '''
 
             proc = await asyncio.create_subprocess_exec(
-                "osascript", "-e", applescript,
+                "osascript",
+                "-e",
+                applescript,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

@@ -374,14 +374,18 @@ class TestSendMessage:
         )
         app_ctx.dashboard_manager.update_task_status(quality_task.id, TaskStatus.COMPLETED)
 
-        result = await send_message(
-            sender_id="admin-001",
-            receiver_id="owner-001",
-            message_type="task_complete",
-            content="実装完了しました",
-            caller_agent_id="admin-001",
-            ctx=ipc_mock_ctx,
-        )
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new=AsyncMock(return_value=True),
+        ):
+            result = await send_message(
+                sender_id="admin-001",
+                receiver_id="owner-001",
+                message_type="task_complete",
+                content="実装完了しました",
+                caller_agent_id="admin-001",
+                ctx=ipc_mock_ctx,
+            )
 
         assert result["success"] is True
         assert result["gate"]["status"] == "passed"
@@ -599,14 +603,18 @@ class TestSendMessage:
         quality_task = app_ctx.dashboard_manager.create_task(title="qa test")
         app_ctx.dashboard_manager.update_task_status(quality_task.id, TaskStatus.COMPLETED)
 
-        result = await send_message(
-            sender_id="admin-001",
-            receiver_id="owner-001",
-            message_type="task_complete",
-            content="実装完了しました",
-            caller_agent_id="admin-001",
-            ctx=ipc_mock_ctx,
-        )
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new=AsyncMock(return_value=True),
+        ):
+            result = await send_message(
+                sender_id="admin-001",
+                receiver_id="owner-001",
+                message_type="task_complete",
+                content="実装完了しました",
+                caller_agent_id="admin-001",
+                ctx=ipc_mock_ctx,
+            )
 
         assert result["success"] is True
         assert result["gate"]["status"] == "passed"
@@ -679,14 +687,18 @@ class TestSendMessage:
         )
         app_ctx.dashboard_manager.update_task_status(pw_task.id, TaskStatus.COMPLETED)
 
-        passed = await send_message(
-            sender_id="admin-001",
-            receiver_id="owner-001",
-            message_type="task_complete",
-            content="再確認済み",
-            caller_agent_id="admin-001",
-            ctx=ipc_mock_ctx,
-        )
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new=AsyncMock(return_value=True),
+        ):
+            passed = await send_message(
+                sender_id="admin-001",
+                receiver_id="owner-001",
+                message_type="task_complete",
+                content="再確認済み",
+                caller_agent_id="admin-001",
+                ctx=ipc_mock_ctx,
+            )
 
         assert passed["success"] is True
         assert passed["gate"]["status"] == "passed"
@@ -1111,10 +1123,71 @@ class TestSendMessage:
                 ctx=ipc_mock_ctx,
             )
 
-        assert result["success"] is True
+        assert result["success"] is False
+        assert result["delivery_state"] == "queued_unnotified"
         assert result["notification_sent"] is False
         assert result["notification_method"] is None
+        assert "delivery_failed" in result["error"]
         mock_macos.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_message_returns_failed_delivery_when_tmux_notify_fails(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """通知失敗時は success=False と delivery_state を返すことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        with patch("src.tools.ipc.notify_agent_via_tmux", new=AsyncMock(return_value=False)):
+            result = await send_message(
+                sender_id="owner-001",
+                receiver_id="admin-001",
+                message_type="system",
+                content="通知失敗を想定",
+                caller_agent_id="owner-001",
+                ctx=ipc_mock_ctx,
+            )
+
+        assert result["success"] is False
+        assert result["delivery_state"] == "queued_unnotified"
+        assert result["message_saved"] is True
+        assert result["notification_sent"] is False
+        assert "delivery_failed" in result["error"]
+        assert app_ctx.ipc_manager.get_unread_count("admin-001") == 1
 
 
 class TestReadMessages:
@@ -1764,6 +1837,56 @@ class TestGetUnreadCount:
 
         assert result["success"] is True
         assert "unread_count" in result
+
+    @pytest.mark.asyncio
+    async def test_get_unread_count_blocks_admin_polling_after_empty_check(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Admin が unread=0 で get_unread_count を連続実行するとブロックされる。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_unread_count = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_unread_count":
+                get_unread_count = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        first = await get_unread_count(
+            agent_id="admin-001",
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+        second = await get_unread_count(
+            agent_id="admin-001",
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert first["success"] is True
+        assert first["unread_count"] == 0
+        assert second["success"] is False
+        assert "polling_blocked" in second["error"]
+        assert second["next_action"] == "wait_for_ipc_notification"
 
     @pytest.mark.asyncio
     async def test_get_unread_count_blocks_owner_polling_while_waiting(
