@@ -1,7 +1,7 @@
 """ダッシュボード/タスク管理ツールのテスト。"""
 
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -651,6 +651,88 @@ class TestGetDashboard:
 
         assert result["success"] is False
         assert "polling_blocked" in result["error"]
+
+
+class TestReportTaskCompletion:
+    """report_task_completion ツールのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_saves_result_to_project_memory_directory(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """完了結果が session 配下ではなく .multi-agent-mcp/memory に保存されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        report_task_completion = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "report_task_completion":
+                report_task_completion = tool.fn
+                break
+        assert report_task_completion is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "issue-001"
+        app_ctx.project_root = str(git_repo)
+        session_memory_dir = git_repo / app_ctx.settings.mcp_dir / app_ctx.session_id / "memory"
+        app_ctx.memory_manager = MemoryManager(str(session_memory_dir))
+
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+            current_task="task-001",
+        )
+
+        with patch(
+            "src.tools.dashboard.capture_claude_actual_cost_for_agent",
+            AsyncMock(return_value=None),
+        ):
+            result = await report_task_completion(
+                task_id="task-001",
+                status="completed",
+                message="完了しました",
+                summary="summary text",
+                caller_agent_id="worker-001",
+                ctx=dashboard_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["memory_saved"] is True
+
+        key = "task:task-001:result"
+        project_memory_dir = git_repo / app_ctx.settings.mcp_dir / "memory"
+        project_memory = MemoryManager(str(project_memory_dir))
+        entry = project_memory.get(key)
+        assert entry is not None
+        assert entry.content == "[completed] summary text"
+
+        session_memory = MemoryManager(str(session_memory_dir))
+        assert session_memory.get(key) is None
 
 
 class TestCostTools:
