@@ -38,6 +38,38 @@ class TestDashboardManagerInitialize:
         assert preserved_task.title == "Existing Task"
 
 
+class TestDashboardManagerCleanup:
+    """DashboardManager.cleanup() のテスト。"""
+
+    def test_cleanup_preserves_dashboard_and_messages(self, temp_dir):
+        """cleanup() が dashboard/messages を削除しないことをテスト。"""
+        dashboard_dir = temp_dir / "dashboard"
+        manager = DashboardManager(
+            workspace_id="test-ws",
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        manager.initialize()
+        manager.create_task(title="Preserved Task")
+        manager.add_message(
+            sender_id="admin-001",
+            receiver_id="owner-001",
+            message_type="status_update",
+            subject="",
+            content="test message",
+        )
+
+        dashboard_path = dashboard_dir / "dashboard.md"
+        messages_path = dashboard_dir / "messages.md"
+        assert dashboard_path.exists()
+        assert messages_path.exists()
+
+        manager.cleanup()
+
+        assert dashboard_path.exists()
+        assert messages_path.exists()
+
+
 class TestDashboardManager:
     """DashboardManagerのテスト。"""
 
