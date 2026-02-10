@@ -578,6 +578,64 @@ class HealthcheckManager:
         except (OSError, json.JSONDecodeError, ValueError) as e:
             logger.debug("%s 後のエージェント保存に失敗: %s", label, e)
 
+    def _increment_recovery_counter(
+        self,
+        app_ctx: Any | None,
+        agent_id: str,
+        task_id: str | None,
+        recovery_reason: str,
+    ) -> None:
+        """復旧成功時のカウンタを更新する。
+
+        Dashboard の拡張フィールドが存在する場合はそれも更新し、
+        未拡張環境では task.metadata のみ更新する。
+        """
+        if app_ctx is None or not task_id:
+            return
+
+        try:
+            from src.tools.helpers_managers import ensure_dashboard_manager
+
+            dashboard = app_ctx.dashboard_manager or ensure_dashboard_manager(app_ctx)
+            if dashboard is None:
+                return
+
+            read_dashboard = getattr(dashboard, "_read_dashboard", None)
+            write_dashboard = getattr(dashboard, "_write_dashboard", None)
+            if not callable(read_dashboard) or not callable(write_dashboard):
+                return
+
+            dashboard_data = read_dashboard()
+            updated = False
+
+            task = dashboard_data.get_task(task_id)
+            if task is not None:
+                metadata = dict(task.metadata or {})
+                count = int(metadata.get("process_recovery_count", 0))
+                metadata["process_recovery_count"] = count + 1
+                metadata["last_recovery_reason"] = recovery_reason
+                metadata["last_recovery_at"] = datetime.now().isoformat()
+                task.metadata = metadata
+                updated = True
+
+            agent_summary = dashboard_data.get_agent(agent_id)
+            if agent_summary is not None and hasattr(agent_summary, "process_recovery_count"):
+                current = int(getattr(agent_summary, "process_recovery_count", 0) or 0)
+                agent_summary.process_recovery_count = current + 1
+                updated = True
+
+            if updated:
+                write_dashboard(dashboard_data)
+        except (
+            OSError,
+            ValueError,
+            AttributeError,
+            KeyError,
+            TypeError,
+            json.JSONDecodeError,
+        ) as e:
+            logger.debug("復旧カウンタ更新に失敗: %s", e)
+
     async def _attempt_staged_recovery(
         self,
         app_ctx: Any | None,
@@ -588,9 +646,16 @@ class HealthcheckManager:
         task_key: str,
     ) -> dict[str, Any]:
         """段階復旧（attempt_recovery → full_recovery → escalate）を実行する。"""
+        recovery_task_id = agent.current_task
         success, message = await self.attempt_recovery(agent_id, force=force_recovery)
         if success:
             self._save_agent_after_recovery(app_ctx, agent, "attempt_recovery")
+            self._increment_recovery_counter(
+                app_ctx,
+                agent_id,
+                recovery_task_id,
+                recovery_reason,
+            )
             self._recovery_failures.pop(task_key, None)
             return {
                 "status": "recovered",
@@ -605,6 +670,12 @@ class HealthcheckManager:
         if full_success:
             target = (app_ctx.agents.get(agent_id) if app_ctx else None) or agent
             self._save_agent_after_recovery(app_ctx, target, "full_recovery")
+            self._increment_recovery_counter(
+                app_ctx,
+                agent_id,
+                recovery_task_id,
+                recovery_reason,
+            )
             self._recovery_failures.pop(task_key, None)
             return {
                 "status": "recovered",
@@ -656,6 +727,17 @@ class HealthcheckManager:
             if agent.role != AgentRole.WORKER.value:
                 continue
             if agent.status == AgentStatus.TERMINATED.value:
+                skipped.append(agent_id)
+                continue
+
+            if agent.status in (AgentStatus.TERMINATED, AgentStatus.TERMINATED.value):
+                stale_keys = [
+                    key
+                    for key in self._recovery_failures
+                    if key.startswith(f"{agent_id}:")
+                ]
+                for stale_key in stale_keys:
+                    self._recovery_failures.pop(stale_key, None)
                 skipped.append(agent_id)
                 continue
 

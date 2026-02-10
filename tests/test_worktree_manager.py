@@ -263,6 +263,48 @@ class TestWorktreeManagerRemoveWorktree:
         assert worktree_manager._is_worker_branch("feature/foo-worker-x-ab12cd34") is False
         assert worktree_manager._is_worker_branch("main") is False
 
+    @pytest.mark.asyncio
+    async def test_remove_worktree_native_resolves_branch_with_normalized_path(
+        self, worktree_manager
+    ):
+        """正規化後に一致する path でも worker branch を削除することをテスト。"""
+        worktree_manager._force_gtr = False
+        worktree_manager._gtr_available = False
+
+        with patch.object(
+            worktree_manager,
+            "list_worktrees",
+            new=AsyncMock(
+                return_value=[
+                    WorktreeInfo(
+                        path="/tmp/repo/.worktrees/feature/../feature/add-skill-worker-1-task001",
+                        branch="feature/add-skill-worker-1-task001",
+                        commit="abc123",
+                        is_bare=False,
+                        is_detached=False,
+                        locked=False,
+                        prunable=False,
+                    )
+                ]
+            ),
+        ), patch.object(
+            worktree_manager, "_run_git", new_callable=AsyncMock
+        ) as mock_run_git:
+            mock_run_git.side_effect = [
+                (0, "", ""),  # worktree remove
+                (0, "", ""),  # branch delete
+            ]
+            success, message = await worktree_manager._remove_worktree_native(
+                "/tmp/repo/.worktrees/feature/add-skill-worker-1-task001"
+            )
+
+            assert success is True
+            assert "ブランチを削除しました" in message
+            assert mock_run_git.await_args_list[1].args == (
+                "branch",
+                "-D",
+                "feature/add-skill-worker-1-task001",
+            )
 
 class TestWorktreeManagerGetWorktreePath:
     """get_worktree_path_for_branchのテスト。"""
