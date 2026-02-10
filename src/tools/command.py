@@ -24,6 +24,7 @@ from src.tools.helpers import (
     get_mcp_tool_prefix_from_config,
     get_worktree_manager,
     mark_owner_waiting_for_admin,
+    refresh_app_settings,
     require_permission,
     resolve_main_repo_root,
     save_agent_to_file,
@@ -448,7 +449,6 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx.session_id = session_id
         sync_agents_from_file(app_ctx)
 
-        profile_settings = get_current_profile_settings(app_ctx)
         agent = agents.get(agent_id)
         if not agent:
             return {"success": False, "error": f"エージェント {agent_id} が見つかりません"}
@@ -472,6 +472,14 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "error": "エージェントに working_dir または worktree_path が設定されていません",
             }
+
+        previous_enable_worktree = app_ctx.settings.enable_worktree
+        refresh_app_settings(app_ctx, str(project_root))
+        # send_task の runtime 振る舞いは既存フラグを維持しつつ、
+        # モデル/CLI 系のみ .env 再読込結果を使用する。
+        app_ctx.settings.enable_worktree = previous_enable_worktree
+        app_ctx.settings.enable_git = agent_enable_git
+        profile_settings = get_current_profile_settings(app_ctx)
 
         is_admin = agent.role == AgentRole.ADMIN.value
 

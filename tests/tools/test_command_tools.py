@@ -750,7 +750,6 @@ class TestSendTask:
         from mcp.server.fastmcp import FastMCP
 
         from src.tools.command import register_tools
-        from src.tools.helpers import refresh_app_settings
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -774,7 +773,6 @@ class TestSendTask:
         )
 
         app_ctx = command_mock_ctx.request_context.lifespan_context
-        refresh_app_settings(app_ctx, str(git_repo))
 
         now = datetime.now()
         app_ctx.agents["owner-001"] = Agent(

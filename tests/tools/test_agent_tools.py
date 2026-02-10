@@ -1340,3 +1340,70 @@ class TestInitializeAgent:
 
         assert result["success"] is False
         assert "利用できません" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_initialize_worker_resolves_cli_from_env(self, mock_ctx, git_repo):
+        """Worker 初期化時は stale ai_cli より env の CLI を優先する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.agent import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        initialize_agent = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "initialize_agent":
+                initialize_agent = tool.fn
+                break
+        assert initialize_agent is not None
+
+        app_ctx = mock_ctx.request_context.lifespan_context
+        mcp_dir = git_repo / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        (mcp_dir / ".env").write_text(
+            "MCP_MODEL_PROFILE_ACTIVE=standard\n"
+            "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n",
+            encoding="utf-8",
+        )
+        app_ctx.settings.enable_git = False
+
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-002"] = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            ai_cli=AICli.CLAUDE,
+            created_at=now,
+            last_activity=now,
+        )
+
+        with patch.object(app_ctx.ai_cli, "is_available", return_value=True):
+            result = await initialize_agent(
+                agent_id="worker-002",
+                prompt_type="custom",
+                custom_prompt="run",
+                terminal="iterm2",
+                caller_agent_id="owner-001",
+                ctx=mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["cli"] == "codex"
+        send_args, send_kwargs = app_ctx.tmux.send_with_rate_limit_to_pane.await_args
+        assert "codex" in send_args[3]
+        assert send_kwargs["confirm_codex_prompt"] is True

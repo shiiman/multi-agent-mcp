@@ -542,12 +542,9 @@ class Settings(BaseSettings):
         return parsed or profile_cli
 
     def get_worker_model(self, worker_index: int, profile_worker_model: str) -> str:
-        """Worker index(1..16) に対するモデルを取得する。
-
-        実運用では worker モデル個別指定は Worker CLI の per-worker モード時のみ有効。
-        """
-        if self.worker_cli_mode != WorkerCliMode.PER_WORKER:
-            return profile_worker_model
+        """Worker index(1..16) に対するモデルを取得する。"""
+        if self.worker_model_mode == WorkerModelMode.UNIFORM:
+            return self.worker_model_uniform or profile_worker_model
         if not (1 <= worker_index <= 16):
             raise ValueError(f"worker_index は 1..16 で指定してください: {worker_index}")
         per_worker = getattr(self, f"worker_model_{worker_index}")
