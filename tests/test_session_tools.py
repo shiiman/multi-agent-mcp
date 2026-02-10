@@ -185,3 +185,24 @@ class TestProvisionalSessionMigration:
         assert result["removed_count"] == 1
         assert result["removed_dirs"] == ["provisional-old1234"]
         assert not orphan.exists()
+
+    def test_cleans_up_all_provisional_directories_when_target_is_none(self, temp_dir):
+        """target_session_ids=None の場合に provisional-* を一括削除することをテスト。"""
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        first = mcp_dir / "provisional-old1111"
+        second = mcp_dir / "provisional-old2222"
+        first.mkdir(parents=True, exist_ok=True)
+        second.mkdir(parents=True, exist_ok=True)
+        (first / "agents.json").write_text("{}", encoding="utf-8")
+        (second / "agents.json").write_text("{}", encoding="utf-8")
+
+        result = cleanup_orphan_provisional_sessions(
+            project_root=str(temp_dir),
+            mcp_dir_name=".multi-agent-mcp",
+            target_session_ids=None,
+        )
+
+        assert result["removed_count"] == 2
+        assert sorted(result["removed_dirs"]) == ["provisional-old1111", "provisional-old2222"]
+        assert not first.exists()
+        assert not second.exists()

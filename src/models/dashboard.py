@@ -148,6 +148,14 @@ class Dashboard(BaseModel):
     updated_at: datetime = Field(
         default_factory=datetime.now, description="更新日時"
     )
+    session_started_at: datetime | None = Field(
+        default=None, description="セッション開始時刻"
+    )
+    session_finished_at: datetime | None = Field(
+        default=None, description="セッション終了時刻"
+    )
+    process_crash_count: int = Field(default=0, description="プロセスクラッシュ回数")
+    process_recovery_count: int = Field(default=0, description="プロセス復旧回数")
 
     # エージェント情報
     agents: list[AgentSummary] = Field(

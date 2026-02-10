@@ -68,6 +68,8 @@ class TestDashboardManager:
         assert updated_task.status == TaskStatus.IN_PROGRESS
         assert updated_task.progress == 25
         assert updated_task.started_at is not None
+        summary = dashboard_manager.get_summary()
+        assert summary["session_started_at"] is not None
 
     def test_complete_task(self, dashboard_manager):
         """タスク完了をテスト。"""
@@ -89,6 +91,8 @@ class TestDashboardManager:
         assert updated_task.status == TaskStatus.COMPLETED
         assert updated_task.progress == 100
         assert updated_task.completed_at is not None
+        summary = dashboard_manager.get_summary()
+        assert summary["session_finished_at"] is not None
 
     def test_fail_task(self, dashboard_manager):
         """タスク失敗をテスト。"""
@@ -123,6 +127,80 @@ class TestDashboardManager:
         assert updated_task.assigned_agent_id == "agent-001"
         assert updated_task.branch == "feature/test"
         assert updated_task.worktree_path == "/path/to/worktree"
+
+    def test_reassign_task_clears_previous_agent_current_task(self, dashboard_manager):
+        """再割り当て時に旧担当の current_task_id がクリアされることをテスト。"""
+        dashboard = dashboard_manager.get_dashboard()
+        dashboard.agents.extend(
+            [
+                AgentSummary(
+                    agent_id="worker-001",
+                    role="worker",
+                    status="busy",
+                    current_task_id=None,
+                    worktree_path=None,
+                    branch=None,
+                    last_activity=datetime.now(),
+                ),
+                AgentSummary(
+                    agent_id="worker-002",
+                    role="worker",
+                    status="idle",
+                    current_task_id=None,
+                    worktree_path=None,
+                    branch=None,
+                    last_activity=datetime.now(),
+                ),
+            ]
+        )
+        dashboard_manager._write_dashboard(dashboard)
+
+        task = dashboard_manager.create_task(title="Reassign Target")
+        dashboard_manager.assign_task(task.id, "worker-001")
+        first = dashboard_manager.get_dashboard()
+        assert first.get_agent("worker-001").current_task_id == task.id
+
+        dashboard_manager.assign_task(task.id, "worker-002")
+        updated = dashboard_manager.get_dashboard()
+        old_agent = updated.get_agent("worker-001")
+        new_agent = updated.get_agent("worker-002")
+        assert old_agent is not None
+        assert old_agent.current_task_id is None
+        assert new_agent is not None
+        assert new_agent.current_task_id == task.id
+
+    def test_update_task_status_rejects_terminal_to_in_progress(self, dashboard_manager):
+        """終端状態から in_progress への直接遷移を拒否することをテスト。"""
+        task = dashboard_manager.create_task(title="Terminal Task")
+        dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED)
+
+        success, message = dashboard_manager.update_task_status(
+            task.id, TaskStatus.IN_PROGRESS
+        )
+        assert success is False
+        assert "reopen_task" in message
+
+    def test_reopen_task_from_terminal(self, dashboard_manager):
+        """reopen_task で終端状態タスクを pending に戻せることをテスト。"""
+        task = dashboard_manager.create_task(title="Reopen Target")
+        dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED)
+
+        success, message = dashboard_manager.reopen_task(task.id, reset_progress=True)
+        assert success is True
+        assert "再開" in message
+        reopened = dashboard_manager.get_task(task.id)
+        assert reopened.status == TaskStatus.PENDING
+        assert reopened.progress == 0
+        assert reopened.completed_at is None
+
+    def test_reopen_task_rejects_non_terminal(self, dashboard_manager):
+        """reopen_task は終端状態以外を拒否することをテスト。"""
+        task = dashboard_manager.create_task(title="Not Terminal")
+        dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=10)
+
+        success, message = dashboard_manager.reopen_task(task.id)
+        assert success is False
+        assert "終端状態ではありません" in message
 
     def test_list_tasks(self, dashboard_manager):
         """タスク一覧をテスト。"""
@@ -295,6 +373,23 @@ class TestDashboardMarkdownSync:
         dashboard = dashboard_manager.get_dashboard()
         assert len(dashboard.agents) == 1
         assert dashboard.agents[0].last_activity is None
+
+    def test_save_markdown_dashboard_sets_session_metadata(self, dashboard_manager, temp_dir):
+        """dashboard front matter にセッション統計が保存されることをテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+        task = dashboard_manager.create_task(title="Meta Task")
+        dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS)
+        dashboard_manager.increment_process_crash_count()
+        dashboard_manager.increment_process_recovery_count()
+        dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED)
+
+        md_path = dashboard_manager.save_markdown_dashboard(project_root, "session-meta")
+        content = md_path.read_text(encoding="utf-8")
+        assert "session_started_at:" in content
+        assert "session_finished_at:" in content
+        assert "process_crash_count: 1" in content
+        assert "process_recovery_count: 1" in content
 
     def test_read_task_file_not_exists(self, dashboard_manager, temp_dir):
         """存在しないタスクファイル読み取りをテスト。"""
@@ -647,6 +742,28 @@ class TestMarkdownDashboard:
         assert "<details open>" in messages_content
         assert "詳細本文のテストメッセージです。" in messages_content
 
+    def test_add_message_appends_to_messages_md_without_overwrite(self, dashboard_manager):
+        """add_message が messages.md 履歴を追記保持することをテスト。"""
+        dashboard_manager.add_message(
+            sender_id="system",
+            receiver_id=None,
+            message_type="task_progress",
+            subject="first",
+            content="message-1",
+        )
+        dashboard_manager.add_message(
+            sender_id="system",
+            receiver_id=None,
+            message_type="task_complete",
+            subject="second",
+            content="message-2",
+        )
+
+        messages_path = dashboard_manager.dashboard_dir / "messages.md"
+        content = messages_path.read_text(encoding="utf-8")
+        assert "message-1" in content
+        assert "message-2" in content
+
     def test_system_actor_is_rendered_without_unknown_prefix(self, dashboard_manager):
         """system 送信者が unknown(system) にならないことをテスト。"""
         dashboard = dashboard_manager.get_dashboard()
@@ -729,6 +846,19 @@ class TestMarkdownDashboard:
         msg = dashboard_manager._parse_ipc_message(msg_file)
         assert msg is not None
         assert msg.content == full_text
+
+    def test_markdown_stats_includes_session_and_process_counts(self, dashboard_manager):
+        """統計セクションにセッション時刻と crash/recovery 回数が表示されることをテスト。"""
+        task = dashboard_manager.create_task(title="Stats Task")
+        dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS)
+        dashboard_manager.increment_process_crash_count()
+        dashboard_manager.increment_process_recovery_count()
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "セッション開始" in md_content
+        assert "セッション終了" in md_content
+        assert "プロセスクラッシュ回数" in md_content
+        assert "プロセス復旧回数" in md_content
 
 
 class TestDashboardCost:

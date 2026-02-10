@@ -154,8 +154,18 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": "project_root が設定されていません",
             }
 
-        screenshot_dir = Path(app_ctx.project_root) / app_ctx.settings.mcp_dir / "screenshot"
-        file_path = screenshot_dir / filename
+        screenshot_dir = (
+            Path(app_ctx.project_root) / app_ctx.settings.mcp_dir / "screenshot"
+        ).resolve()
+        file_path = (screenshot_dir / filename).resolve()
+
+        try:
+            file_path.relative_to(screenshot_dir)
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"path traversal は許可されていません: {filename}",
+            }
 
         if not file_path.exists():
             return {

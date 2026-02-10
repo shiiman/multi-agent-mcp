@@ -399,7 +399,7 @@ def register_tools(mcp: FastMCP) -> None:
             provisional_cleanup_result = cleanup_orphan_provisional_sessions(
                 resolved_project_root,
                 app_ctx.settings.mcp_dir,
-                target_session_ids=[migration_result.get("source_session_id")],
+                target_session_ids=None,
             )
 
         # gtr 自動確認・設定

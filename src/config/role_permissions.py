@@ -121,6 +121,13 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
     "get_workspace_template": ["owner", "admin"],
 }
 
+# Worker が自身の agent_id のみを対象に実行できるツール
+WORKER_SELF_SCOPE_TOOLS: set[str] = {
+    "read_messages",
+    "get_unread_count",
+    "get_output",
+}
+
 
 def get_allowed_roles(tool_name: str) -> list[str]:
     """指定されたツールの許可ロールを取得する。
@@ -146,6 +153,11 @@ def is_tool_allowed(tool_name: str, role: str) -> bool:
     """
     allowed = get_allowed_roles(tool_name)
     return role in allowed
+
+
+def requires_worker_self_scope(tool_name: str) -> bool:
+    """Worker の self-scope 制約が必要なツールか判定する。"""
+    return tool_name in WORKER_SELF_SCOPE_TOOLS
 
 
 def get_role_error_message(tool_name: str, current_role: str) -> str:

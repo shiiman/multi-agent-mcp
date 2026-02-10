@@ -339,6 +339,103 @@ class TestGetOutput:
         assert result["success"] is True
         assert result["lines"] == 100
 
+    @pytest.mark.asyncio
+    async def test_worker_get_output_allows_self(self, command_mock_ctx, git_repo):
+        """Worker は自身の get_output を実行できる。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_output = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_output":
+                get_output = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await get_output(
+            agent_id="worker-001",
+            lines=30,
+            caller_agent_id="worker-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["agent_id"] == "worker-001"
+        assert result["lines"] == 30
+
+    @pytest.mark.asyncio
+    async def test_worker_get_output_blocks_other_agent(
+        self, command_mock_ctx, git_repo
+    ):
+        """Worker は他 agent の get_output を実行できない。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_output = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_output":
+                get_output = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await get_output(
+            agent_id="admin-001",
+            lines=50,
+            caller_agent_id="worker-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "自分自身の agent_id" in result["error"]
+
 
 class TestOpenSession:
     """open_session ツールのテスト。"""
@@ -653,7 +750,6 @@ class TestSendTask:
         from mcp.server.fastmcp import FastMCP
 
         from src.tools.command import register_tools
-        from src.tools.helpers import refresh_app_settings
 
         mcp = FastMCP("test")
         register_tools(mcp)
@@ -677,7 +773,6 @@ class TestSendTask:
         )
 
         app_ctx = command_mock_ctx.request_context.lifespan_context
-        refresh_app_settings(app_ctx, str(git_repo))
 
         now = datetime.now()
         app_ctx.agents["owner-001"] = Agent(
