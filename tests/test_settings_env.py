@@ -3,6 +3,7 @@
 from src.config.settings import (
     AICli,
     ModelDefaults,
+    Settings,
     WorkerCliMode,
     WorkerModelMode,
     get_mcp_dir,
@@ -128,13 +129,15 @@ class TestGenerateEnvTemplate:
         assert "MCP_MODEL_COST_DEFAULT_PER_1K" in template
         assert "MCP_COST_PER_1K_TOKENS_" not in template
 
-    def test_template_contains_worker_cli_mode(self):
+    def test_template_contains_worker_cli_mode(self, monkeypatch):
         """テンプレートに Worker CLI モード設定が含まれることをテスト。"""
-        template = generate_env_template()
+        monkeypatch.delenv("MCP_PROJECT_ROOT", raising=False)
+        settings = Settings(_env_file=None)
+        template = generate_env_template(settings=settings)
         assert "MCP_WORKER_CLI_MODE" in template
         assert "MCP_WORKER_CLI_1" in template
         assert "MCP_WORKER_CLI_16" in template
-        assert "MCP_WORKER_CLI_1=claude" in template
+        assert f"MCP_WORKER_CLI_1={settings.get_worker_cli(1).value}" in template
 
     def test_template_contains_worker_model_mode(self):
         """テンプレートに Worker モデル設定が含まれることをテスト。"""
