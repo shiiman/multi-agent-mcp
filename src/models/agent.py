@@ -50,6 +50,7 @@ class Agent(BaseModel):
     )
     working_dir: str | None = Field(default=None, description="作業ディレクトリのパス")
     worktree_path: str | None = Field(default=None, description="割り当てられたworktreeのパス")
+    branch: str | None = Field(default=None, description="現在割り当て中のブランチ")
     current_task: str | None = Field(default=None, description="現在実行中のタスク")
     created_at: datetime = Field(description="作成日時")
     last_activity: datetime = Field(description="最終活動日時")
@@ -61,6 +62,12 @@ class Agent(BaseModel):
     window_index: int | None = Field(default=None, description="ウィンドウ番号（0, 1, 2, ...）")
     pane_index: int | None = Field(
         default=None, description="ウィンドウ内のペインインデックス"
+    )
+    cli_session_name: str | None = Field(
+        default=None, description="AI CLI セッション名（必要時のみ）"
+    )
+    cli_session_target: str | None = Field(
+        default=None, description="AI CLI セッションの接続先識別子"
     )
     ai_cli: AICli | None = Field(default=None, description="使用するAI CLI（None=デフォルト）")
     ai_bootstrapped: bool = Field(

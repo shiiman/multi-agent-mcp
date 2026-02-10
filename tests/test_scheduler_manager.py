@@ -1,7 +1,8 @@
 """SchedulerManagerのテスト。"""
 
+from unittest.mock import MagicMock
 
-from src.managers.scheduler_manager import TaskPriority
+from src.managers.scheduler_manager import SchedulerManager, TaskPriority
 
 
 class TestSchedulerManager:
@@ -122,3 +123,44 @@ class TestSchedulerManager:
         scheduler_manager.enqueue_task("task-2", TaskPriority.MEDIUM)
         assignments = scheduler_manager.run_auto_assign_loop()
         assert isinstance(assignments, list)
+
+    def test_assign_task_sets_worker_busy_and_persists(
+        self,
+        dashboard_manager,
+        sample_agents,
+    ):
+        """割り当て直後にWorkerがbusy化され、永続化されることをテスト。"""
+        persist_agent_state = MagicMock(return_value=True)
+        scheduler = SchedulerManager(
+            dashboard_manager,
+            sample_agents,
+            persist_agent_state=persist_agent_state,
+        )
+
+        task = dashboard_manager.create_task("assign-test")
+        scheduler.enqueue_task(task.id, TaskPriority.HIGH)
+
+        result, _ = scheduler.assign_task(task.id, "agent-002")
+
+        assert result is True
+        worker = sample_agents["agent-002"]
+        assert worker.status == "busy"
+        assert worker.current_task == task.id
+        persist_agent_state.assert_called_once_with(worker)
+
+    def test_run_auto_assign_loop_prevents_duplicate_assignment_to_same_worker(
+        self,
+        dashboard_manager,
+        sample_agents,
+    ):
+        """同一idle Workerへの連続自動割り当てを防止できることをテスト。"""
+        scheduler = SchedulerManager(dashboard_manager, sample_agents)
+        first_task = dashboard_manager.create_task("first-task")
+        second_task = dashboard_manager.create_task("second-task")
+        scheduler.enqueue_task(first_task.id, TaskPriority.HIGH)
+        scheduler.enqueue_task(second_task.id, TaskPriority.MEDIUM)
+
+        assignments = scheduler.run_auto_assign_loop()
+
+        assert assignments == [(first_task.id, "agent-002")]
+        assert sample_agents["agent-002"].status == "busy"

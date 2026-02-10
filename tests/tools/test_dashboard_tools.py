@@ -178,6 +178,46 @@ class TestCreateTask:
         assert result["task"]["assigned_agent_id"] == "worker-001"
         assert result["task"]["branch"] == "feature/test"
 
+    @pytest.mark.asyncio
+    async def test_create_task_with_metadata(self, dashboard_mock_ctx, git_repo):
+        """メタデータ付きでタスク作成できることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_task":
+                create_task = tool.fn
+                break
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await create_task(
+            title="メタデータ付きタスク",
+            description="説明",
+            metadata={"task_kind": "docs", "requires_playwright": False},
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["task"]["metadata"]["task_kind"] == "docs"
+        assert result["task"]["metadata"]["requires_playwright"] is False
+
 
 class TestUpdateTaskStatus:
     """update_task_status ツールのテスト。"""
@@ -280,6 +320,148 @@ class TestUpdateTaskStatus:
 
         assert result["success"] is False
         assert "無効なステータス" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_terminal_to_in_progress_is_rejected(self, dashboard_mock_ctx, git_repo):
+        """終端状態からの直接再開は拒否されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_task = None
+        update_task_status = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_task":
+                create_task = tool.fn
+            elif tool.name == "update_task_status":
+                update_task_status = tool.fn
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        create_result = await create_task(
+            title="完了タスク",
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+        task_id = create_result["task"]["id"]
+
+        done_result = await update_task_status(
+            task_id=task_id,
+            status="completed",
+            caller_agent_id="admin-001",
+            ctx=dashboard_mock_ctx,
+        )
+        assert done_result["success"] is True
+
+        resume_result = await update_task_status(
+            task_id=task_id,
+            status="in_progress",
+            caller_agent_id="admin-001",
+            ctx=dashboard_mock_ctx,
+        )
+        assert resume_result["success"] is False
+        assert "reopen_task" in resume_result["message"]
+
+
+class TestReopenTask:
+    """reopen_task ツールのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_reopen_task_success(self, dashboard_mock_ctx, git_repo):
+        """終端タスクを再開できることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        create_task = None
+        update_task_status = None
+        reopen_task = None
+        get_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "create_task":
+                create_task = tool.fn
+            elif tool.name == "update_task_status":
+                update_task_status = tool.fn
+            elif tool.name == "reopen_task":
+                reopen_task = tool.fn
+            elif tool.name == "get_task":
+                get_task = tool.fn
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        create_result = await create_task(
+            title="再開対象タスク",
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+        task_id = create_result["task"]["id"]
+
+        await update_task_status(
+            task_id=task_id,
+            status="completed",
+            caller_agent_id="admin-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        reopen_result = await reopen_task(
+            task_id=task_id,
+            reset_progress=True,
+            caller_agent_id="admin-001",
+            ctx=dashboard_mock_ctx,
+        )
+        assert reopen_result["success"] is True
+
+        task_result = await get_task(
+            task_id=task_id,
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+        assert task_result["task"]["status"] == "pending"
+        assert task_result["task"]["progress"] == 0
 
 
 class TestAssignTaskToAgent:
@@ -733,6 +915,87 @@ class TestReportTaskCompletion:
 
         session_memory = MemoryManager(str(session_memory_dir))
         assert session_memory.get(key) is None
+
+    @pytest.mark.asyncio
+    async def test_reports_failed_completion_with_task_failed_message_type(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """失敗報告時は task_failed メッセージ種別で Admin に通知することをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        report_task_completion = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "report_task_completion":
+                report_task_completion = tool.fn
+                break
+        assert report_task_completion is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "issue-001"
+        app_ctx.project_root = str(git_repo)
+
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+            current_task="task-002",
+        )
+
+        with (
+            patch(
+                "src.tools.dashboard.capture_claude_actual_cost_for_agent",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.tools.dashboard.notify_agent_via_tmux",
+                AsyncMock(return_value=True),
+            ),
+        ):
+            result = await report_task_completion(
+                task_id="task-002",
+                status="failed",
+                message="失敗しました",
+                caller_agent_id="worker-001",
+                ctx=dashboard_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["reported_status"] == "failed"
+        assert result["notification_sent"] is True
+
+        messages = app_ctx.ipc_manager.read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            mark_as_read=False,
+        )
+        assert len(messages) == 1
+        assert messages[0].message_type == MessageType.TASK_FAILED
 
 
 class TestCostTools:

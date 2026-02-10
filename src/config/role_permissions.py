@@ -54,6 +54,7 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
     "get_task": ["owner", "admin", "worker"],
     "list_tasks": ["owner", "admin", "worker"],
     "assign_task_to_agent": ["admin"],
+    "reopen_task": ["admin"],
     "update_task_status": ["admin"],
     "remove_task": ["owner", "admin"],
     "report_task_progress": ["worker"],

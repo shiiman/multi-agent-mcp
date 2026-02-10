@@ -304,11 +304,17 @@ class WorktreeManager:
         """
         # worktree からブランチ名を取得（削除前に取得）
         branch_name = None
+        normalized_path = os.path.realpath(path)
         worktrees = await self.list_worktrees()
         for wt in worktrees:
-            if wt.path == path:
+            if os.path.realpath(wt.path) == normalized_path:
                 branch_name = wt.branch
                 break
+
+        if not branch_name and os.path.exists(path):
+            current_branch = await self.get_current_branch(path)
+            if current_branch and current_branch != "HEAD":
+                branch_name = current_branch
 
         # worktree を削除
         args = ["worktree", "remove"]

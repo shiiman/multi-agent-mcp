@@ -5,6 +5,7 @@
 
 import heapq
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
@@ -61,15 +62,18 @@ class SchedulerManager:
         self,
         dashboard_manager: "DashboardManager",
         agents: dict[str, "Agent"],
+        persist_agent_state: Callable[["Agent"], bool] | None = None,
     ) -> None:
         """SchedulerManagerを初期化する。
 
         Args:
             dashboard_manager: ダッシュボードマネージャー
             agents: エージェントの辞書（agent_id -> Agent）
+            persist_agent_state: エージェント状態永続化コールバック
         """
         self.dashboard_manager = dashboard_manager
         self.agents = agents
+        self._persist_agent_state = persist_agent_state
         self._task_queue: list[ScheduledTask] = []
         self._assigned_tasks: dict[str, str] = {}  # task_id -> agent_id
         self._task_map: dict[str, ScheduledTask] = {}  # task_id -> ScheduledTask
@@ -216,9 +220,30 @@ class SchedulerManager:
         if agent.status != "idle":
             return False, f"Worker {worker_id} は現在利用できません（状態: {agent.status}）"
 
+        # 同一Workerへの多重割り当てを防ぐため、先にbusy反映と永続化を行う
+        previous_status = agent.status
+        previous_task = agent.current_task
+        previous_last_activity = agent.last_activity
+        now = datetime.now()
+
+        agent.status = "busy"
+        agent.current_task = task_id
+        agent.last_activity = now
+        if self._persist_agent_state:
+            self._persist_agent_state(agent)
+
         # 割り当て
         self._assigned_tasks[task_id] = worker_id
-        self.dashboard_manager.assign_task(task_id, worker_id)
+        assigned, message = self.dashboard_manager.assign_task(task_id, worker_id)
+        if not assigned:
+            # 反映失敗時は状態を戻して整合性を維持する
+            self._assigned_tasks.pop(task_id, None)
+            agent.status = previous_status
+            agent.current_task = previous_task
+            agent.last_activity = previous_last_activity
+            if self._persist_agent_state:
+                self._persist_agent_state(agent)
+            return False, message
 
         logger.info(f"タスク {task_id} を Worker {worker_id} に割り当てました")
         return True, f"タスク {task_id} を Worker {worker_id} に割り当てました"
