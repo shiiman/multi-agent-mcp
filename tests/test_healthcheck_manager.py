@@ -253,6 +253,8 @@ class TestHealthcheckMonitoring:
         assert updated is not None
         assert updated.status == TaskStatus.FAILED
         assert worker.current_task is None
+        summary = dashboard.get_summary()
+        assert summary["process_crash_count"] == 1
 
     @pytest.mark.asyncio
     async def test_monitor_recovers_in_progress_no_ipc_timeout(self, temp_dir, settings):
@@ -349,3 +351,6 @@ class TestHealthcheckMonitoring:
         assert len(result["recovered"]) == 1
         assert result["recovered"][0]["reason"] == "in_progress_no_ipc"
         assert worker.ai_bootstrapped is False
+        summary = dashboard.get_summary()
+        assert summary["process_crash_count"] == 1
+        assert summary["process_recovery_count"] == 1

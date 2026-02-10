@@ -683,11 +683,22 @@ class HealthcheckManager:
             if recovery_reason is None:
                 continue
 
+            if dashboard is not None:
+                try:
+                    dashboard.increment_process_crash_count()
+                except (AttributeError, ValueError) as e:
+                    logger.debug("process_crash_count 更新に失敗: %s", e)
+
             result = await self._attempt_staged_recovery(
                 app_ctx, agent_id, agent, recovery_reason, force_recovery, current_key,
             )
 
             if result["status"] == "recovered":
+                if dashboard is not None:
+                    try:
+                        dashboard.increment_process_recovery_count()
+                    except (AttributeError, ValueError) as e:
+                        logger.debug("process_recovery_count 更新に失敗: %s", e)
                 recovered.append(result["detail"])
             elif result["status"] == "escalated":
                 escalated.append(result["detail"])
