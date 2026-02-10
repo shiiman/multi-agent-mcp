@@ -92,6 +92,9 @@ MCP_COST_WARNING_THRESHOLD_USD=10.0
 | 読み込み | 各ツール実行時 |
 | 書き込み | `init_tmux_workspace` で初期作成 |
 
+> モデルプロファイル（`MCP_MODEL_PROFILE_ACTIVE`）の正準保存先は `.env` です。  
+> `config.json` はモデルプロファイルを永続化しません。
+
 ```json
 {
   "mcp_tool_prefix": "mcp__multi-agent-mcp__",

@@ -179,6 +179,21 @@ codex mcp list
 | `check_gtr_available` | gtr (git-worktree-runner) の利用可否を確認（git有効時のみ） |
 | `open_worktree_with_ai` | gtr aiでworktreeをAIツールで開く（git有効時のみ） |
 
+#### create_worktree の引数契約
+
+`create_worktree` は以下の引数契約です（`branch_name` 引数は存在しません）。
+
+```python
+create_worktree(
+    repo_path="/path/to/repo",
+    worktree_path="/path/to/worktree",
+    branch="feature/xxx",
+    create_branch=True,
+    base_branch="main",
+    caller_agent_id="admin-or-owner-id",
+)
+```
+
 ### マージ（1個）
 
 | Tool | 説明 |
@@ -194,11 +209,12 @@ codex mcp list
 | `get_unread_count` | 未読メッセージ数を取得 |
 | `register_agent_to_ipc` | エージェントをIPCシステムに登録 |
 
-### ダッシュボード/タスク管理（14個）
+### ダッシュボード/タスク管理（15個）
 
 | Tool | 説明 |
 |------|------|
 | `create_task` | 新しいタスクを作成 |
+| `reopen_task` | 終端タスクを再開（再実行用） |
 | `update_task_status` | タスクのステータスを更新（Admin専用） |
 | `assign_task_to_agent` | タスクをエージェントに割り当て（Admin専用） |
 | `list_tasks` | タスク一覧を取得 |
@@ -212,6 +228,26 @@ codex mcp list
 | `set_cost_warning_threshold` | コスト警告の閾値を設定 |
 | `reset_cost_counter` | コストカウンターをリセット |
 | `get_cost_summary` | コストサマリーを取得 |
+
+#### create_task の metadata 運用
+
+`create_task` では、タスク説明文字列だけでなく metadata を渡す運用を推奨します。
+
+- `task_kind`: タスク種別（例: `implementation` / `qa` / `docs` / `report`）
+- `requires_playwright`: Playwright 検証が必要なタスクか（`true`/`false`）
+- `output_dir`: 成果物の出力先（例: `.multi-agent-mcp/{session_id}/reports`）
+
+#### update_task_status の遷移制約
+
+- `update_task_status` は通常の前進遷移に使用します。
+- `completed` / `failed` / `cancelled` の終端状態になったタスクを再開するときは、
+  `update_task_status` で直接戻さず `reopen_task` を使用してください。
+
+#### 調査レポートの出力ルール
+
+- 調査・検証系タスクの Markdown 成果物は
+  `.multi-agent-mcp/{session_id}/reports/*.md` に出力します。
+- 出力先は `create_task.metadata.output_dir` で明示し、Worker 指示にも同じパスを記載します。
 
 ### Gtrconfig（3個）
 
@@ -297,6 +333,26 @@ codex mcp list
 | `get_model_profile` | 現在のプロファイルを取得 |
 | `switch_model_profile` | プロファイルを切り替え（standard/performance） |
 | `get_model_profile_settings` | プロファイルの設定詳細を取得 |
+
+#### switch_model_profile の方針
+
+- モデルプロファイルの正準保存先は **`.multi-agent-mcp/.env`**（`MCP_MODEL_PROFILE_ACTIVE`）です。
+- `switch_model_profile` は `.env` のみを更新し、`config.json` へは保存しません。
+- `config.json` はセッション設定（`session_id`, `enable_git` など）専用です。
+
+### 主要フィールド（公開I/F）
+
+#### Agent
+
+- 主要フィールド: `id`, `role`, `status`, `tmux_session`, `working_dir`, `worktree_path`, `current_task`
+- グリッド/CLI 関連: `session_name`, `window_index`, `pane_index`, `ai_cli`, `ai_bootstrapped`
+
+#### Dashboard / Task
+
+- `TaskInfo`: `task_file_path`, `metadata`, `started_at`, `completed_at`, `error_message`
+- `metadata` には `requested_description` や運用キー（`task_kind` など）を保持します
+- Dashboard 運用フィールド: `session_started_at`, `session_finished_at`,
+  `process_crash_count`, `process_recovery_count`
 
 ## 使用例
 
@@ -413,7 +469,8 @@ cleanup_workspace()
 ├── screenshot/             # スクリーンショット保存先
 └── {session_id}/           # セッション別
     ├── dashboard/          # ダッシュボード
-    └── tasks/              # タスクファイル
+    ├── tasks/              # タスクファイル
+    └── reports/            # 調査/検証レポート（*.md）
 ```
 
 ### プロジェクト別設定

@@ -10,6 +10,7 @@ from src.tools.session_env import (
     _format_env_value,
     _setup_mcp_directories,
     generate_env_template,
+    set_env_value,
 )
 
 
@@ -77,6 +78,11 @@ class TestGenerateEnvTemplate:
         """テンプレートの値が Settings と一致する。"""
         result = generate_env_template(settings=settings)
         assert f"MCP_MAX_WORKERS={settings.max_workers}" in result
+
+    def test_template_contains_send_cooldown_default(self, settings):
+        """テンプレートに send cooldown の既定値が含まれることをテスト。"""
+        result = generate_env_template(settings=settings)
+        assert "MCP_SEND_COOLDOWN_SECONDS=2.0" in result
 
 
 class TestSetupMcpDirectories:
@@ -223,3 +229,29 @@ class TestSetupMcpDirectories:
         ):
             _setup_mcp_directories(str(temp_dir), settings=settings)
         assert "invalid_config" in str(exc_info.value)
+
+
+class TestSetEnvValue:
+    """set_env_value のテスト。"""
+
+    def test_updates_existing_key(self, temp_dir):
+        """既存キーを上書きできる。"""
+        env_file = temp_dir / ".multi-agent-mcp" / ".env"
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text("MCP_MODEL_PROFILE_ACTIVE=standard\n", encoding="utf-8")
+
+        set_env_value(env_file, "MCP_MODEL_PROFILE_ACTIVE", "performance")
+
+        assert env_file.read_text(encoding="utf-8") == "MCP_MODEL_PROFILE_ACTIVE=performance\n"
+
+    def test_appends_new_key(self, temp_dir):
+        """存在しないキーは末尾に追加する。"""
+        env_file = temp_dir / ".multi-agent-mcp" / ".env"
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text("MCP_ENABLE_GIT=true\n", encoding="utf-8")
+
+        set_env_value(env_file, "MCP_MODEL_PROFILE_ACTIVE", "performance")
+
+        assert env_file.read_text(encoding="utf-8").endswith(
+            "MCP_MODEL_PROFILE_ACTIVE=performance\n"
+        )

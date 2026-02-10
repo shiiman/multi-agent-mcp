@@ -16,6 +16,7 @@
 | 短縮名 | 完全名 |
 | ------ | ------ |
 | `create_task` | `{mcp_tool_prefix}create_task` |
+| `reopen_task` | `{mcp_tool_prefix}reopen_task` |
 | `create_agent` | `{mcp_tool_prefix}create_agent` |
 | `create_workers_batch` | `{mcp_tool_prefix}create_workers_batch` |
 | `create_worktree` | `{mcp_tool_prefix}create_worktree` |
@@ -35,9 +36,23 @@ Admin ID: `{agent_id}`
 
 **呼び出し例:**
 ```
-{mcp_tool_prefix}create_task(title="タスク名", description="説明", caller_agent_id="{agent_id}")
+{mcp_tool_prefix}create_task(
+  title="タスク名",
+  description="説明",
+  metadata={{
+    "task_kind": "implementation",
+    "requires_playwright": false,
+    "output_dir": ".multi-agent-mcp/{session_id}/reports"
+  }},
+  caller_agent_id="{agent_id}"
+)
 {mcp_tool_prefix}create_agent(role="worker", working_dir="/path/to/worktree", caller_agent_id="{agent_id}")
-{mcp_tool_prefix}create_worktree(branch_name="xxx", caller_agent_id="{agent_id}")
+{mcp_tool_prefix}create_worktree(
+  repo_path="{project_path}",
+  worktree_path="/path/to/worktree",
+  branch="feature/xxx",
+  caller_agent_id="{agent_id}"
+)
 {mcp_tool_prefix}send_task(agent_id="xxx", task_content="内容", session_id="{session_id}", caller_agent_id="{agent_id}")
 ```
 
@@ -95,6 +110,11 @@ for task in subtasks:
     create_task(
         title=task["title"],
         description=task["description"],
+        metadata={{
+            "task_kind": task.get("task_kind", "implementation"),
+            "requires_playwright": task.get("requires_playwright", False),
+            "output_dir": task.get("output_dir", f".multi-agent-mcp/{session_id}/reports"),
+        }},
         caller_agent_id="{agent_id}"
     )
 ```
@@ -102,6 +122,22 @@ for task in subtasks:
 - 計画書から並列実行可能なサブタスクを抽出
 - **各サブタスクを必ず `create_task` で Dashboard に登録**
 - タスクを登録しないと `list_tasks` が空のままになる
+
+#### 2.3. `create_task` metadata 運用（必須）
+
+`create_task` では以下の metadata を標準化して渡します。
+
+- `task_kind`: タスク種別（例: `implementation` / `qa` / `report` / `docs`）
+- `requires_playwright`: UI 検証が必要なタスクは `true`
+- `output_dir`: 成果物の出力先ディレクトリ（原則 `.multi-agent-mcp/{session_id}/reports`）
+
+`task_kind=report` または調査・検証系タスクでは、成果物を必ず `output_dir` 配下の `.md` として保存します。
+
+#### 2.4. ステータス遷移制約（重要）
+
+- `update_task_status` は通常遷移のみで使用します（`pending -> in_progress -> completed/failed/cancelled`）。
+- **終端状態（`completed` / `failed` / `cancelled`）からの再開は `reopen_task` を使用**します。
+- 終端状態から `update_task_status` で直接戻す運用は禁止です（監査履歴を壊すため）。
 
 ### 3. Worker 一括作成・タスク割り当て・タスク送信
 
@@ -114,9 +150,15 @@ for task in subtasks:
     result = create_task(
         title=task["title"],
         description=task["description"],
+        metadata={{
+            "task_kind": task.get("task_kind", "implementation"),
+            "requires_playwright": task.get("requires_playwright", False),
+            "output_dir": task.get("output_dir", f".multi-agent-mcp/{session_id}/reports"),
+        }},
         caller_agent_id="{agent_id}"
     )
-    task_ids.append(result["task_id"])
+    task_id = result.get("task_id") or result.get("task", {{}}).get("id")
+    task_ids.append(task_id)
 
 # ステップ 2: Worker 設定を準備（task_id を含める）
 worker_configs = [
@@ -290,6 +332,11 @@ for task in qa_tasks:
     create_task(
         title=task["title"],
         description=task["description"],
+        metadata={{
+            "task_kind": "qa",
+            "requires_playwright": "UI" in task["title"],
+            "output_dir": f".multi-agent-mcp/{session_id}/reports",
+        }},
         caller_agent_id="{agent_id}"
     )
 ```
@@ -352,7 +399,14 @@ while (品質に問題あり && イテレーション < {max_iterations}):
 - 最大イテレーション回数: {max_iterations}回（超えたら Owner に報告）
 - 修正内容はメモリに保存（`save_to_memory`）して学習
 
-### 6.1 Owner 完了通知前の必須ゲート
+### 6.1 調査・検証レポートの出力先
+
+- 調査・検証・テンプレート整合の成果物は `reports/*.md` ではなく、
+  **`.multi-agent-mcp/{session_id}/reports/*.md` を正本**として出力します。
+- ファイル名は `waveX-<topic>.md` 形式を推奨します。
+- Owner/Worker に成果物パスを共有する際は、絶対パスではなくセッション相対パスで記録します。
+
+### 6.2 Owner 完了通知前の必須ゲート
 
 Owner に `task_complete` を送る前に、以下を満たしていること:
 

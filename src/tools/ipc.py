@@ -21,6 +21,7 @@ from src.tools.helpers import (
     require_permission,
     save_agent_to_file,
     sync_agents_from_file,
+    validate_sender_caller_match,
 )
 from src.tools.helpers_managers import ensure_dashboard_manager
 from src.tools.session_state import cleanup_session_resources
@@ -95,11 +96,24 @@ def _auto_update_dashboard_from_messages(
                 checklist = msg.metadata.get("checklist")
                 message_text = msg.metadata.get("message")
                 reporter = msg.metadata.get("reporter")
+                status_ok, status_msg = dashboard.update_task_status(
+                    task_id, TaskStatus.IN_PROGRESS, progress
+                )
+                if not status_ok:
+                    skipped_reasons.append(
+                        f"status_update_rejected:{task_id}:{status_msg}"
+                    )
+                    continue
+
                 if checklist:
-                    dashboard.update_task_checklist(
+                    checklist_ok, checklist_msg = dashboard.update_task_checklist(
                         task_id, checklist, log_message=message_text
                     )
-                dashboard.update_task_status(task_id, TaskStatus.IN_PROGRESS, progress)
+                    if not checklist_ok:
+                        skipped_reasons.append(
+                            f"checklist_update_error:{task_id}:{checklist_msg}"
+                        )
+
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
                     agent.current_task = task_id
@@ -114,9 +128,15 @@ def _auto_update_dashboard_from_messages(
                 if task and task.status == TaskStatus.COMPLETED:
                     skipped_reasons.append(f"already_completed:{task_id}")
                     continue
-                dashboard.update_task_status(
+                status_ok, status_msg = dashboard.update_task_status(
                     task_id, TaskStatus.COMPLETED, progress=100
                 )
+                if not status_ok:
+                    skipped_reasons.append(
+                        f"status_update_rejected:{task_id}:{status_msg}"
+                    )
+                    continue
+
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
                     if agent.current_task == task_id:
@@ -132,7 +152,15 @@ def _auto_update_dashboard_from_messages(
                 if task and task.status == TaskStatus.FAILED:
                     skipped_reasons.append(f"already_failed:{task_id}")
                     continue
-                dashboard.update_task_status(task_id, TaskStatus.FAILED)
+                status_ok, status_msg = dashboard.update_task_status(
+                    task_id, TaskStatus.FAILED
+                )
+                if not status_ok:
+                    skipped_reasons.append(
+                        f"status_update_rejected:{task_id}:{status_msg}"
+                    )
+                    continue
+
                 if reporter and reporter in app_ctx.agents:
                     agent = app_ctx.agents[reporter]
                     if agent.current_task == task_id:
@@ -516,6 +544,10 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        sender_validation_error = validate_sender_caller_match(sender_id, caller_agent_id)
+        if sender_validation_error:
+            return sender_validation_error
+
         ipc = ensure_ipc_manager(app_ctx)
         sync_agents_from_file(app_ctx)
 
@@ -603,7 +635,7 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # イベント駆動通知: 受信者の状態に応じて通知方法を選択
-        # macOS 通知は admin→owner の task_complete のみに制限
+        # tmux ペイン未配置の Owner 向けに、admin→owner は macOS へフォールバック
         notification_sent = False
         notification_method = None
         auto_cleanup_executed = False
@@ -613,13 +645,12 @@ def register_tools(mcp: FastMCP) -> None:
             sync_agents_from_file(app_ctx)
             receiver_agent = app_ctx.agents.get(receiver_id)
             sender_agent = app_ctx.agents.get(sender_id)
-            # macOS 通知条件: admin→owner の task_complete のみ
-            is_admin_to_owner_complete = (
+            # macOS 通知条件: admin→owner のメッセージ
+            is_admin_to_owner_message = (
                 sender_agent
                 and receiver_agent
                 and str(getattr(sender_agent, "role", "")) == AgentRole.ADMIN.value
                 and str(getattr(receiver_agent, "role", "")) == AgentRole.OWNER.value
-                and msg_type == MessageType.TASK_COMPLETE
             )
             if receiver_agent:
                 has_tmux_pane = (
@@ -630,18 +661,18 @@ def register_tools(mcp: FastMCP) -> None:
                     # tmux ペインがある場合: リトライ付き tmux 通知
                     tmux_ok = await notify_agent_via_tmux(
                         app_ctx, receiver_agent, msg_type.value, sender_id,
-                        allow_macos_fallback=is_admin_to_owner_complete,
+                        allow_macos_fallback=is_admin_to_owner_message,
                     )
                     if tmux_ok:
                         notification_sent = True
                         notification_method = "tmux"
                     else:
-                        notification_sent = is_admin_to_owner_complete
+                        notification_sent = is_admin_to_owner_message
                         notification_method = (
-                            "macos_fallback" if is_admin_to_owner_complete else None
+                            "macos_fallback" if is_admin_to_owner_message else None
                         )
-                elif is_admin_to_owner_complete:
-                    # tmux ペインがない Owner への admin 完了通知のみ macOS 通知
+                elif is_admin_to_owner_message:
+                    # tmux ペインがない Owner への admin 通知を macOS で補完
                     from src.tools.helpers import _send_macos_notification
 
                     macos_ok = await _send_macos_notification(
@@ -704,7 +735,12 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             メッセージ一覧（success, messages, count または error）
         """
-        app_ctx, role_error = require_permission(ctx, "read_messages", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx,
+            "read_messages",
+            caller_agent_id,
+            target_agent_id=agent_id,
+        )
         if role_error:
             return role_error
 
@@ -851,7 +887,12 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             未読数（success, agent_id, unread_count）
         """
-        app_ctx, role_error = require_permission(ctx, "get_unread_count", caller_agent_id)
+        app_ctx, role_error = require_permission(
+            ctx,
+            "get_unread_count",
+            caller_agent_id,
+            target_agent_id=agent_id,
+        )
         if role_error:
             return role_error
 

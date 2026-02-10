@@ -216,7 +216,7 @@ class TestInitializeAgentCLISelection:
 
         # CLI が None の場合はデフォルトを使用
         cli = agent.ai_cli or ai_cli_manager.get_default_cli()
-        assert cli == AICli.CLAUDE  # デフォルトは Claude
+        assert cli == ai_cli_manager.settings.get_active_profile_cli()
 
 
 class TestBuildCliArgsWithPrompt:

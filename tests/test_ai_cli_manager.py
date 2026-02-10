@@ -19,7 +19,7 @@ class TestAiCliManager:
     def test_get_default_cli(self, ai_cli_manager):
         """デフォルトCLIを取得できることをテスト。"""
         default = ai_cli_manager.get_default_cli()
-        assert default == AICli.CLAUDE
+        assert default == ai_cli_manager.settings.get_active_profile_cli()
 
     def test_get_command(self, ai_cli_manager):
         """CLIコマンドを取得できることをテスト。"""
@@ -43,7 +43,7 @@ class TestAiCliManager:
         assert info["cli"] == "claude"
         assert info["command"] == "claude"
         assert "available" in info
-        assert info["is_default"] is True
+        assert info["is_default"] == (ai_cli_manager.get_default_cli() == AICli.CLAUDE)
 
     def test_get_all_cli_info(self, ai_cli_manager):
         """全CLI情報を取得できることをテスト。"""

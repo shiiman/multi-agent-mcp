@@ -1,12 +1,24 @@
 """モデルプロファイル管理ツール。"""
 
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import ModelProfile
 from src.context import AppContext
-from src.tools.helpers import require_permission
+from src.tools.helpers import refresh_app_settings, require_permission, resolve_main_repo_root
+from src.tools.session_env import set_env_value
+
+
+def get_profile_persistence_policy(app_ctx: AppContext) -> dict[str, Any]:
+    """モデルプロファイル永続化ポリシーを返す。"""
+    return {
+        "canonical_store": f"{app_ctx.settings.mcp_dir}/.env",
+        "updated_env_key": "MCP_MODEL_PROFILE_ACTIVE",
+        "config_json_runtime_overrides": ["enable_git"],
+        "config_json_persists_profile": False,
+    }
 
 
 def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str, Any]:
@@ -96,6 +108,7 @@ def register_tools(mcp: FastMCP) -> None:
             "success": True,
             "active_profile": settings.model_profile_active.value,
             "settings": current_settings,
+            "persistence_policy": get_profile_persistence_policy(app_ctx),
             "worker_cli": {
                 "mode": settings.worker_cli_mode.value,
                 "uniform": settings.get_active_profile_cli().value,
@@ -123,6 +136,10 @@ def register_tools(mcp: FastMCP) -> None:
 
         Returns:
             切り替え結果（success, previous_profile, current_profile, settings）
+
+        Notes:
+            永続化先は `.multi-agent-mcp/.env` の `MCP_MODEL_PROFILE_ACTIVE` のみ。
+            `config.json` には保存しない。
         """
         app_ctx, role_error = require_permission(ctx, "switch_model_profile", caller_agent_id)
         if role_error:
@@ -141,15 +158,43 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         previous_profile = settings.model_profile_active
-        settings.model_profile_active = new_profile
+        if previous_profile == new_profile:
+            return {
+                "success": True,
+                "previous_profile": previous_profile.value,
+                "current_profile": new_profile.value,
+                "settings": get_current_profile_settings(app_ctx),
+                "persistence_policy": get_profile_persistence_policy(app_ctx),
+                "message": f"プロファイルは既に {new_profile.value} です",
+            }
 
-        new_settings = get_profile_settings(app_ctx, new_profile)
+        project_root = app_ctx.project_root
+        if not project_root:
+            return {
+                "success": False,
+                "error": "project_root が未設定のため .env を更新できません",
+            }
+
+        if settings.enable_git:
+            try:
+                project_root = resolve_main_repo_root(project_root)
+            except ValueError:
+                project_root = str(Path(project_root).expanduser())
+        else:
+            project_root = str(Path(project_root).expanduser())
+
+        env_file = Path(project_root) / settings.mcp_dir / ".env"
+        set_env_value(env_file, "MCP_MODEL_PROFILE_ACTIVE", new_profile.value)
+        refresh_app_settings(app_ctx, project_root)
+
+        new_settings = get_current_profile_settings(app_ctx)
 
         return {
             "success": True,
             "previous_profile": previous_profile.value,
-            "current_profile": new_profile.value,
+            "current_profile": app_ctx.settings.model_profile_active.value,
             "settings": new_settings,
+            "persistence_policy": get_profile_persistence_policy(app_ctx),
             "message": (
                 f"プロファイルを {previous_profile.value} → {new_profile.value} に切り替えました"
             ),
@@ -193,6 +238,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "profile": target_profile.value,
                 "is_active": target_profile == settings.model_profile_active,
                 "settings": profile_settings,
+                "persistence_policy": get_profile_persistence_policy(app_ctx),
             }
         else:
             # 全プロファイル
@@ -203,6 +249,7 @@ def register_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "active_profile": settings.model_profile_active.value,
+                "persistence_policy": get_profile_persistence_policy(app_ctx),
                 "worker_cli": {
                     "mode": settings.worker_cli_mode.value,
                     "uniform": settings.get_active_profile_cli().value,

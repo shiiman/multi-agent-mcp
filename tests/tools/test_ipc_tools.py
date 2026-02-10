@@ -610,6 +610,119 @@ class TestSendMessage:
         assert result["receiver_id"] == "admin-001"
         assert result["rerouted_receiver_id"] == "admin-001"
 
+    @pytest.mark.asyncio
+    async def test_send_message_rejects_sender_caller_mismatch(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """sender_id と caller_agent_id が不一致の場合は拒否される。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_message(
+            sender_id="owner-001",
+            receiver_id="owner-001",
+            message_type="system",
+            content="spoof",
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "sender_id と caller_agent_id が一致しない" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_admin_to_owner_non_complete_uses_macos_fallback(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """admin→owner の task_complete 以外でも通知が欠落しないことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_message = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                send_message = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            session_name=None,
+            window_index=None,
+            pane_index=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        with patch("src.tools.helpers._send_macos_notification", new=AsyncMock(return_value=True)):
+            result = await send_message(
+                sender_id="admin-001",
+                receiver_id="owner-001",
+                message_type="task_failed",
+                content="検証失敗",
+                caller_agent_id="admin-001",
+                ctx=ipc_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["notification_sent"] is True
+        assert result["notification_method"] == "macos"
+
 
 class TestReadMessages:
     """read_messages ツールのテスト。"""
@@ -647,6 +760,98 @@ class TestReadMessages:
             agent_id="owner-001",
             unread_only=True,
             caller_agent_id="owner-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_worker_read_messages_blocks_other_agent(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Worker は他 agent の read_messages を実行できない。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await read_messages(
+            agent_id="owner-001",
+            unread_only=True,
+            caller_agent_id="worker-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "自分自身の agent_id" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_worker_read_messages_allows_self(self, ipc_mock_ctx, git_repo):
+        """Worker は自分自身の read_messages は実行できる。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await read_messages(
+            agent_id="worker-001",
+            unread_only=True,
+            caller_agent_id="worker-001",
             ctx=ipc_mock_ctx,
         )
 
@@ -834,6 +1039,166 @@ class TestReadMessages:
         assert state["waiting_for_admin"] is False
         assert state["unlock_reason"] == "admin_notification_consumed"
 
+    @pytest.mark.asyncio
+    async def test_read_messages_admin_auto_updates_dashboard_from_task_progress(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Admin read_messages 時に task_progress から Dashboard が自動更新されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+        assert read_messages is not None
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="progress target",
+            description="auto update",
+            assigned_agent_id="worker-001",
+        )
+
+        app_ctx.ipc_manager.send_message(
+            sender_id="worker-001",
+            receiver_id="admin-001",
+            message_type=MessageType.TASK_PROGRESS,
+            content="50% reached",
+            metadata={
+                "task_id": f"task:{task.id}",
+                "progress": 50,
+                "message": "50% reached",
+                "reporter": "worker-001",
+            },
+        )
+
+        result = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["dashboard_updated"] is True
+        assert result["dashboard_updates_applied"] == 1
+        updated = app_ctx.dashboard_manager.get_task(task.id)
+        assert updated is not None
+        assert updated.status == TaskStatus.IN_PROGRESS
+        assert updated.progress == 50
+
+    @pytest.mark.asyncio
+    async def test_read_messages_admin_auto_updates_dashboard_from_task_failed(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Admin read_messages 時に task_failed から Dashboard が自動更新されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+        assert read_messages is not None
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="failure target",
+            description="auto update",
+            assigned_agent_id="worker-001",
+        )
+        app_ctx.agents["worker-001"].current_task = task.id
+
+        app_ctx.ipc_manager.send_message(
+            sender_id="worker-001",
+            receiver_id="admin-001",
+            message_type=MessageType.TASK_FAILED,
+            content="failed",
+            metadata={
+                "task_id": f"task:{task.id}",
+                "reporter": "worker-001",
+            },
+        )
+
+        result = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["dashboard_updated"] is True
+        assert result["dashboard_updates_applied"] == 1
+        updated = app_ctx.dashboard_manager.get_task(task.id)
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+
 
 class TestGetUnreadCount:
     """get_unread_count ツールのテスト。"""
@@ -875,6 +1240,57 @@ class TestGetUnreadCount:
 
         assert result["success"] is True
         assert "unread_count" in result
+
+    @pytest.mark.asyncio
+    async def test_worker_get_unread_count_blocks_other_agent(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Worker は他 agent の未読数を取得できない。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_unread_count = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_unread_count":
+                get_unread_count = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await get_unread_count(
+            agent_id="owner-001",
+            caller_agent_id="worker-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "自分自身の agent_id" in result["error"]
 
 
 class TestUnlockOwnerWait:
@@ -975,4 +1391,3 @@ class TestRegisterAgentToIpc:
 
         assert result["success"] is True
         assert result["agent_id"] == "new-agent-001"
-

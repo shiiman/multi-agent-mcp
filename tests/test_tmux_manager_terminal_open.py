@@ -93,3 +93,18 @@ class TestTmuxManagerTerminalOpen:
 
         assert success is False
         manager._open_in_ghostty.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_open_session_in_terminal_quotes_session_name(self):
+        """セッション名に記号が含まれても shell-quote されることをテスト。"""
+        manager = TmuxManager(Settings())
+        manager._open_in_iterm2 = AsyncMock(return_value=True)
+
+        success = await manager.open_session_in_terminal(
+            "project:abc-1.2", terminal=TerminalApp.ITERM2
+        )
+
+        assert success is True
+        manager._open_in_iterm2.assert_awaited_once_with(
+            "tmux attach -t -- project:abc-1.2"
+        )

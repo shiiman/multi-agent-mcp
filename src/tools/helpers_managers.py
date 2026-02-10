@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 
 from src.context import AppContext
 from src.managers.dashboard_manager import DashboardManager
@@ -121,8 +122,14 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
 def ensure_scheduler_manager(app_ctx: AppContext) -> SchedulerManager:
     """SchedulerManagerが初期化されていることを確認する。"""
     if app_ctx.scheduler_manager is None:
+        from src.tools.helpers_persistence import save_agent_to_file
+
         dashboard = ensure_dashboard_manager(app_ctx)
-        app_ctx.scheduler_manager = SchedulerManager(dashboard, app_ctx.agents)
+        app_ctx.scheduler_manager = SchedulerManager(
+            dashboard,
+            app_ctx.agents,
+            persist_agent_state=lambda agent: save_agent_to_file(app_ctx, agent),
+        )
     return app_ctx.scheduler_manager
 
 
@@ -152,31 +159,32 @@ def ensure_persona_manager(app_ctx: AppContext) -> PersonaManager:
 def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
     """MemoryManagerが初期化されていることを確認する。
 
-    worktree 内で実行されている場合でも、メインリポジトリの memory ディレクトリを使用する。
+    worktree 内で実行されている場合でも、メインリポジトリの
+    `{mcp_dir}/memory`（セッション非依存）を使用する。
     """
-    if app_ctx.memory_manager is None:
-        from src.tools.helpers import resolve_project_root
+    from src.tools.helpers import resolve_project_root
 
-        project_root = resolve_project_root(
-            app_ctx,
-            allow_env_fallback=True,
-            allow_agent_fallback=True,
+    project_root = resolve_project_root(
+        app_ctx,
+        allow_env_fallback=True,
+        allow_agent_fallback=True,
+    )
+    # project_root を設定（次回以降のために）
+    if not app_ctx.project_root:
+        app_ctx.project_root = project_root
+        logger.info(f"project_root を自動設定: {project_root}")
+
+    # report_task_completion の保存先整合のため、常に session 非依存の
+    # .multi-agent-mcp/memory を使用する。
+    memory_dir = os.path.join(project_root, app_ctx.settings.mcp_dir, "memory")
+    memory_dir_abs = os.path.realpath(os.path.abspath(memory_dir))
+    current_dir_abs: str | None = None
+    if app_ctx.memory_manager is not None and app_ctx.memory_manager.storage_dir is not None:
+        current_dir_abs = os.path.realpath(
+            os.path.abspath(str(Path(app_ctx.memory_manager.storage_dir)))
         )
-        # project_root を設定（次回以降のために）
-        if not app_ctx.project_root:
-            app_ctx.project_root = project_root
-            logger.info(f"project_root を自動設定: {project_root}")
-        # session_id を確保（config.json から読み取り）
-        session_id = ensure_session_id(app_ctx)
-        if session_id:
-            memory_dir = os.path.join(
-                project_root,
-                app_ctx.settings.mcp_dir,
-                session_id,
-                "memory",
-            )
-        else:
-            memory_dir = os.path.join(project_root, app_ctx.settings.mcp_dir, "memory")
+
+    if app_ctx.memory_manager is None or current_dir_abs != memory_dir_abs:
         app_ctx.memory_manager = MemoryManager(storage_dir=memory_dir)
     return app_ctx.memory_manager
 
