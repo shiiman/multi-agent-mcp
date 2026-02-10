@@ -73,3 +73,7 @@
 - `tests/tools/test_healthcheck_tools.py`
 - `tests/test_worktree_manager.py`
 - `reports/wave1-c-recovery-tmux-worktree.md`
+
+## 収束情報
+- 最終確認コミット: `5d293a7`
+- 受入条件 #6/#7 の回帰テストを含む関連検証はすべて PASS（43 passed）
