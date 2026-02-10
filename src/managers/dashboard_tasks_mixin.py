@@ -3,9 +3,10 @@
 import logging
 import re
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from src.config.settings import get_mcp_dir
 from src.models.agent import Agent
@@ -26,9 +27,43 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_DashboardMutationResult = TypeVar("_DashboardMutationResult")
+
 
 class DashboardTasksMixin:
     """Dashboard のタスク・集計・ファイル配布機能を提供する mixin。"""
+
+    _TERMINAL_TASK_STATUSES: ClassVar[set[TaskStatus]] = {
+        TaskStatus.COMPLETED,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLED,
+    }
+    _ALLOWED_TASK_TRANSITIONS: ClassVar[dict[TaskStatus, set[TaskStatus]]] = {
+        TaskStatus.PENDING: {
+            TaskStatus.PENDING,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.BLOCKED,
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        },
+        TaskStatus.IN_PROGRESS: {
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.BLOCKED,
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        },
+        TaskStatus.BLOCKED: {
+            TaskStatus.BLOCKED,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        },
+        TaskStatus.COMPLETED: {TaskStatus.COMPLETED},
+        TaskStatus.FAILED: {TaskStatus.FAILED},
+        TaskStatus.CANCELLED: {TaskStatus.CANCELLED},
+    }
 
     def get_dashboard(self) -> Dashboard:
         """現在のダッシュボードを取得する。
@@ -37,6 +72,15 @@ class DashboardTasksMixin:
             Dashboard オブジェクト
         """
         return self._read_dashboard()
+
+    def _mutate_dashboard(
+        self,
+        mutator: Callable[[Dashboard], _DashboardMutationResult],
+        *,
+        write_back: bool = True,
+    ) -> _DashboardMutationResult:
+        """Dashboard 変更をロック付きトランザクションで実行する。"""
+        return self.run_dashboard_transaction(mutator, write_back=write_back)
 
     def _resolve_task(self, dashboard: Dashboard, task_id: str) -> TaskInfo | None:
         """task_id を exact / normalized / unique prefix で解決する。"""
@@ -91,30 +135,53 @@ class DashboardTasksMixin:
         Returns:
             作成されたTaskInfo
         """
-        dashboard = self._read_dashboard()
-        task_metadata = metadata.copy() if metadata else {}
-        if description:
-            task_metadata["requested_description"] = description
+        def _create(dashboard: Dashboard) -> TaskInfo:
+            task_metadata = metadata.copy() if metadata else {}
+            if description:
+                task_metadata["requested_description"] = description
 
-        task = TaskInfo(
-            id=str(uuid.uuid4()),
-            title=title,
-            description="",
-            task_file_path=None,
-            status=TaskStatus.PENDING,
-            assigned_agent_id=assigned_agent_id,
-            branch=branch,
-            worktree_path=worktree_path,
-            metadata=task_metadata,
-            created_at=datetime.now(),
-        )
+            task = TaskInfo(
+                id=str(uuid.uuid4()),
+                title=title,
+                description="",
+                task_file_path=None,
+                status=TaskStatus.PENDING,
+                assigned_agent_id=assigned_agent_id,
+                branch=branch,
+                worktree_path=worktree_path,
+                metadata=task_metadata,
+                created_at=datetime.now(),
+            )
 
-        dashboard.tasks.append(task)
-        dashboard.calculate_stats()
-        self._write_dashboard(dashboard)
+            dashboard.tasks.append(task)
+            dashboard.calculate_stats()
+            return task
+
+        task = self._mutate_dashboard(_create)
 
         logger.info(f"タスクを作成しました: {task.id} - {title}")
         return task
+
+    def _validate_task_transition(
+        self, old_status: TaskStatus, new_status: TaskStatus
+    ) -> tuple[bool, str | None]:
+        """タスク状態遷移が許可されるか検証する。"""
+        allowed_statuses = self._ALLOWED_TASK_TRANSITIONS.get(old_status, {old_status})
+        if new_status in allowed_statuses:
+            return True, None
+
+        if old_status in self._TERMINAL_TASK_STATUSES:
+            return (
+                False,
+                (
+                    f"終端状態 ({old_status.value}) から {new_status.value} へは遷移できません。"
+                    "再開には reopen_task を使用してください。"
+                ),
+            )
+        return (
+            False,
+            f"状態遷移が許可されていません: {old_status.value} -> {new_status.value}",
+        )
 
     def update_task_status(
         self,
@@ -134,48 +201,113 @@ class DashboardTasksMixin:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
-        dashboard = self._read_dashboard()
+        def _update(dashboard: Dashboard) -> tuple[bool, str]:
+            task = self._resolve_task(dashboard, task_id)
+            if not task:
+                return False, f"タスク {task_id} が見つかりません"
 
-        task = self._resolve_task(dashboard, task_id)
-        if not task:
-            return False, f"タスク {task_id} が見つかりません"
+            old_status = task.status
+            is_valid, error = self._validate_task_transition(old_status, status)
+            if not is_valid:
+                return False, error or "状態遷移が許可されていません"
 
-        old_status = task.status
-        task.status = status
+            now = datetime.now()
+            task.status = status
 
-        if progress is not None:
-            task.progress = progress
+            if progress is not None:
+                task.progress = progress
 
-        if error_message is not None:
-            task.error_message = error_message
+            if error_message is not None:
+                task.error_message = error_message
+            elif status != TaskStatus.FAILED:
+                task.error_message = None
 
-        # ステータス変更時の日時記録
-        now = datetime.now()
-        if status == TaskStatus.IN_PROGRESS and old_status == TaskStatus.PENDING:
-            task.started_at = now
-            if task.assigned_agent_id:
+            if status == TaskStatus.IN_PROGRESS:
+                if (
+                    old_status in (TaskStatus.PENDING, TaskStatus.BLOCKED)
+                    and task.started_at is None
+                ):
+                    task.started_at = now
+                if dashboard.session_started_at is None:
+                    dashboard.session_started_at = task.started_at or now
+                task.completed_at = None
+                task.metadata["last_in_progress_update_at"] = now.isoformat()
+                if task.assigned_agent_id:
+                    for agent_summary in dashboard.agents:
+                        if agent_summary.agent_id == task.assigned_agent_id:
+                            agent_summary.current_task_id = task.id
+                            if agent_summary.role == "worker":
+                                agent_summary.status = "busy"
+                            break
+            elif status in self._TERMINAL_TASK_STATUSES:
+                task.completed_at = now
+                if status == TaskStatus.COMPLETED:
+                    task.progress = 100
                 for agent_summary in dashboard.agents:
-                    if agent_summary.agent_id == task.assigned_agent_id:
-                        agent_summary.current_task_id = task.id
-                        agent_summary.status = "busy"
-                        break
-        if status == TaskStatus.IN_PROGRESS:
-            task.metadata["last_in_progress_update_at"] = now.isoformat()
-        elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
-            task.completed_at = now
-            if status == TaskStatus.COMPLETED:
-                task.progress = 100
+                    if agent_summary.current_task_id == task.id:
+                        agent_summary.current_task_id = None
+                        if agent_summary.role == "worker":
+                            agent_summary.status = "idle"
+            elif status == TaskStatus.PENDING:
+                task.completed_at = None
+
+            has_active_tasks = any(
+                t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
+                for t in dashboard.tasks
+            )
+            if dashboard.tasks and not has_active_tasks:
+                dashboard.session_finished_at = now
+            else:
+                dashboard.session_finished_at = None
+
+            dashboard.calculate_stats()
+            logger.info(f"タスク {task.id} のステータスを更新: {old_status} -> {status}")
+            return True, f"ステータスを更新しました: {status.value}"
+
+        return self._mutate_dashboard(_update)
+
+    def reopen_task(self, task_id: str, reset_progress: bool = False) -> tuple[bool, str]:
+        """終端状態タスクを PENDING に戻す。
+
+        Args:
+            task_id: タスクID
+            reset_progress: True の場合は進捗率を 0 に戻す
+
+        Returns:
+            (成功フラグ, メッセージ) のタプル
+        """
+
+        def _reopen(dashboard: Dashboard) -> tuple[bool, str]:
+            task = self._resolve_task(dashboard, task_id)
+            if not task:
+                return False, f"タスク {task_id} が見つかりません"
+            if task.status not in self._TERMINAL_TASK_STATUSES:
+                return (
+                    False,
+                    f"タスク {task.id} は終端状態ではありません（現在: {task.status.value}）",
+                )
+
+            now = datetime.now()
+            old_status = task.status
+            task.status = TaskStatus.PENDING
+            task.completed_at = None
+            task.error_message = None
+            if reset_progress:
+                task.progress = 0
+            task.metadata["reopened_at"] = now.isoformat()
+            dashboard.session_finished_at = None
+
             for agent_summary in dashboard.agents:
                 if agent_summary.current_task_id == task.id:
                     agent_summary.current_task_id = None
                     if agent_summary.role == "worker":
                         agent_summary.status = "idle"
 
-        dashboard.calculate_stats()
-        self._write_dashboard(dashboard)
+            dashboard.calculate_stats()
+            logger.info(f"タスク {task.id} を再開しました: {old_status} -> pending")
+            return True, "タスクを再開しました: pending"
 
-        logger.info(f"タスク {task_id} のステータスを更新: {old_status} -> {status}")
-        return True, f"ステータスを更新しました: {status.value}"
+        return self._mutate_dashboard(_reopen)
 
     def assign_task(
         self,
@@ -195,30 +327,43 @@ class DashboardTasksMixin:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
-        dashboard = self._read_dashboard()
+        def _assign(dashboard: Dashboard) -> tuple[bool, str]:
+            task = self._resolve_task(dashboard, task_id)
+            if not task:
+                return False, f"タスク {task_id} が見つかりません"
 
-        task = self._resolve_task(dashboard, task_id)
-        if not task:
-            return False, f"タスク {task_id} が見つかりません"
+            previous_agent_id = task.assigned_agent_id
+            task.assigned_agent_id = agent_id
+            if branch:
+                task.branch = branch
+            if worktree_path:
+                task.worktree_path = worktree_path
 
-        task.assigned_agent_id = agent_id
-        if branch:
-            task.branch = branch
-        if worktree_path:
-            task.worktree_path = worktree_path
+            if previous_agent_id and previous_agent_id != agent_id:
+                for agent_summary in dashboard.agents:
+                    if (
+                        agent_summary.agent_id == previous_agent_id
+                        and agent_summary.current_task_id == task.id
+                    ):
+                        agent_summary.current_task_id = None
+                        if agent_summary.role == "worker":
+                            agent_summary.status = "idle"
+                        break
 
-        # エージェントの current_task_id も更新
-        for agent_summary in dashboard.agents:
-            if agent_summary.agent_id == agent_id:
-                agent_summary.current_task_id = task.id
-                if agent_summary.role == "worker":
-                    agent_summary.status = "busy"
-                break
+            # エージェントの current_task_id も更新
+            for agent_summary in dashboard.agents:
+                if agent_summary.agent_id == agent_id:
+                    if task.status not in self._TERMINAL_TASK_STATUSES:
+                        agent_summary.current_task_id = task.id
+                        if agent_summary.role == "worker":
+                            agent_summary.status = "busy"
+                    break
 
-        self._write_dashboard(dashboard)
+            dashboard.calculate_stats()
+            logger.info(f"タスク {task.id} をエージェント {agent_id} に割り当てました")
+            return True, f"タスクを割り当てました: {agent_id}"
 
-        logger.info(f"タスク {task_id} をエージェント {agent_id} に割り当てました")
-        return True, f"タスクを割り当てました: {agent_id}"
+        return self._mutate_dashboard(_assign)
 
     def remove_task(self, task_id: str) -> tuple[bool, str]:
         """タスクを削除する。
@@ -229,18 +374,22 @@ class DashboardTasksMixin:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
-        dashboard = self._read_dashboard()
+        def _remove(dashboard: Dashboard) -> tuple[bool, str]:
+            task = self._resolve_task(dashboard, task_id)
+            if not task:
+                return False, f"タスク {task_id} が見つかりません"
 
-        task = self._resolve_task(dashboard, task_id)
-        if not task:
-            return False, f"タスク {task_id} が見つかりません"
+            dashboard.tasks = [t for t in dashboard.tasks if t.id != task.id]
+            for agent_summary in dashboard.agents:
+                if agent_summary.current_task_id == task.id:
+                    agent_summary.current_task_id = None
+                    if agent_summary.role == "worker":
+                        agent_summary.status = "idle"
+            dashboard.calculate_stats()
+            logger.info(f"タスク {task.id} を削除しました")
+            return True, "タスクを削除しました"
 
-        dashboard.tasks = [t for t in dashboard.tasks if t.id != task_id]
-        dashboard.calculate_stats()
-        self._write_dashboard(dashboard)
-
-        logger.info(f"タスク {task_id} を削除しました")
-        return True, "タスクを削除しました"
+        return self._mutate_dashboard(_remove)
 
     def get_task(self, task_id: str) -> TaskInfo | None:
         """タスクを取得する。
@@ -296,32 +445,32 @@ class DashboardTasksMixin:
         Returns:
             (成功フラグ, メッセージ) のタプル
         """
-        dashboard = self._read_dashboard()
+        def _update_checklist(dashboard: Dashboard) -> tuple[bool, str]:
+            task = self._resolve_task(dashboard, task_id)
+            if not task:
+                return False, f"タスク {task_id} が見つかりません"
 
-        task = self._resolve_task(dashboard, task_id)
-        if not task:
-            return False, f"タスク {task_id} が見つかりません"
+            # チェックリストを更新
+            if checklist is not None:
+                task.checklist = [
+                    ChecklistItem(text=item["text"], completed=item.get("completed", False))
+                    for item in checklist
+                ]
+                # チェックリストから進捗を計算
+                if task.checklist:
+                    completed_count = sum(1 for item in task.checklist if item.completed)
+                    task.progress = int((completed_count / len(task.checklist)) * 100)
 
-        # チェックリストを更新
-        if checklist is not None:
-            task.checklist = [
-                ChecklistItem(text=item["text"], completed=item.get("completed", False))
-                for item in checklist
-            ]
-            # チェックリストから進捗を計算
-            if task.checklist:
-                completed_count = sum(1 for item in task.checklist if item.completed)
-                task.progress = int((completed_count / len(task.checklist)) * 100)
+            # ログを追加（最新5件を保持）
+            if log_message:
+                task.logs.append(TaskLog(message=log_message))
+                task.logs = task.logs[-5:]  # 最新5件のみ保持
 
-        # ログを追加（最新5件を保持）
-        if log_message:
-            task.logs.append(TaskLog(message=log_message))
-            task.logs = task.logs[-5:]  # 最新5件のみ保持
+            dashboard.calculate_stats()
+            logger.info(f"タスク {task.id} のチェックリスト/ログを更新しました")
+            return True, "チェックリスト/ログを更新しました"
 
-        self._write_dashboard(dashboard)
-
-        logger.info(f"タスク {task_id} のチェックリスト/ログを更新しました")
-        return True, "チェックリスト/ログを更新しました"
+        return self._mutate_dashboard(_update_checklist)
 
     # エージェントサマリー管理メソッド
 
@@ -331,36 +480,36 @@ class DashboardTasksMixin:
         Args:
             agent: Agentオブジェクト
         """
-        dashboard = self._read_dashboard()
+        def _update_agent(dashboard: Dashboard) -> None:
+            # 既存のサマリーを検索
+            existing = dashboard.get_agent(agent.id)
 
-        # 既存のサマリーを検索
-        existing = dashboard.get_agent(agent.id)
-
-        summary = AgentSummary(
-            agent_id=agent.id,
-            name=self._compute_agent_name(agent),
-            role=agent.role,  # use_enum_values=True のため既に文字列
-            status=agent.status,  # use_enum_values=True のため既に文字列
-            current_task_id=agent.current_task,
-            worktree_path=agent.worktree_path,
-            branch=None,  # 別途取得が必要
-            last_activity=agent.last_activity,
-        )
-
-        if existing:
-            # 既存のサマリーを更新
-            idx = next(
-                i
-                for i, a in enumerate(dashboard.agents)
-                if a.agent_id == agent.id
+            summary = AgentSummary(
+                agent_id=agent.id,
+                name=self._compute_agent_name(agent),
+                role=agent.role,  # use_enum_values=True のため既に文字列
+                status=agent.status,  # use_enum_values=True のため既に文字列
+                current_task_id=agent.current_task,
+                worktree_path=agent.worktree_path,
+                branch=None,  # 別途取得が必要
+                last_activity=agent.last_activity,
             )
-            dashboard.agents[idx] = summary
-        else:
-            # 新規追加
-            dashboard.agents.append(summary)
 
-        dashboard.calculate_stats()
-        self._write_dashboard(dashboard)
+            if existing:
+                # 既存のサマリーを更新
+                idx = next(
+                    i
+                    for i, a in enumerate(dashboard.agents)
+                    if a.agent_id == agent.id
+                )
+                dashboard.agents[idx] = summary
+            else:
+                # 新規追加
+                dashboard.agents.append(summary)
+
+            dashboard.calculate_stats()
+
+        self._mutate_dashboard(_update_agent)
 
     def remove_agent_summary(self, agent_id: str) -> None:
         """エージェントサマリーを削除する。
@@ -368,13 +517,13 @@ class DashboardTasksMixin:
         Args:
             agent_id: エージェントID
         """
-        dashboard = self._read_dashboard()
+        def _remove_agent(dashboard: Dashboard) -> None:
+            dashboard.agents = [
+                a for a in dashboard.agents if a.agent_id != agent_id
+            ]
+            dashboard.calculate_stats()
 
-        dashboard.agents = [
-            a for a in dashboard.agents if a.agent_id != agent_id
-        ]
-        dashboard.calculate_stats()
-        self._write_dashboard(dashboard)
+        self._mutate_dashboard(_remove_agent)
 
     # ワークスペース統計更新メソッド
 
@@ -387,23 +536,24 @@ class DashboardTasksMixin:
         Args:
             worktree_manager: WorktreeManager インスタンス
         """
-        dashboard = self._read_dashboard()
-
         worktrees = await worktree_manager.list_worktrees()
-        dashboard.total_worktrees = len(worktrees)
 
-        # アクティブなworktree（未完了タスクに紐づくもの）をカウント
-        assigned_paths = {
-            t.worktree_path
-            for t in dashboard.tasks
-            if t.worktree_path
-            and t.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
-        }
-        dashboard.active_worktrees = len(
-            [wt for wt in worktrees if wt.path in assigned_paths]
-        )
+        def _update_worktree(dashboard: Dashboard) -> None:
+            dashboard.total_worktrees = len(worktrees)
 
-        self._write_dashboard(dashboard)
+            # アクティブなworktree（未完了タスクに紐づくもの）をカウント
+            assigned_paths = {
+                t.worktree_path
+                for t in dashboard.tasks
+                if t.worktree_path
+                and t.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+            }
+            dashboard.active_worktrees = len(
+                [wt for wt in worktrees if wt.path in assigned_paths]
+            )
+            dashboard.calculate_stats()
+
+        self._mutate_dashboard(_update_worktree)
 
     def sync_from_agent_manager(self, agent_manager: "AgentManager") -> None:
         """AgentManagerからエージェント情報を同期する。
@@ -411,24 +561,25 @@ class DashboardTasksMixin:
         Args:
             agent_manager: AgentManager インスタンス
         """
-        dashboard = self._read_dashboard()
-        dashboard.agents = []
+        def _sync(dashboard: Dashboard) -> None:
+            dashboard.agents = []
 
-        for agent in agent_manager.agents.values():
-            summary = AgentSummary(
-                agent_id=agent.id,
-                name=self._compute_agent_name(agent),
-                role=agent.role,
-                status=agent.status,
-                current_task_id=agent.current_task,
-                worktree_path=agent.worktree_path,
-                branch=None,
-                last_activity=agent.last_activity,
-            )
-            dashboard.agents.append(summary)
+            for agent in agent_manager.agents.values():
+                summary = AgentSummary(
+                    agent_id=agent.id,
+                    name=self._compute_agent_name(agent),
+                    role=agent.role,
+                    status=agent.status,
+                    current_task_id=agent.current_task,
+                    worktree_path=agent.worktree_path,
+                    branch=None,
+                    last_activity=agent.last_activity,
+                )
+                dashboard.agents.append(summary)
 
-        dashboard.calculate_stats()
-        self._write_dashboard(dashboard)
+            dashboard.calculate_stats()
+
+        self._mutate_dashboard(_sync)
 
     def get_summary(self) -> dict:
         """ダッシュボードのサマリーを取得する。
@@ -458,6 +609,16 @@ class DashboardTasksMixin:
             "all_tasks_completed": all_tasks_completed,
             "total_worktrees": dashboard.total_worktrees,
             "active_worktrees": dashboard.active_worktrees,
+            "session_started_at": (
+                dashboard.session_started_at.isoformat()
+                if dashboard.session_started_at else None
+            ),
+            "session_finished_at": (
+                dashboard.session_finished_at.isoformat()
+                if dashboard.session_finished_at else None
+            ),
+            "process_crash_count": dashboard.process_crash_count,
+            "process_recovery_count": dashboard.process_recovery_count,
             "updated_at": dashboard.updated_at.isoformat(),
             "cost": {
                 "total_api_calls": cost.total_api_calls,
@@ -501,9 +662,8 @@ class DashboardTasksMixin:
         content: str,
     ) -> None:
         """Dashboard 表示用メッセージを messages.md に追記保存する。"""
-        dashboard = self._read_dashboard()
-        dashboard.messages.append(
-            MessageSummary(
+        def _append(dashboard: Dashboard) -> None:
+            message = MessageSummary(
                 sender_id=sender_id,
                 receiver_id=receiver_id,
                 message_type=message_type,
@@ -511,8 +671,10 @@ class DashboardTasksMixin:
                 content=content,
                 created_at=datetime.now(),
             )
-        )
-        self._write_messages_markdown(dashboard)
+            dashboard.messages.append(message)
+            self._append_message_markdown(dashboard, message)
+
+        self._mutate_dashboard(_append, write_back=False)
 
     # タスクファイル管理メソッド（ファイルベースのタスク配布）
 
@@ -536,12 +698,14 @@ class DashboardTasksMixin:
         except ValueError:
             relative_path = str(task_file)
 
-        dashboard = self._read_dashboard()
-        task = self._resolve_task(dashboard, task_id)
-        if task:
-            task.task_file_path = relative_path
-            task.description = relative_path
-            self._write_dashboard(dashboard)
+        def _update_task_path(dashboard: Dashboard) -> None:
+            task = self._resolve_task(dashboard, task_id)
+            if task:
+                task.task_file_path = relative_path
+                task.description = relative_path
+                dashboard.calculate_stats()
+
+        self._mutate_dashboard(_update_task_path)
         logger.info(f"タスクファイルを作成しました: {task_file}")
         return task_file
 
@@ -573,5 +737,31 @@ class DashboardTasksMixin:
             logger.info(f"タスクファイルを削除しました: {task_file}")
             return True
         return False
+
+    def increment_process_crash_count(self) -> int:
+        """プロセスクラッシュ回数を1件加算する。"""
+        def _increment(dashboard: Dashboard) -> int:
+            dashboard.process_crash_count += 1
+            dashboard.calculate_stats()
+            return dashboard.process_crash_count
+
+        return self._mutate_dashboard(_increment)
+
+    def increment_process_recovery_count(self) -> int:
+        """プロセス復旧回数を1件加算する。"""
+        def _increment(dashboard: Dashboard) -> int:
+            dashboard.process_recovery_count += 1
+            dashboard.calculate_stats()
+            return dashboard.process_recovery_count
+
+        return self._mutate_dashboard(_increment)
+
+    def mark_session_finished(self) -> None:
+        """セッション終了時刻を現在時刻で記録する。"""
+        def _mark(dashboard: Dashboard) -> None:
+            dashboard.session_finished_at = datetime.now()
+            dashboard.calculate_stats()
+
+        self._mutate_dashboard(_mark)
 
     # Markdown ダッシュボード生成メソッド

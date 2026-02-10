@@ -3,7 +3,9 @@
 from src.config.settings import (
     AICli,
     ModelDefaults,
+    Settings,
     WorkerCliMode,
+    WorkerModelMode,
     get_mcp_dir,
     get_project_env_file,
     load_settings_for_project,
@@ -127,16 +129,25 @@ class TestGenerateEnvTemplate:
         assert "MCP_MODEL_COST_DEFAULT_PER_1K" in template
         assert "MCP_COST_PER_1K_TOKENS_" not in template
 
-    def test_template_contains_worker_cli_mode(self):
+    def test_template_contains_worker_cli_mode(self, monkeypatch):
         """テンプレートに Worker CLI モード設定が含まれることをテスト。"""
-        template = generate_env_template()
+        monkeypatch.delenv("MCP_PROJECT_ROOT", raising=False)
+        settings = Settings(_env_file=None)
+        template = generate_env_template(settings=settings)
         assert "MCP_WORKER_CLI_MODE" in template
         assert "MCP_WORKER_CLI_1" in template
         assert "MCP_WORKER_CLI_16" in template
-        assert "MCP_WORKER_CLI_1=claude" in template
+        assert f"MCP_WORKER_CLI_1={settings.get_worker_cli(1).value}" in template
 
     def test_template_contains_worker_model_mode(self):
         """テンプレートに Worker モデル設定が含まれることをテスト。"""
+        template = generate_env_template()
+        assert "MCP_WORKER_MODEL_MODE" in template
+        assert "MCP_WORKER_MODEL_UNIFORM" in template
+        assert "MCP_WORKER_MODEL_MODE=uniform" in template
+
+    def test_template_contains_worker_model_lines(self):
+        """テンプレートに Worker モデル個別設定が含まれることをテスト。"""
         template = generate_env_template()
         assert "MCP_WORKER_MODEL_1" in template
         assert "MCP_WORKER_MODEL_16" in template
@@ -145,10 +156,12 @@ class TestGenerateEnvTemplate:
         """テンプレートにヘルスチェック設定が含まれることをテスト。"""
         template = generate_env_template()
         assert "MCP_HEALTHCHECK_INTERVAL_SECONDS" in template
+        assert "MCP_SEND_COOLDOWN_SECONDS=2.0" in template
         assert "MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS" in template
         assert "MCP_HEALTHCHECK_IN_PROGRESS_NO_IPC_TIMEOUT_SECONDS" in template
         assert "MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS" in template
         assert "MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE" in template
+        assert "MCP_SEND_COOLDOWN_SECONDS=2.0" in template
 
     def test_template_has_comments(self):
         """テンプレートにコメントが含まれることをテスト。"""
@@ -222,13 +235,14 @@ class TestWorkerCliAndModelResolution:
         assert settings.get_worker_cli(1) == AICli.CLAUDE
         assert settings.get_worker_cli(2) == AICli.GEMINI
 
-    def test_get_worker_model_depends_on_worker_cli_mode(self):
+    def test_get_worker_model_depends_on_worker_model_mode(self):
         settings = load_settings_for_project(None)
-        settings.worker_cli_mode = WorkerCliMode.UNIFORM
+        settings.worker_model_mode = WorkerModelMode.UNIFORM
+        settings.worker_model_uniform = "gpt-5.3-codex"
         settings.worker_model_1 = "gpt-5.3-codex"
-        assert settings.get_worker_model(1, "opus") == "opus"
+        assert settings.get_worker_model(1, "opus") == "gpt-5.3-codex"
 
-        settings.worker_cli_mode = WorkerCliMode.PER_WORKER
+        settings.worker_model_mode = WorkerModelMode.PER_WORKER
         settings.worker_model_3 = "gemini-3-pro"
         assert settings.get_worker_model(3, "opus") == "gemini-3-pro"
         assert settings.get_worker_model(4, "opus") == "opus"

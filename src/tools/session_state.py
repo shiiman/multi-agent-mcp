@@ -142,8 +142,17 @@ def cleanup_orphan_provisional_sessions(
     project_root: str | None,
     mcp_dir_name: str,
     target_session_ids: Iterable[str] | None = None,
+    preserve_session_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    """指定された provisional-* セッションディレクトリのみ削除する。"""
+    """provisional-* セッションディレクトリを削除する。
+
+    Args:
+        project_root: プロジェクトルート
+        mcp_dir_name: MCP ディレクトリ名
+        target_session_ids: 削除対象の session_id 一覧。
+            None の場合は mcp_dir 配下の provisional-* を全走査して削除する。
+        preserve_session_ids: 削除除外する provisional-* session_id 一覧
+    """
     result: dict[str, Any] = {
         "removed_count": 0,
         "removed_dirs": [],
@@ -156,11 +165,28 @@ def cleanup_orphan_provisional_sessions(
     if not mcp_dir.exists() or not mcp_dir.is_dir():
         return result
 
-    targets = {
+    provisional_dirs = {
+        entry.name
+        for entry in mcp_dir.iterdir()
+        if entry.is_dir() and entry.name.startswith("provisional-")
+    }
+    if target_session_ids is None:
+        targets = set(provisional_dirs)
+    else:
+        targets = {
+            session_id
+            for session_id in target_session_ids
+            if isinstance(session_id, str) and session_id.startswith("provisional-")
+        }
+        targets &= provisional_dirs
+
+    preserve_targets = {
         session_id
-        for session_id in (target_session_ids or [])
+        for session_id in (preserve_session_ids or [])
         if isinstance(session_id, str) and session_id.startswith("provisional-")
     }
+    targets -= preserve_targets
+
     if not targets:
         return result
 
@@ -308,7 +334,7 @@ async def cleanup_session_resources(
     results["provisional_cleanup"] = cleanup_orphan_provisional_sessions(
         app_ctx.project_root,
         app_ctx.settings.mcp_dir,
-        target_session_ids=[app_ctx.session_id] if app_ctx.session_id else [],
+        target_session_ids=None,
     )
 
     # ⑩ インメモリ状態リセット

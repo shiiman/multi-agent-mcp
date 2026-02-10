@@ -1,12 +1,14 @@
 """モデルプロファイル管理ツール。"""
 
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import ModelProfile
 from src.context import AppContext
-from src.tools.helpers import require_permission
+from src.tools.helpers import refresh_app_settings, require_permission, resolve_main_repo_root
+from src.tools.session_env import set_env_value
 
 
 def get_profile_settings(app_ctx: AppContext, profile: ModelProfile) -> dict[str, Any]:
@@ -141,14 +143,40 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         previous_profile = settings.model_profile_active
-        settings.model_profile_active = new_profile
+        if previous_profile == new_profile:
+            return {
+                "success": True,
+                "previous_profile": previous_profile.value,
+                "current_profile": new_profile.value,
+                "settings": get_current_profile_settings(app_ctx),
+                "message": f"プロファイルは既に {new_profile.value} です",
+            }
 
-        new_settings = get_profile_settings(app_ctx, new_profile)
+        project_root = app_ctx.project_root
+        if not project_root:
+            return {
+                "success": False,
+                "error": "project_root が未設定のため .env を更新できません",
+            }
+
+        if settings.enable_git:
+            try:
+                project_root = resolve_main_repo_root(project_root)
+            except ValueError:
+                project_root = str(Path(project_root).expanduser())
+        else:
+            project_root = str(Path(project_root).expanduser())
+
+        env_file = Path(project_root) / settings.mcp_dir / ".env"
+        set_env_value(env_file, "MCP_MODEL_PROFILE_ACTIVE", new_profile.value)
+        refresh_app_settings(app_ctx, project_root)
+
+        new_settings = get_current_profile_settings(app_ctx)
 
         return {
             "success": True,
             "previous_profile": previous_profile.value,
-            "current_profile": new_profile.value,
+            "current_profile": app_ctx.settings.model_profile_active.value,
             "settings": new_settings,
             "message": (
                 f"プロファイルを {previous_profile.value} → {new_profile.value} に切り替えました"

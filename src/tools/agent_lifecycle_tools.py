@@ -63,6 +63,11 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             作成結果（success, agent, message または error）
         """
         app_ctx, role_error = require_permission(ctx, "create_agent", caller_agent_id)
+        try:
+            refresh_app_settings(app_ctx, working_dir)
+        except (ValueError, OSError) as e:
+            logger.debug("create_agent 前の設定再読み込みをスキップ: %s", e)
+
         settings = app_ctx.settings
         agents = app_ctx.agents
 
@@ -388,6 +393,11 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         if agent_enable_git is None:
             agent_enable_git = app_ctx.settings.enable_git
 
+        try:
+            refresh_app_settings(app_ctx, working_dir)
+        except (ValueError, OSError) as e:
+            logger.debug("initialize_agent 前の設定再読み込みをスキップ: %s", e)
+
         # プロンプトの構築
         prompt: str | None = None
         prompt_source: str = ""
@@ -458,15 +468,35 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 "error": f"無効なターミナルです: {terminal}（有効: {valid_terminals}）",
             }
 
-        # AI CLI を取得（エージェントに設定されていればそれを使用、なければデフォルト）
-        # agent.ai_cli は use_enum_values=True により文字列になっている可能性がある
-        agent_cli = agent.ai_cli
-        if agent_cli is not None:
-            if isinstance(agent_cli, str):
-                agent_cli = AICli(agent_cli)
-            cli = agent_cli
+        # AI CLI を取得。Worker は slot + .env を優先して毎回再解決する。
+        cli: AICli
+        if (
+            role_value == AgentRole.WORKER.value
+            and agent.window_index is not None
+            and agent.pane_index is not None
+        ):
+            try:
+                worker_no = resolve_worker_number_from_slot(
+                    app_ctx.settings,
+                    agent.window_index,
+                    agent.pane_index,
+                )
+                cli = app_ctx.settings.get_worker_cli(worker_no)
+            except Exception as e:
+                logger.debug("Worker CLI の再解決に失敗したため agent.ai_cli を使用: %s", e)
+                fallback_cli = agent.ai_cli
+                if isinstance(fallback_cli, str):
+                    fallback_cli = AICli(fallback_cli)
+                cli = fallback_cli or ai_cli_manager.get_default_cli()
         else:
-            cli = ai_cli_manager.get_default_cli()
+            # agent.ai_cli は use_enum_values=True により文字列になっている可能性がある
+            agent_cli = agent.ai_cli
+            if agent_cli is not None:
+                if isinstance(agent_cli, str):
+                    agent_cli = AICli(agent_cli)
+                cli = agent_cli
+            else:
+                cli = ai_cli_manager.get_default_cli()
         if not ai_cli_manager.is_available(cli):
             cli_command = ai_cli_manager.get_command(cli)
             return {

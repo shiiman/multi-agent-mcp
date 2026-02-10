@@ -256,6 +256,13 @@ class TestWorktreeManagerRemoveWorktree:
                 "feature/add-skill-worker-1-task001",
             )
 
+    def test_is_worker_branch_patterns(self, worktree_manager):
+        """cleanup 対象の worker ブランチ判定をテスト。"""
+        assert worktree_manager._is_worker_branch("worker-test-1") is True
+        assert worktree_manager._is_worker_branch("feature/foo-worker-1-ab12cd34") is True
+        assert worktree_manager._is_worker_branch("feature/foo-worker-x-ab12cd34") is False
+        assert worktree_manager._is_worker_branch("main") is False
+
 
 class TestWorktreeManagerGetWorktreePath:
     """get_worktree_path_for_branchのテスト。"""

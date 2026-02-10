@@ -1,11 +1,13 @@
 """セッションツール向け環境設定ヘルパー。"""
 
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from src.config.settings import (
+    ModelProfile,
     Settings,
     load_effective_settings_for_project,
 )
@@ -31,17 +33,41 @@ def _generate_per_worker_env_lines(
     s: Settings, v: Callable[[object], str],
 ) -> str:
     """Worker 1〜16 の per-worker CLI/MODEL 行を生成する。"""
-    default_model = v(s.model_profile_performance_worker_model)
-    default_cli = v(s.get_active_profile_cli())
+    profile_worker_model = (
+        s.model_profile_standard_worker_model
+        if s.model_profile_active == ModelProfile.STANDARD
+        else s.model_profile_performance_worker_model
+    )
     lines: list[str] = []
     for i in range(1, 17):
-        cli_val = getattr(s, f"worker_cli_{i}", None)
-        model_val = getattr(s, f"worker_model_{i}", None)
-        cli_str = v(cli_val) if cli_val else default_cli
-        model_str = v(model_val) if model_val else default_model
+        cli_str = v(s.get_worker_cli(i))
+        model_str = v(s.get_worker_model(i, profile_worker_model))
         lines.append(f"MCP_WORKER_CLI_{i}={cli_str}")
         lines.append(f"MCP_WORKER_MODEL_{i}={model_str}")
     return "\n".join(lines)
+
+
+def set_env_value(env_file: Path, key: str, value: str) -> None:
+    """`.env` のキーを upsert する。"""
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
+    key_pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    updated = False
+
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        if key_pattern.match(line):
+            lines[index] = f"{key}={value}"
+            updated = True
+            break
+
+    if not updated:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.append(f"{key}={value}")
+
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def generate_env_template(settings: Settings | None = None) -> str:
@@ -111,6 +137,10 @@ MCP_MODEL_PROFILE_ACTIVE={v(s.model_profile_active)}
 
 # uniform: 全 Worker 同じCLI / per-worker: Worker 1..16 を個別設定
 MCP_WORKER_CLI_MODE={v(s.worker_cli_mode)}
+
+# uniform: 全 Worker 同じモデル / per-worker: Worker 1..16 を個別設定
+MCP_WORKER_MODEL_MODE={v(s.worker_model_mode)}
+MCP_WORKER_MODEL_UNIFORM={v(s.worker_model_uniform or "")}
 
 # standard プロファイル設定（バランス重視）
 MCP_MODEL_PROFILE_STANDARD_CLI={v(s.model_profile_standard_cli)}

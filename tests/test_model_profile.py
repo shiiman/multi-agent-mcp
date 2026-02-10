@@ -32,9 +32,12 @@ class TestSettingsModelProfile:
         assert settings.model_profile_active == ModelProfile.STANDARD
 
     def test_standard_profile_settings_defaults(self, settings):
-        """standard プロファイルのデフォルト値をテスト。"""
-        assert settings.model_profile_standard_admin_model == ModelDefaults.OPUS
-        assert settings.model_profile_standard_worker_model == ModelDefaults.SONNET
+        """standard プロファイルの設定値が有効であることをテスト。"""
+        cli_defaults = settings.get_cli_default_models()
+        expected_admin = cli_defaults[settings.model_profile_standard_cli.value]["admin"]
+        expected_worker = cli_defaults[settings.model_profile_standard_cli.value]["worker"]
+        assert settings.model_profile_standard_admin_model == expected_admin
+        assert settings.model_profile_standard_worker_model == expected_worker
         assert settings.model_profile_standard_max_workers == 6
         assert settings.model_profile_standard_admin_thinking_tokens == 4000
         assert settings.model_profile_standard_worker_thinking_tokens == 4000

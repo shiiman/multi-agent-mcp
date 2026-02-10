@@ -224,7 +224,7 @@ class TestInitTmuxWorkspace:
     async def test_init_tmux_workspace_cleans_orphan_provisional_dirs(
         self, session_mock_ctx, git_repo
     ):
-        """正式 session_id 設定時に孤立 provisional-* が削除されることをテスト。"""
+        """正式 session_id 設定時に provisional-* 残骸が削除されることをテスト。"""
         from mcp.server.fastmcp import FastMCP
 
         from src.tools.session import register_tools
@@ -263,10 +263,10 @@ class TestInitTmuxWorkspace:
 
         assert result["success"] is True
         assert result["provisional_migration"]["executed"] is True
-        assert result["provisional_cleanup"]["removed_count"] == 0
-        assert result["provisional_cleanup"]["removed_dirs"] == []
+        assert result["provisional_cleanup"]["removed_count"] == 1
+        assert result["provisional_cleanup"]["removed_dirs"] == ["provisional-orphan9999"]
         assert not source.exists()
-        assert orphan.exists()
+        assert not orphan.exists()
 
     @pytest.mark.asyncio
     async def test_init_tmux_workspace_allows_non_git_when_enable_git_false(
