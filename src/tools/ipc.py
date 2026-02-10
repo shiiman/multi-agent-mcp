@@ -206,6 +206,23 @@ def _task_context_text(title: str, description: str, metadata: dict | None = Non
     return f"{title} {requested} {description}".lower()
 
 
+def _get_requires_playwright(metadata: dict | None) -> bool | None:
+    """metadata.requires_playwright を bool として解釈する。"""
+    if not isinstance(metadata, dict):
+        return None
+
+    raw_value = metadata.get("requires_playwright")
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
 def _is_quality_task(title: str, description: str, metadata: dict | None = None) -> bool:
     text = _task_context_text(title, description, metadata)
     keywords = ("qa", "quality", "test", "e2e", "検証", "テスト", "品質", "playwright")
@@ -213,13 +230,21 @@ def _is_quality_task(title: str, description: str, metadata: dict | None = None)
 
 
 def _is_playwright_task(title: str, description: str, metadata: dict | None = None) -> bool:
+    metadata_flag = _get_requires_playwright(metadata)
+    if metadata_flag is not None:
+        return metadata_flag
+
     text = _task_context_text(title, description, metadata)
     return "playwright" in text
 
 
 def _is_ui_related_task(title: str, description: str, metadata: dict | None = None) -> bool:
+    metadata_flag = _get_requires_playwright(metadata)
+    if metadata_flag is not None:
+        return metadata_flag
+
     text = _task_context_text(title, description, metadata)
-    keywords = ("ui", "frontend", "画面", "表示", "フロント", "browser", "e2e")
+    keywords = ("ui", "frontend", "画面", "表示", "フロント", "browser")
     return any(keyword in text for keyword in keywords)
 
 
@@ -815,8 +840,12 @@ def register_tools(mcp: FastMCP) -> None:
         owner_wait_state: dict[str, Any] | None = None
         if is_owner_caller and caller_agent_id:
             owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
-            if owner_wait_state.get("waiting_for_admin") and ipc.get_unread_count(agent_id) == 0:
-                return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+            if owner_wait_state.get("waiting_for_admin"):
+                # Owner 待機中は自身 inbox の通知待機のみ許可する。
+                if agent_id != caller_agent_id:
+                    return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+                if ipc.get_unread_count(caller_agent_id) == 0:
+                    return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
 
         messages = ipc.read_messages(
             agent_id=agent_id,
@@ -937,8 +966,12 @@ def register_tools(mcp: FastMCP) -> None:
         is_owner_caller = caller_role in (AgentRole.OWNER.value, "owner")
         if is_owner_caller and caller_agent_id:
             owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
-            if owner_wait_state.get("waiting_for_admin") and count == 0:
-                return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+            if owner_wait_state.get("waiting_for_admin"):
+                # Owner 待機中は自身 inbox の通知待機のみ許可する。
+                if agent_id != caller_agent_id:
+                    return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
+                if count == 0:
+                    return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
 
         return {
             "success": True,

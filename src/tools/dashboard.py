@@ -16,6 +16,7 @@ from src.tools.helpers import (
     ensure_memory_manager,
     find_agents_by_role,
     get_admin_poll_state,
+    get_owner_wait_state,
     notify_agent_via_tmux,
     require_permission,
     save_agent_to_file,
@@ -83,6 +84,36 @@ def _polling_blocked_response() -> dict[str, Any]:
         ),
         "next_action": "wait_for_ipc_notification",
     }
+
+
+def _owner_polling_blocked_response(waiting_admin_id: str | None) -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": (
+            "polling_blocked: Owner は Admin からの通知待機中のため、"
+            "unread=0 の監視呼び出しはできません"
+        ),
+        "next_action": "wait_for_user_input_or_unlock_owner_wait",
+        "waiting_for_admin_id": waiting_admin_id,
+    }
+
+
+def _normalize_owner_wait_error(
+    app_ctx: Any,
+    caller_agent_id: str | None,
+    role_error: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not role_error:
+        return None
+
+    error_text = str(role_error.get("error", ""))
+    if "owner_wait_locked" not in error_text:
+        return role_error
+
+    waiting_admin_id = role_error.get("waiting_for_admin_id")
+    if waiting_admin_id is None and caller_agent_id:
+        waiting_admin_id = get_owner_wait_state(app_ctx, caller_agent_id).get("admin_id")
+    return _owner_polling_blocked_response(waiting_admin_id)
 
 
 async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
@@ -371,7 +402,7 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx, role_error = require_permission(ctx, "list_tasks", caller_agent_id)
         if role_error:
-            return role_error
+            return _normalize_owner_wait_error(app_ctx, caller_agent_id, role_error)
 
         caller = app_ctx.agents.get(caller_agent_id)
         caller_role = getattr(caller, "role", None)
@@ -784,7 +815,7 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx, role_error = require_permission(ctx, "get_dashboard", caller_agent_id)
         if role_error:
-            return role_error
+            return _normalize_owner_wait_error(app_ctx, caller_agent_id, role_error)
 
         dashboard = ensure_dashboard_manager(app_ctx)
 
@@ -826,7 +857,7 @@ def register_tools(mcp: FastMCP) -> None:
         """
         app_ctx, role_error = require_permission(ctx, "get_dashboard_summary", caller_agent_id)
         if role_error:
-            return role_error
+            return _normalize_owner_wait_error(app_ctx, caller_agent_id, role_error)
 
         dashboard = ensure_dashboard_manager(app_ctx)
 

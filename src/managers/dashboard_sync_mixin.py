@@ -29,6 +29,9 @@ class DashboardSyncMixin:
         agents_file = session_dir / "agents.json"
 
         def _sync(dashboard) -> None:
+            if dashboard.session_started_at is None:
+                dashboard.session_started_at = datetime.now()
+
             # 🔴 agents.json からエージェント情報を同期
             if agents_file.exists():
                 try:

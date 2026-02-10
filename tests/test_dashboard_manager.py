@@ -392,6 +392,21 @@ class TestDashboardMarkdownSync:
         assert "process_crash_count: 1" in content
         assert "process_recovery_count: 1" in content
 
+    def test_save_markdown_dashboard_records_started_at_on_first_save(
+        self, dashboard_manager, temp_dir
+    ):
+        """初回保存時に session_started_at を記録することをテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        md_path = dashboard_manager.save_markdown_dashboard(project_root, "session-initial")
+        content = md_path.read_text(encoding="utf-8")
+        front_matter = dashboard_manager._parse_yaml_front_matter(content)
+
+        assert front_matter is not None
+        assert front_matter.get("session_started_at") is not None
+        assert "**開始時刻**: -" not in content
+
     def test_read_task_file_not_exists(self, dashboard_manager, temp_dir):
         """存在しないタスクファイル読み取りをテスト。"""
         project_root = temp_dir / "project"
@@ -464,7 +479,9 @@ class TestMarkdownDashboard:
         assert "## 統計" in md_content
         assert "開始時刻" in md_content
         assert "更新時刻" in md_content
+        assert "終了時刻" in md_content
         assert md_content.index("**開始時刻**") < md_content.index("**更新時刻**")
+        assert md_content.index("**更新時刻**") < md_content.index("**終了時刻**")
 
         # タスク情報が含まれていることを確認
         assert "Task 1" in md_content
@@ -890,19 +907,20 @@ class TestMarkdownDashboard:
         assert msg is not None
         assert msg.content == full_text
 
-    def test_markdown_stats_includes_session_and_process_counts(self, dashboard_manager):
-        """統計セクションにセッション時刻と crash/recovery 回数が表示されることをテスト。"""
+    def test_markdown_stats_excludes_session_and_includes_process_counts(self, dashboard_manager):
+        """統計セクションでセッション時刻を除外し、process 回数を表示することをテスト。"""
         task = dashboard_manager.create_task(title="Stats Task")
         dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS)
         dashboard_manager.increment_process_crash_count()
         dashboard_manager.increment_process_recovery_count()
 
         md_content = dashboard_manager.generate_markdown_dashboard()
-        assert "セッション開始" in md_content
-        assert "セッション終了" in md_content
+        assert "**開始時刻**" in md_content
+        assert "**終了時刻**" in md_content
+        assert "- **セッション開始**" not in md_content
+        assert "- **セッション終了**" not in md_content
         assert "プロセスクラッシュ回数" in md_content
         assert "プロセス復旧回数" in md_content
-        assert md_content.index("- **セッション開始**") < md_content.index("- **総エージェント数**")
 
 
 class TestDashboardCost:

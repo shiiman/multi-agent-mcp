@@ -374,6 +374,28 @@ def register_tools(mcp: FastMCP) -> None:
                 new_session_id=session_id,
             )
             app_ctx.session_id = session_id
+            if app_ctx.ipc_manager is not None:
+                expected_ipc_dir = (
+                    Path(resolved_project_root)
+                    / app_ctx.settings.mcp_dir
+                    / session_id
+                    / "ipc"
+                )
+                current_ipc_dir = Path(app_ctx.ipc_manager.ipc_dir)
+                is_session_scoped_ipc = (
+                    f"/{app_ctx.settings.mcp_dir}/" in str(current_ipc_dir)
+                    and str(current_ipc_dir).endswith("/ipc")
+                )
+                if (
+                    is_session_scoped_ipc
+                    and current_ipc_dir.resolve() != expected_ipc_dir.resolve()
+                ):
+                    logger.info(
+                        "session_id 確定により IPCManager を再初期化します: %s -> %s",
+                        current_ipc_dir,
+                        expected_ipc_dir,
+                    )
+                    app_ctx.ipc_manager = None
 
             # session_id 設定後、既存エージェント（Owner 等）をファイルに再保存
             # Owner は init_tmux_workspace の前に作成されるため、

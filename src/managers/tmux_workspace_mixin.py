@@ -41,6 +41,21 @@ class TmuxWorkspaceMixin:
             return False
         return True
 
+    async def _recover_codex_queue_mode(self, target: str) -> bool:
+        """Codex の queue モードから通常入力へ復帰する。"""
+        # Codex の "tab to queue message" 表示中は Enter では送信確定しないため、
+        # まず Esc で queue 入力をキャンセルし、失敗時は C-c で復帰を試みる。
+        code, _, stderr = await self._run("send-keys", "-t", target, "Escape")
+        if code == 0:
+            return True
+
+        logger.warning("Esc 送信に失敗したため C-c で復帰を試みます: %s", stderr)
+        code, _, stderr = await self._run("send-keys", "-t", target, "C-c")
+        if code != 0:
+            logger.error("Codex queue モード復帰エラー: %s", stderr)
+            return False
+        return True
+
     async def create_main_session(self, working_dir: str) -> bool:
         """メインセッション（左40:右60分離レイアウト）を作成する。
 
@@ -474,6 +489,29 @@ class TmuxWorkspaceMixin:
             output = await self.capture_pane_by_index(session, window, pane, lines=120)
             if not self._is_pending_codex_prompt(output, command):
                 return True
+
+            if "tab to queue message" in output.lower():
+                logger.debug(
+                    "Codex queue モードを検出。復帰後にコマンドを再送します"
+                )
+                if not await self._recover_codex_queue_mode(target):
+                    return False
+                resent = await self.send_keys_to_pane(
+                    session=session,
+                    window=window,
+                    pane=pane,
+                    command=command,
+                    literal=literal,
+                    clear_input=False,
+                    enter_delay_ms=codex_delay,
+                )
+                if not resent:
+                    logger.error("Codex queue モード復帰後の再送エラー")
+                    return False
+                if interval_ms:
+                    await asyncio.sleep(interval_ms / 1000)
+                continue
+
             logger.debug("Codex プロンプトに未確定入力を検出、Enter を再送します")
             if not await self._send_enter_key(target):
                 logger.error("Codex Enter再送エラー")

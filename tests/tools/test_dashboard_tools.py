@@ -835,6 +835,193 @@ class TestGetDashboard:
         assert "polling_blocked" in result["error"]
 
 
+class TestOwnerWaitLockPolling:
+    """Owner 待機ロック中の dashboard 系ポーリング抑止テスト。"""
+
+    @pytest.mark.asyncio
+    async def test_get_dashboard_returns_polling_blocked_for_owner_wait_lock(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """Owner 待機ロック中は get_dashboard が polling_blocked になる。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_dashboard = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_dashboard":
+                get_dashboard = tool.fn
+                break
+        assert get_dashboard is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = await get_dashboard(
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "polling_blocked" in result["error"]
+        assert result["next_action"] == "wait_for_user_input_or_unlock_owner_wait"
+        assert result["waiting_for_admin_id"] == "admin-001"
+
+    @pytest.mark.asyncio
+    async def test_get_dashboard_summary_returns_polling_blocked_for_owner_wait_lock(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """Owner 待機ロック中は get_dashboard_summary が polling_blocked になる。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_dashboard_summary = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_dashboard_summary":
+                get_dashboard_summary = tool.fn
+                break
+        assert get_dashboard_summary is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = await get_dashboard_summary(
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "polling_blocked" in result["error"]
+        assert result["next_action"] == "wait_for_user_input_or_unlock_owner_wait"
+        assert result["waiting_for_admin_id"] == "admin-001"
+
+    @pytest.mark.asyncio
+    async def test_list_tasks_returns_polling_blocked_for_owner_wait_lock(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """Owner 待機ロック中は list_tasks が polling_blocked になる。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        list_tasks = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "list_tasks":
+                list_tasks = tool.fn
+                break
+        assert list_tasks is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = await list_tasks(
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "polling_blocked" in result["error"]
+        assert result["next_action"] == "wait_for_user_input_or_unlock_owner_wait"
+        assert result["waiting_for_admin_id"] == "admin-001"
+
+
 class TestReportTaskProgress:
     """report_task_progress ツールのテスト。"""
 

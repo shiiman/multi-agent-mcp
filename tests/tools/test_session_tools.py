@@ -269,6 +269,53 @@ class TestInitTmuxWorkspace:
         assert not orphan.exists()
 
     @pytest.mark.asyncio
+    async def test_init_tmux_workspace_clears_stale_ipc_manager_after_session_switch(
+        self, session_mock_ctx, git_repo
+    ):
+        """session 確定時に provisional 向き IPCManager を破棄することをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.managers.ipc_manager import IPCManager
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        app_ctx = session_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "provisional-stale0001"
+        app_ctx.project_root = str(git_repo)
+        app_ctx.tmux.session_exists = AsyncMock(return_value=False)
+        app_ctx.tmux.create_main_session = AsyncMock(return_value=True)
+
+        stale_ipc_dir = (
+            git_repo
+            / app_ctx.settings.mcp_dir
+            / "provisional-stale0001"
+            / "ipc"
+        )
+        app_ctx.ipc_manager = IPCManager(str(stale_ipc_dir))
+        app_ctx.ipc_manager.initialize()
+
+        result = await init_tmux_workspace(
+            working_dir=str(git_repo),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="issue-234",
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert app_ctx.session_id == "issue-234"
+        assert app_ctx.ipc_manager is None
+
+    @pytest.mark.asyncio
     async def test_init_tmux_workspace_allows_non_git_when_enable_git_false(
         self, session_mock_ctx, git_repo
     ):

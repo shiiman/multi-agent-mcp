@@ -202,6 +202,49 @@ class TestGenerateAdminTask:
         assert "No Git モード" in result
         assert "create_worktree" in result
 
+    def test_no_git_admin_template_includes_session_report_output_dir(self):
+        """No Git テンプレートで調査レポート出力先が session reports 配下であることをテスト。"""
+        settings = Settings()
+        settings.enable_git = False
+        settings.enable_worktree = True
+
+        result = generate_admin_task(
+            session_id="123",
+            agent_id="admin-001",
+            plan_content="テスト",
+            branch_name="feature/test",
+            worker_count=2,
+            memory_context="",
+            project_name="test-project",
+            working_dir="/tmp/project",
+            settings=settings,
+        )
+
+        assert ".multi-agent-mcp/123/reports" in result
+        assert ".multi-agent-mcp/123/reports/*.md" in result
+
+    def test_no_worktree_admin_template_includes_session_report_output_dir(self):
+        """Non-Worktree テンプレートでレポート出力先が session reports 配下であることをテスト。"""
+        settings = Settings()
+        settings.enable_git = True
+        settings.enable_worktree = False
+
+        result = generate_admin_task(
+            session_id="123",
+            agent_id="admin-001",
+            plan_content="テスト",
+            branch_name="feature/test",
+            worker_count=2,
+            memory_context="",
+            project_name="test-project",
+            working_dir="/tmp/project",
+            settings=settings,
+        )
+
+        assert "Non-Worktree モード" in result
+        assert ".multi-agent-mcp/123/reports" in result
+        assert ".multi-agent-mcp/123/reports/*.md" in result
+
 
 class TestGenerate7SectionTask:
     """generate_7section_task 関数のテスト。"""

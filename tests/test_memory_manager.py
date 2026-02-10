@@ -1,5 +1,6 @@
 """MemoryManager のテスト。"""
 
+import os
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -424,3 +425,46 @@ class TestMemoryManager:
         # 全件取得
         all_entries = manager.list_archive()
         assert len(all_entries) == 4
+
+    def test_load_from_dir_limits_entries_by_max_entries(self, temp_storage: Path) -> None:
+        """起動時読み込みが max_entries 件に制限されることをテスト。"""
+        seed_manager = MemoryManager(temp_storage, max_entries=10, auto_prune=False)
+        for i in range(5):
+            seed_manager.save(f"key{i}", f"content{i}")
+
+        base_ts = datetime.now().timestamp() - 1000
+        for i in range(5):
+            file_path = temp_storage / f"key{i}.md"
+            mtime = base_ts + i
+            os.utime(file_path, (mtime, mtime))
+
+        manager = MemoryManager(temp_storage, max_entries=3, auto_prune=False)
+        loaded_keys = {entry.key for entry in manager.list_all()}
+
+        assert loaded_keys == {"key2", "key3", "key4"}
+
+    def test_load_from_dir_archives_overflow_files_when_auto_prune_enabled(
+        self, temp_storage: Path
+    ) -> None:
+        """起動時に上限超過ファイルがアーカイブへ移動されることをテスト。"""
+        seed_manager = MemoryManager(temp_storage, max_entries=10, auto_prune=False)
+        for i in range(4):
+            seed_manager.save(f"key{i}", f"content{i}")
+
+        base_ts = datetime.now().timestamp() - 1000
+        for i in range(4):
+            file_path = temp_storage / f"key{i}.md"
+            mtime = base_ts + i
+            os.utime(file_path, (mtime, mtime))
+
+        manager = MemoryManager(temp_storage, max_entries=2, auto_prune=True)
+
+        loaded_keys = {entry.key for entry in manager.list_all()}
+        assert loaded_keys == {"key2", "key3"}
+
+        remaining_files = {path.name for path in temp_storage.glob("*.md")}
+        assert remaining_files == {"key2.md", "key3.md"}
+
+        assert manager.archive_dir is not None
+        archived_files = {path.name for path in manager.archive_dir.glob("*.md")}
+        assert archived_files == {"key0.md", "key1.md"}
