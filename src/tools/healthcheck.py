@@ -38,11 +38,13 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         }
 
     old_worktree_path = old_agent.worktree_path
+    old_working_dir = old_agent.working_dir or old_worktree_path or str(app_ctx.project_root or ".")
     old_branch = getattr(old_agent, "branch", None)
     old_ai_cli = old_agent.ai_cli
     old_session_name = old_agent.session_name
     old_window_index = old_agent.window_index
     old_pane_index = old_agent.pane_index
+    enable_git = bool(getattr(app_ctx.settings, "enable_git", True))
 
     from src.tools.helpers import ensure_dashboard_manager
 
@@ -58,6 +60,23 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                 and task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED]
             ):
                 reassigned_tasks.append(task)
+
+    if not old_branch:
+        old_branch = next(
+            (task.branch for task in reassigned_tasks if getattr(task, "branch", None)),
+            None,
+        )
+
+    if enable_git and old_worktree_path and not old_branch:
+        try:
+            from src.managers.worktree_manager import WorktreeManager
+
+            branch_detector = WorktreeManager(app_ctx.project_root)
+            detected_branch = await branch_detector.get_current_branch(path=old_worktree_path)
+            if detected_branch:
+                old_branch = detected_branch
+        except Exception as e:
+            logger.debug("復旧時のブランチ自動検出に失敗: %s", e)
 
     logger.info(f"full_recovery 開始: agent={agent_id}, tasks={len(reassigned_tasks)}")
 
@@ -76,7 +95,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
     del agents[agent_id]
 
     new_worktree_path = old_worktree_path
-    if old_worktree_path and old_branch:
+    if enable_git and old_worktree_path and old_branch:
         from src.managers.worktree_manager import WorktreeManager
 
         try:
@@ -119,6 +138,8 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                 if app_ctx.project_root
                 else old_worktree_path
             )
+    elif not enable_git:
+        logger.info("enable_git=false のため worktree 再作成をスキップします")
 
     from datetime import datetime
 
@@ -140,6 +161,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         role=AgentRole.WORKER,
         status=AgentStatus.IDLE,
         tmux_session=tmux_session,
+        working_dir=old_working_dir,
         created_at=datetime.now(),
         last_activity=datetime.now(),
         worktree_path=new_worktree_path,
@@ -153,16 +175,18 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
     save_agent_to_file(app_ctx, new_agent)
     logger.info(f"新しい agent を作成: {new_agent_id}")
 
+    recovery_dir = new_worktree_path or old_working_dir
+
     if (
         old_session_name is not None
         and old_window_index is not None
         and old_pane_index is not None
-        and new_worktree_path
+        and recovery_dir
     ):
         try:
             window_name = tmux._get_window_name(old_window_index)
             target = f"{old_session_name}:{window_name}.{old_pane_index}"
-            await tmux._run("send-keys", "-t", target, f"cd {new_worktree_path}", "Enter")
+            await tmux._run("send-keys", "-t", target, f"cd {recovery_dir}", "Enter")
             await tmux.set_pane_title(
                 old_session_name, old_window_index, old_pane_index, new_agent_id
             )
@@ -177,7 +201,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                     task_id=task_id,
                     agent_id=new_agent_id,
                     branch=task.branch,
-                    worktree_path=new_worktree_path,
+                    worktree_path=new_worktree_path or old_working_dir,
                 )
                 logger.info(f"タスク {task_id} を {new_agent_id} に再割り当て")
             except Exception as e:
@@ -196,7 +220,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
             notification_content = (
                 f"Worker {agent_id} を復旧しました（新ID: {new_agent_id}）。\n"
                 f"以下のタスクの再送信が必要です: {', '.join(task_ids)}\n"
-                f"worktree_path: {new_worktree_path}"
+                f"worktree_path: {new_worktree_path or old_working_dir}"
             )
             for admin_id in admin_ids:
                 ipc.send_message(
@@ -211,7 +235,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
                         "old_agent_id": agent_id,
                         "new_agent_id": new_agent_id,
                         "reassigned_task_ids": task_ids,
-                        "worktree_path": new_worktree_path,
+                        "worktree_path": new_worktree_path or old_working_dir,
                     },
                 )
             logger.info(
@@ -225,7 +249,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         "success": True,
         "old_agent_id": agent_id,
         "new_agent_id": new_agent_id,
-        "new_worktree_path": new_worktree_path,
+        "new_worktree_path": new_worktree_path or old_working_dir,
         "reassigned_tasks": [t.id for t in reassigned_tasks],
         "message": (
             f"エージェント {agent_id} を {new_agent_id} として"
