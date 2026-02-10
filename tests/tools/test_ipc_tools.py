@@ -665,10 +665,10 @@ class TestSendMessage:
         assert "sender_id と caller_agent_id が一致しない" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_admin_to_owner_non_complete_uses_macos_fallback(
+    async def test_admin_to_owner_non_complete_does_not_use_macos_fallback(
         self, ipc_mock_ctx, git_repo
     ):
-        """admin→owner の task_complete 以外でも通知が欠落しないことをテスト。"""
+        """admin→owner の task_complete 以外では macOS 通知しないことをテスト。"""
         from mcp.server.fastmcp import FastMCP
 
         from src.tools.ipc import register_tools
@@ -709,7 +709,7 @@ class TestSendMessage:
             last_activity=now,
         )
 
-        with patch("src.tools.helpers._send_macos_notification", new=AsyncMock(return_value=True)):
+        with patch("src.tools.helpers._send_macos_notification", new=AsyncMock(return_value=True)) as mock_macos:
             result = await send_message(
                 sender_id="admin-001",
                 receiver_id="owner-001",
@@ -720,8 +720,9 @@ class TestSendMessage:
             )
 
         assert result["success"] is True
-        assert result["notification_sent"] is True
-        assert result["notification_method"] == "macos"
+        assert result["notification_sent"] is False
+        assert result["notification_method"] is None
+        mock_macos.assert_not_awaited()
 
 
 class TestReadMessages:
@@ -967,6 +968,68 @@ class TestReadMessages:
 
         assert result["success"] is False
         assert "polling_blocked" in result["error"]
+        assert result["next_action"] == "wait_for_user_input_or_unlock_owner_wait"
+
+    @pytest.mark.asyncio
+    async def test_read_messages_blocks_owner_polling_even_without_unread_only(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Owner 待機ロック中は unread_only=False の空読みもブロックされることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = await read_messages(
+            agent_id="owner-001",
+            unread_only=False,
+            caller_agent_id="owner-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "polling_blocked" in result["error"]
+        assert result["next_action"] == "wait_for_user_input_or_unlock_owner_wait"
 
     @pytest.mark.asyncio
     async def test_read_messages_owner_unlocked_after_admin_message(
@@ -1240,6 +1303,132 @@ class TestGetUnreadCount:
 
         assert result["success"] is True
         assert "unread_count" in result
+
+    @pytest.mark.asyncio
+    async def test_get_unread_count_blocks_owner_polling_while_waiting(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Owner 待機ロック中は unread=0 の get_unread_count をブロックする。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_unread_count = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_unread_count":
+                get_unread_count = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+
+        result = await get_unread_count(
+            agent_id="owner-001",
+            caller_agent_id="owner-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "polling_blocked" in result["error"]
+        assert result["next_action"] == "wait_for_user_input_or_unlock_owner_wait"
+
+    @pytest.mark.asyncio
+    async def test_get_unread_count_owner_allows_when_unread_exists(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Owner 待機ロック中でも未読がある場合は件数取得できる。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_unread_count = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_unread_count":
+                get_unread_count = tool.fn
+                break
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx._owner_wait_state["owner-001"] = {
+            "waiting_for_admin": True,
+            "admin_id": "admin-001",
+            "session_id": "issue-001",
+            "locked_at": now,
+            "unlocked_at": None,
+            "unlock_reason": None,
+        }
+        app_ctx.ipc_manager.send_message(
+            sender_id="admin-001",
+            receiver_id="owner-001",
+            message_type=MessageType.SYSTEM,
+            content="進捗通知",
+        )
+
+        result = await get_unread_count(
+            agent_id="owner-001",
+            caller_agent_id="owner-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["unread_count"] == 1
 
     @pytest.mark.asyncio
     async def test_worker_get_unread_count_blocks_other_agent(

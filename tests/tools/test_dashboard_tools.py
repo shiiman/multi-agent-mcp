@@ -835,6 +835,91 @@ class TestGetDashboard:
         assert "polling_blocked" in result["error"]
 
 
+class TestReportTaskProgress:
+    """report_task_progress ツールのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_progress_default_message_is_japanese(
+        self, dashboard_mock_ctx, git_repo
+    ):
+        """message 未指定時の進捗報告本文が日本語デフォルトになることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        report_task_progress = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "report_task_progress":
+                report_task_progress = tool.fn
+                break
+        assert report_task_progress is not None
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+            current_task="task-003",
+        )
+
+        with (
+            patch(
+                "src.tools.dashboard.capture_claude_actual_cost_for_agent",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.tools.dashboard.notify_agent_via_tmux",
+                AsyncMock(return_value=True),
+            ),
+        ):
+            result = await report_task_progress(
+                task_id="task-003",
+                progress=40,
+                message=None,
+                caller_agent_id="worker-001",
+                ctx=dashboard_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["progress"] == 40
+        assert result["admin_notified"] is True
+
+        messages = app_ctx.ipc_manager.read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            mark_as_read=False,
+        )
+        assert len(messages) == 1
+        assert messages[0].message_type == MessageType.TASK_PROGRESS
+        assert messages[0].subject == "進捗報告: task-003 (40%)"
+        assert messages[0].content == "タスク task-003 の進捗: 40%"
+        assert messages[0].metadata["progress"] == 40
+
+
 class TestReportTaskCompletion:
     """report_task_completion ツールのテスト。"""
 
@@ -845,6 +930,7 @@ class TestReportTaskCompletion:
         """完了結果が session 配下ではなく .multi-agent-mcp/memory に保存されることをテスト。"""
         from mcp.server.fastmcp import FastMCP
 
+        from src.models.message import MessageType
         from src.tools.dashboard import register_tools
 
         mcp = FastMCP("test")
@@ -915,6 +1001,15 @@ class TestReportTaskCompletion:
 
         session_memory = MemoryManager(str(session_memory_dir))
         assert session_memory.get(key) is None
+
+        messages = app_ctx.ipc_manager.read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            mark_as_read=False,
+        )
+        assert len(messages) == 1
+        assert messages[0].message_type == MessageType.TASK_COMPLETE
+        assert "(完了)" in messages[0].subject
 
     @pytest.mark.asyncio
     async def test_reports_failed_completion_with_task_failed_message_type(
@@ -996,6 +1091,7 @@ class TestReportTaskCompletion:
         )
         assert len(messages) == 1
         assert messages[0].message_type == MessageType.TASK_FAILED
+        assert "(失敗)" in messages[0].subject
 
 
 class TestCostTools:

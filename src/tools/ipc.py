@@ -32,6 +32,19 @@ _ADMIN_DASHBOARD_GRANT_SECONDS = 90
 _POLLING_BLOCKED_GRACE_SECONDS = 30
 
 
+def _owner_polling_blocked_response(waiting_admin_id: str | None) -> dict[str, Any]:
+    """Owner の待機ロック中に発生するポーリング抑止レスポンスを生成する。"""
+    return {
+        "success": False,
+        "error": (
+            "polling_blocked: Owner は Admin からの通知待機中のため、"
+            "unread=0 の監視呼び出しはできません"
+        ),
+        "next_action": "wait_for_user_input_or_unlock_owner_wait",
+        "waiting_for_admin_id": waiting_admin_id,
+    }
+
+
 def _mark_admin_waiting_for_ipc(app_ctx: Any, admin_id: str) -> None:
     state = get_admin_poll_state(app_ctx, admin_id)
     state["waiting_for_ipc"] = True
@@ -645,12 +658,13 @@ def register_tools(mcp: FastMCP) -> None:
             sync_agents_from_file(app_ctx)
             receiver_agent = app_ctx.agents.get(receiver_id)
             sender_agent = app_ctx.agents.get(sender_id)
-            # macOS 通知条件: admin→owner のメッセージ
-            is_admin_to_owner_message = (
+            # macOS 通知条件: admin→owner の task_complete のみ
+            is_admin_to_owner_task_complete = (
                 sender_agent
                 and receiver_agent
                 and str(getattr(sender_agent, "role", "")) == AgentRole.ADMIN.value
                 and str(getattr(receiver_agent, "role", "")) == AgentRole.OWNER.value
+                and msg_type == MessageType.TASK_COMPLETE
             )
             if receiver_agent:
                 has_tmux_pane = (
@@ -661,17 +675,17 @@ def register_tools(mcp: FastMCP) -> None:
                     # tmux ペインがある場合: リトライ付き tmux 通知
                     tmux_ok = await notify_agent_via_tmux(
                         app_ctx, receiver_agent, msg_type.value, sender_id,
-                        allow_macos_fallback=is_admin_to_owner_message,
+                        allow_macos_fallback=is_admin_to_owner_task_complete,
                     )
                     if tmux_ok:
                         notification_sent = True
                         notification_method = "tmux"
                     else:
-                        notification_sent = is_admin_to_owner_message
+                        notification_sent = is_admin_to_owner_task_complete
                         notification_method = (
-                            "macos_fallback" if is_admin_to_owner_message else None
+                            "macos_fallback" if is_admin_to_owner_task_complete else None
                         )
-                elif is_admin_to_owner_message:
+                elif is_admin_to_owner_task_complete:
                     # tmux ペインがない Owner への admin 通知を macOS で補完
                     from src.tools.helpers import _send_macos_notification
 
@@ -774,20 +788,8 @@ def register_tools(mcp: FastMCP) -> None:
         owner_wait_state: dict[str, Any] | None = None
         if is_owner_caller and caller_agent_id:
             owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
-            if (
-                owner_wait_state.get("waiting_for_admin")
-                and unread_only
-                and ipc.get_unread_count(agent_id) == 0
-            ):
-                return {
-                    "success": False,
-                    "error": (
-                        "polling_blocked: Owner は Admin からの通知待機中のため、"
-                        "unread=0 の連続 read_messages はできません"
-                    ),
-                    "next_action": "wait_for_ipc_notification_or_unlock_owner_wait",
-                    "waiting_for_admin_id": owner_wait_state.get("admin_id"),
-                }
+            if owner_wait_state.get("waiting_for_admin") and ipc.get_unread_count(agent_id) == 0:
+                return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
 
         messages = ipc.read_messages(
             agent_id=agent_id,
@@ -902,6 +904,14 @@ def register_tools(mcp: FastMCP) -> None:
             ipc.register_agent(agent_id)
 
         count = ipc.get_unread_count(agent_id)
+        sync_agents_from_file(app_ctx)
+        caller = app_ctx.agents.get(caller_agent_id)
+        caller_role = getattr(caller, "role", None)
+        is_owner_caller = caller_role in (AgentRole.OWNER.value, "owner")
+        if is_owner_caller and caller_agent_id:
+            owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
+            if owner_wait_state.get("waiting_for_admin") and count == 0:
+                return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
 
         return {
             "success": True,

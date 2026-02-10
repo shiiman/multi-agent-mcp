@@ -43,6 +43,26 @@ class TestTmuxManagerTerminalOpen:
         assert fallback_call[4] == "-e"
 
     @pytest.mark.asyncio
+    async def test_open_in_ghostty_uses_pgrep_fallback_for_running_detection(self):
+        """AppleScript 判定失敗時は pgrep 判定で既起動を検出し、タブ追加を試みる。"""
+        manager = TmuxManager(Settings())
+        manager._run_exec = AsyncMock(
+            side_effect=[
+                (1, "", "osascript error"),  # _is_ghostty_running: osascript
+                (1, "", ""),  # _is_ghostty_running: pgrep Ghostty
+                (0, "1234", ""),  # _is_ghostty_running: pgrep ghostty
+                (0, "", ""),  # _open_tab_in_running_ghostty
+            ]
+        )
+
+        with patch("shutil.which", return_value="/usr/local/bin/ghostty"):
+            success = await manager._open_in_ghostty("tmux attach -t test")
+
+        assert success is True
+        assert manager._run_exec.await_args_list[1].args == ("pgrep", "-x", "Ghostty")
+        assert manager._run_exec.await_args_list[2].args == ("pgrep", "-x", "ghostty")
+
+    @pytest.mark.asyncio
     async def test_open_in_iterm2_contains_tab_branch(self):
         """iTerm2 は既存ウィンドウ時のタブ分岐を持つ。"""
         manager = TmuxManager(Settings())

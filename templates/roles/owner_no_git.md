@@ -101,6 +101,7 @@ Owner は **目的と期待する成果** を伝えますが、**実行方法** 
 **実装上の強制ルール**:
 - `send_task`（Owner→Admin）成功後、Owner は待機ロック状態になります
 - 待機ロック中は `read_messages` / `get_unread_count` / `unlock_owner_wait` 以外のツールは実行できません
+- 待機ロック中に `read_messages` / `get_unread_count` を `unread=0` で呼ぶと `polling_blocked` になります
 - `read_messages` で Admin 由来メッセージを読んだ時点で待機ロックが解除されます
 - 障害時のみ `unlock_owner_wait` で手動解除してください
 
@@ -218,9 +219,9 @@ get_dashboard_summary(caller_agent_id=owner_id)
 **Admin に `send_task` で計画書を送信したら、Owner は待機のみ。**
 
 ```
-# 待機（実装レベルで強制）
-read_messages(unread_only=True)  # Admin からの通知を待機
-get_unread_count()               # 未読確認
+# 待機（受動待機）
+# send_task 成功後は、監視目的の read/list 呼び出しを行わない
+# 次のユーザー入力または IPC 通知まで待機する
 ```
 
 Admin が品質チェックをパスしたら、Owner に完了報告が届きます。

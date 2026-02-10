@@ -335,12 +335,13 @@ def register_tools(mcp: FastMCP) -> None:
         # 既存の tmux セッションが存在するかチェック（重複起動防止）
         session_exists = await tmux.session_exists(project_name)
         if session_exists:
-            # 既存セッションのリカバリ: 古いリソースをクリーンアップして再初期化
+            # 既存セッションのリカバリ: tmux セッションのみ再作成する。
+            # cleanup_session_resources() は dashboard/messages など永続ファイルを削除するため、
+            # init 時の重複起動防止フローでは呼ばない。
             logger.warning(
                 f"既存の tmux セッション '{project_name}' を検出。"
-                "古いリソースをクリーンアップして再初期化します。"
+                "tmux セッションのみ再作成して初期化を継続します。"
             )
-            await cleanup_session_resources(app_ctx, remove_worktrees=False)
             # tmux セッションを明示的に kill
             await tmux.kill_session(project_name)
             # 再チェック: kill できなかった場合はエラー

@@ -422,3 +422,71 @@ class TestInitTmuxWorkspace:
 
         assert result["success"] is True
         app_ctx.tmux.rename_session.assert_awaited_once_with(legacy_name, new_name)
+
+    @pytest.mark.asyncio
+    async def test_init_tmux_workspace_preserves_existing_dashboard_files(
+        self, session_mock_ctx, git_repo
+    ):
+        """既存 tmux 検出時でも過去 session の dashboard/messages を消さないことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.managers.tmux_shared import get_project_name
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        app_ctx = session_mock_ctx.request_context.lifespan_context
+        old_session_id = "issue-old"
+        old_dashboard_dir = git_repo / app_ctx.settings.mcp_dir / old_session_id / "dashboard"
+        old_dashboard = DashboardManager(
+            workspace_id=old_session_id,
+            workspace_path=str(git_repo),
+            dashboard_dir=str(old_dashboard_dir),
+        )
+        old_dashboard.initialize()
+
+        old_dashboard_path = old_dashboard_dir / "dashboard.md"
+        old_messages_path = old_dashboard_dir / "messages.md"
+        old_messages_path.write_text("# old messages\n", encoding="utf-8")
+
+        app_ctx.dashboard_manager = old_dashboard
+        app_ctx.session_id = old_session_id
+        app_ctx.workspace_id = old_session_id
+        app_ctx.project_root = str(git_repo)
+
+        project_name = get_project_name(str(git_repo), enable_git=True)
+        session_state = {"exists": True}
+
+        async def _session_exists(name: str) -> bool:
+            if name == project_name:
+                return session_state["exists"]
+            return False
+
+        async def _kill_session(_name: str) -> bool:
+            session_state["exists"] = False
+            return True
+
+        app_ctx.tmux.session_exists = AsyncMock(side_effect=_session_exists)
+        app_ctx.tmux.kill_session = AsyncMock(side_effect=_kill_session)
+        app_ctx.tmux.create_main_session = AsyncMock(return_value=True)
+
+        result = await init_tmux_workspace(
+            working_dir=str(git_repo),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="issue-new",
+            enable_git=True,
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert old_dashboard_path.exists()
+        assert old_messages_path.exists()

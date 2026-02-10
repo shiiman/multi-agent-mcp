@@ -24,6 +24,19 @@ from src.tools.helpers import (
 
 logger = logging.getLogger(__name__)
 _ADMIN_DASHBOARD_GRANT_SECONDS = 90
+_TASK_STATUS_LABELS_JA = {
+    "pending": "未着手",
+    "in_progress": "進行中",
+    "completed": "完了",
+    "failed": "失敗",
+    "blocked": "ブロック中",
+    "cancelled": "キャンセル",
+}
+
+
+def _task_status_label_ja(status: str) -> str:
+    """タスクステータスの日本語表示ラベルを返す。"""
+    return _TASK_STATUS_LABELS_JA.get(status, status)
 
 
 def _has_recent_healthcheck_event(app_ctx: Any, admin_id: str) -> bool:
@@ -566,11 +579,12 @@ def register_tools(mcp: FastMCP) -> None:
             if status == "completed"
             else MessageType.TASK_FAILED
         )
+        status_label = _task_status_label_ja(status)
         completion_message = ipc.send_message(
             sender_id=caller_agent_id,
             receiver_id=admin_id,
             message_type=msg_type,
-            subject=f"タスク報告: {task_id} ({status})",
+            subject=f"タスク報告: {task_id} ({status_label})",
             content=message,
             priority=MessagePriority.HIGH,
             metadata={

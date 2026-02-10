@@ -181,7 +181,15 @@ class TmuxManager(TmuxWorkspaceMixin):
                 'else return "false"'
             )
             code, stdout, _ = await self._run_exec("osascript", "-e", applescript)
-            return code == 0 and "true" in stdout.lower()
+            if code == 0:
+                return "true" in stdout.lower()
+
+            # AppleScript 判定が失敗する環境向けフォールバック
+            code, _, _ = await self._run_exec("pgrep", "-x", "Ghostty")
+            if code == 0:
+                return True
+            code, _, _ = await self._run_exec("pgrep", "-x", "ghostty")
+            return code == 0
 
         async def _open_tab_in_running_ghostty(command: str) -> bool:
             escaped_command = _escape_applescript_string(command)
@@ -191,13 +199,25 @@ class TmuxManager(TmuxWorkspaceMixin):
                 activate
             end tell
             tell application "System Events"
-                tell process "Ghostty"
-                    keystroke "t" using command down
-                    delay 0.5
-                    keystroke "v" using command down
-                    delay 0.1
-                    keystroke return
-                end tell
+                if exists process "Ghostty" then
+                    tell process "Ghostty"
+                        keystroke "t" using command down
+                        delay 0.5
+                        keystroke "v" using command down
+                        delay 0.1
+                        keystroke return
+                    end tell
+                else if exists process "ghostty" then
+                    tell process "ghostty"
+                        keystroke "t" using command down
+                        delay 0.5
+                        keystroke "v" using command down
+                        delay 0.1
+                        keystroke return
+                    end tell
+                else
+                    error "Ghostty process not found"
+                end if
             end tell
             '''
             code, _, _ = await self._run_exec("osascript", "-e", applescript)

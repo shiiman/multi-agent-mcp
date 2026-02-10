@@ -462,7 +462,9 @@ class TestMarkdownDashboard:
         assert "## エージェント状態" in md_content
         assert "## タスク状態" in md_content
         assert "## 統計" in md_content
+        assert "開始時刻" in md_content
         assert "更新時刻" in md_content
+        assert md_content.index("**開始時刻**") < md_content.index("**更新時刻**")
 
         # タスク情報が含まれていることを確認
         assert "Task 1" in md_content
@@ -537,6 +539,22 @@ class TestMarkdownDashboard:
         # 完了タスクのemojiが含まれていることを確認
         assert "✅" in md_content
         assert "Completed Task" in md_content
+
+    def test_markdown_status_label_is_japanese_but_internal_status_is_compatible(
+        self, dashboard_manager
+    ):
+        """表示は日本語、内部 status は英語トークンを維持することをテスト。"""
+        task = dashboard_manager.create_task(title="In Progress Task")
+        dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=33)
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "🔄 進行中" in md_content
+        assert "🔄 in_progress" not in md_content
+
+        loaded = dashboard_manager.get_task(task.id)
+        assert loaded is not None
+        assert loaded.status == TaskStatus.IN_PROGRESS
+        assert loaded.status.value == "in_progress"
 
     def test_task_worktree_is_rendered_as_relative_path(self, dashboard_manager, temp_dir):
         """タスクの Worktree が workspace 相対パスで表示されることをテスト。"""
@@ -664,7 +682,7 @@ class TestMarkdownDashboard:
         md_content = dashboard_manager.generate_markdown_dashboard()
         assert "## タスク詳細" in md_content
         assert "### Failed Task" in md_content
-        assert "**状態**: `failed`" in md_content
+        assert "**状態**: `失敗`" in md_content
         assert "**エラー**: ネットワークエラー" in md_content
 
     def test_task_details_hides_failed_without_supplement(self, dashboard_manager):
@@ -699,8 +717,8 @@ class TestMarkdownDashboard:
         assert "## タスク詳細" in md_content
         assert "### Doing Task" in md_content
         assert "### Broken Task" in md_content
-        assert "**状態**: `in_progress`" in md_content
-        assert "**状態**: `failed`" in md_content
+        assert "**状態**: `進行中`" in md_content
+        assert "**状態**: `失敗`" in md_content
 
     def test_message_history_written_to_messages_md(self, dashboard_manager):
         """メッセージ履歴が messages.md に分離保存されることをテスト。"""
@@ -884,6 +902,7 @@ class TestMarkdownDashboard:
         assert "セッション終了" in md_content
         assert "プロセスクラッシュ回数" in md_content
         assert "プロセス復旧回数" in md_content
+        assert md_content.index("- **セッション開始**") < md_content.index("- **総エージェント数**")
 
 
 class TestDashboardCost:

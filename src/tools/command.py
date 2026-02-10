@@ -448,7 +448,24 @@ def register_tools(mcp: FastMCP) -> None:
             return role_error
 
         agents = app_ctx.agents
-        app_ctx.session_id = session_id
+        requested_session_id = session_id
+        effective_session_id = app_ctx.session_id or requested_session_id
+        if (
+            app_ctx.session_id
+            and app_ctx.session_id.startswith("provisional-")
+            and requested_session_id != app_ctx.session_id
+        ):
+            app_ctx.session_id = requested_session_id
+            effective_session_id = requested_session_id
+        elif app_ctx.session_id and requested_session_id != app_ctx.session_id:
+            logger.warning(
+                "send_task の session_id が現在セッションと不一致のため、"
+                " 既存セッションを優先します: requested=%s current=%s",
+                requested_session_id,
+                app_ctx.session_id,
+            )
+        elif not app_ctx.session_id:
+            app_ctx.session_id = requested_session_id
         sync_agents_from_file(app_ctx)
 
         agent = agents.get(agent_id)
@@ -487,7 +504,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         if not is_admin:
             return await _send_task_to_worker_via_command(
-                app_ctx, agent, agent_id, task_content, session_id,
+                app_ctx, agent, agent_id, task_content, effective_session_id,
                 auto_enhance, branch_name, project_root, profile_settings, caller_agent_id,
             )
 
@@ -495,14 +512,14 @@ def register_tools(mcp: FastMCP) -> None:
         if auto_enhance:
             try:
                 final_task_content = _enhance_admin_task(
-                app_ctx, agent_id, task_content, branch_name, session_id,
+                app_ctx, agent_id, task_content, branch_name, effective_session_id,
                 project_root, profile_settings["max_workers"], agent_enable_git,
                 )
             except InvalidConfigError as e:
                 return {"success": False, "error": str(e)}
 
         result = await _send_task_to_admin_via_command(
-            app_ctx, agent, agent_id, final_task_content, session_id,
+            app_ctx, agent, agent_id, final_task_content, effective_session_id,
             auto_enhance, branch_name, project_root, profile_settings, agent_enable_git,
         )
 
@@ -514,10 +531,12 @@ def register_tools(mcp: FastMCP) -> None:
                 app_ctx=app_ctx,
                 owner_id=caller_agent_id,
                 admin_id=agent_id,
-                session_id=session_id,
+                session_id=effective_session_id,
             )
             result["owner_wait_locked"] = True
             result["waiting_for_admin_id"] = agent_id
+            result["wait_mode"] = "owner_passive_wait"
+            result["next_action"] = "wait_for_user_input"
         else:
             result["owner_wait_locked"] = False
 

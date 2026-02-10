@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from typing import ClassVar
 
 import yaml
 
@@ -14,6 +15,15 @@ logger = logging.getLogger(__name__)
 
 class DashboardMarkdownMixin:
     """Dashboard の Markdown 生成機能を提供する mixin。"""
+
+    _TASK_STATUS_LABELS_JA: ClassVar[dict[str, str]] = {
+        "pending": "未着手",
+        "in_progress": "進行中",
+        "completed": "完了",
+        "failed": "失敗",
+        "blocked": "ブロック中",
+        "cancelled": "キャンセル",
+    }
 
     def _parse_yaml_front_matter(self, content: str) -> dict | None:
         """YAML Front Matter をパースする。
@@ -42,10 +52,12 @@ class DashboardMarkdownMixin:
             Markdown 文字列
         """
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        session_started = self._format_dashboard_time(dashboard.session_started_at)
 
         lines = [
             "# Multi-Agent Dashboard",
             "",
+            f"**開始時刻**: {session_started}",
             f"**更新時刻**: {now}",
         ]
 
@@ -55,6 +67,12 @@ class DashboardMarkdownMixin:
         lines.extend(self._generate_stats_section(dashboard))
 
         return "\n".join(lines)
+
+    def _format_dashboard_time(self, value: datetime | None) -> str:
+        """ダッシュボード時刻を表示用に整形する。"""
+        if value is None:
+            return "-"
+        return value.strftime("%Y-%m-%d %H:%M:%S")
 
     def _format_worktree_path(self, worktree_path: str | None, workspace_path: str) -> str:
         """Worktree パスを workspace 基準の相対表記に整形する。"""
@@ -219,7 +237,9 @@ class DashboardMarkdownMixin:
         agent_labels = self._build_agent_label_map(dashboard)
 
         for task in dashboard.tasks:
-            emoji = task_emoji.get(str(task.status.value).lower(), "❓")
+            status_value = str(task.status.value).lower()
+            emoji = task_emoji.get(status_value, "❓")
+            status_label = self._TASK_STATUS_LABELS_JA.get(status_value, str(task.status.value))
             assigned = self._format_agent_display(
                 task.assigned_agent_id,
                 agent_labels,
@@ -237,13 +257,13 @@ class DashboardMarkdownMixin:
                     "</details>"
                 )
                 lines.append(
-                    f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
+                    f"| `{task.id[:8]}` | {task.title} | {emoji} {status_label} | "
                     f"`{assigned}` | {task.progress}% | {started_at} | {completed_at} | "
                     f"{worktree_cell} |"
                 )
             else:
                 lines.append(
-                    f"| `{task.id[:8]}` | {task.title} | {emoji} {task.status.value} | "
+                    f"| `{task.id[:8]}` | {task.title} | {emoji} {status_label} | "
                     f"`{assigned}` | {task.progress}% | {started_at} | {completed_at} |"
                 )
 
@@ -274,11 +294,13 @@ class DashboardMarkdownMixin:
         ]
 
         for task in detail_tasks:
+            status_value = str(task.status.value).lower()
+            status_label = self._TASK_STATUS_LABELS_JA.get(status_value, str(task.status.value))
             lines.extend([
                 "",
                 f"### {task.title}",
                 "",
-                f"**状態**: `{task.status.value}`",
+                f"**状態**: `{status_label}`",
                 "",
                 f"**進捗**: {task.progress}%",
             ])
@@ -414,29 +436,21 @@ class DashboardMarkdownMixin:
 
     def _generate_stats_section(self, dashboard: Dashboard) -> list[str]:
         """統計・コスト情報セクションを生成する。"""
-        session_started = (
-            dashboard.session_started_at.isoformat()
-            if dashboard.session_started_at
-            else "-"
-        )
-        session_finished = (
-            dashboard.session_finished_at.isoformat()
-            if dashboard.session_finished_at
-            else "-"
-        )
+        session_started = self._format_dashboard_time(dashboard.session_started_at)
+        session_finished = self._format_dashboard_time(dashboard.session_finished_at)
         lines = [
             "",
             "---",
             "",
             "## 統計",
             "",
+            f"- **セッション開始**: {session_started}",
+            f"- **セッション終了**: {session_finished}",
             f"- **総エージェント数**: {dashboard.total_agents}",
             f"- **アクティブエージェント**: {dashboard.active_agents}",
             f"- **総タスク数**: {dashboard.total_tasks}",
             f"- **完了タスク**: {dashboard.completed_tasks}",
             f"- **失敗タスク**: {dashboard.failed_tasks}",
-            f"- **セッション開始**: {session_started}",
-            f"- **セッション終了**: {session_finished}",
             f"- **プロセスクラッシュ回数**: {dashboard.process_crash_count}",
             f"- **プロセス復旧回数**: {dashboard.process_recovery_count}",
         ]

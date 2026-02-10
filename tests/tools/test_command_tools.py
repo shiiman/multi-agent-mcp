@@ -960,6 +960,84 @@ class TestSendTask:
         )
 
     @pytest.mark.asyncio
+    async def test_send_task_worker_uses_existing_session_on_mismatch(
+        self, command_mock_ctx, git_repo
+    ):
+        """Worker 送信時も既存 session_id を優先して helper に渡すことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "test-session"
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+            ai_bootstrapped=True,
+        )
+
+        dashboard = app_ctx.dashboard_manager
+        task_info = dashboard.create_task(
+            title="worker session mismatch task",
+            assigned_agent_id="worker-001",
+        )
+        dashboard.assign_task(task_info.id, "worker-001")
+
+        with patch(
+            "src.tools.command._send_task_to_worker",
+            new=AsyncMock(
+                return_value={
+                    "task_sent": True,
+                    "dispatch_mode": "followup",
+                    "dispatch_error": None,
+                    "task_file": "/tmp/task-worker-mismatch.md",
+                    "command_sent": "dispatch command",
+                }
+            ),
+        ) as mock_send:
+            result = await send_task(
+                agent_id="worker-001",
+                task_content="worker mismatch task",
+                session_id="mismatched-session-id",
+                auto_enhance=False,
+                caller_agent_id="owner-001",
+                ctx=command_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert app_ctx.session_id == "test-session"
+        assert not (git_repo / ".multi-agent-mcp" / "mismatched-session-id").exists()
+        assert mock_send.call_args.kwargs["session_id"] == "test-session"
+
+    @pytest.mark.asyncio
     async def test_send_task_worker_skips_worktree_when_disabled(
         self, command_mock_ctx, git_repo
     ):
@@ -1147,6 +1225,7 @@ class TestSendTask:
         assert send_task is not None
 
         app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "issue-owner-wait"
         now = datetime.now()
         app_ctx.agents["owner-001"] = Agent(
             id="owner-001",
@@ -1181,6 +1260,8 @@ class TestSendTask:
 
         assert result["success"] is True
         assert result["owner_wait_locked"] is True
+        assert result["wait_mode"] == "owner_passive_wait"
+        assert result["next_action"] == "wait_for_user_input"
         state = app_ctx._owner_wait_state["owner-001"]
         assert state["waiting_for_admin"] is True
         assert state["admin_id"] == "admin-001"
@@ -1303,3 +1384,119 @@ class TestSendTask:
 
         assert result["success"] is False
         assert "owner_wait_locked" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_send_task_keeps_existing_session_on_mismatch(
+        self, command_mock_ctx, git_repo
+    ):
+        """既存 session_id と不一致入力時は既存セッションを優先する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "test-session"
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        mismatched_session_id = "task-id-like-1234abcd"
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="session mismatch task",
+            session_id=mismatched_session_id,
+            auto_enhance=False,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert app_ctx.session_id == "test-session"
+        assert "/.multi-agent-mcp/test-session/tasks/" in result["task_file"]
+        assert not (git_repo / ".multi-agent-mcp" / mismatched_session_id).exists()
+
+    @pytest.mark.asyncio
+    async def test_send_task_switches_from_provisional_session(
+        self, command_mock_ctx, git_repo
+    ):
+        """provisional-* からは requested session_id へ切り替える。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+        assert send_task is not None
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.session_id = "provisional-abcd1234"
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="provisional switch task",
+            session_id="issue-1234",
+            auto_enhance=False,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert app_ctx.session_id == "issue-1234"
+        assert "/.multi-agent-mcp/issue-1234/tasks/" in result["task_file"]
