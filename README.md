@@ -71,7 +71,6 @@ codex mcp remove multi-agent-mcp
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "--reinstall",
         "--from", "git+https://github.com/shiiman/multi-agent-mcp",
         "multi-agent-mcp"
       ],
@@ -92,7 +91,6 @@ codex mcp remove multi-agent-mcp
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "--reinstall",
         "--from", "git+https://github.com/shiiman/multi-agent-mcp",
         "multi-agent-mcp"
       ],
