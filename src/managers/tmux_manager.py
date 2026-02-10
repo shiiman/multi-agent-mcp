@@ -154,7 +154,7 @@ class TmuxManager(TmuxWorkspaceMixin):
         if not session_name or not self._SESSION_NAME_PATTERN.fullmatch(session_name):
             logger.error("無効な tmux セッション名です: %r", session)
             return False
-        attach_cmd = f"tmux attach -t -- {shlex.quote(session_name)}"
+        attach_cmd = f"tmux attach -t {shlex.quote(session_name)}"
         openers = {
             TerminalApp.GHOSTTY: self._open_in_ghostty,
             TerminalApp.ITERM2: self._open_in_iterm2,
@@ -176,10 +176,13 @@ class TmuxManager(TmuxWorkspaceMixin):
             return value.replace("\\", "\\\\").replace('"', '\\"')
 
         async def _is_ghostty_running() -> bool:
-            applescript = (
-                'if application "Ghostty" is running then return "true" '
-                'else return "false"'
-            )
+            applescript = """
+            if application "Ghostty" is running then
+                return "true"
+            else
+                return "false"
+            end if
+            """
             code, stdout, _ = await self._run_exec("osascript", "-e", applescript)
             if code == 0:
                 return "true" in stdout.lower()

@@ -58,6 +58,24 @@ class TestGhosttyExecutor:
         executor._run_osascript.assert_awaited_once()
         executor._run_shell.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_is_running_uses_pgrep_fallback(self):
+        """AppleScript 判定失敗時は pgrep 判定で既起動を検出する。"""
+        executor = GhosttyExecutor()
+        executor._run_osascript = AsyncMock(return_value=(1, "", "osascript error"))
+        executor._run_exec = AsyncMock(
+            side_effect=[
+                (1, "", ""),  # pgrep Ghostty
+                (0, "1234\n", ""),  # pgrep ghostty
+            ]
+        )
+
+        running = await executor._is_running()
+
+        assert running is True
+        assert executor._run_exec.await_args_list[0].args == ("pgrep", "-x", "Ghostty")
+        assert executor._run_exec.await_args_list[1].args == ("pgrep", "-x", "ghostty")
+
 
 class TestITerm2Executor:
     """iTerm2 実装のテスト。"""

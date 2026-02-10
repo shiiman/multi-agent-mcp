@@ -484,10 +484,13 @@ class AiCliManager:
 
     async def _is_ghostty_running(self) -> bool:
         """Ghostty が起動中かを確認する。"""
-        applescript = (
-            'if application "Ghostty" is running then return "true" '
-            'else return "false"'
-        )
+        applescript = """
+        if application "Ghostty" is running then
+            return "true"
+        else
+            return "false"
+        end if
+        """
         try:
             proc = await asyncio.create_subprocess_exec(
                 "osascript",
@@ -497,11 +500,27 @@ class AiCliManager:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return False
-            return "true" in stdout.decode().lower()
+            if proc.returncode == 0:
+                return "true" in stdout.decode().lower()
         except Exception:
-            return False
+            pass
+
+        # AppleScript 判定が失敗する環境向けフォールバック
+        for process_name in ("Ghostty", "ghostty"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "pgrep",
+                    "-x",
+                    process_name,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.communicate()
+                if proc.returncode == 0:
+                    return True
+            except Exception:
+                continue
+        return False
 
     async def _open_in_ghostty_tab(self, command: str) -> bool:
         """起動中の Ghostty に新しいタブを開いてコマンドを実行する。"""

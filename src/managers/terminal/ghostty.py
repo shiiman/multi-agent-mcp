@@ -79,13 +79,24 @@ class GhosttyExecutor(TerminalExecutor):
 
     async def _is_running(self) -> bool:
         """Ghostty が起動中かを確認する。"""
-        applescript = (
-            'if application "Ghostty" is running then return "true" '
-            'else return "false"'
-        )
+        applescript = """
+        if application "Ghostty" is running then
+            return "true"
+        else
+            return "false"
+        end if
+        """
         try:
             code, stdout, _ = await self._run_osascript(applescript)
-            return code == 0 and "true" in stdout.lower()
+            if code == 0:
+                return "true" in stdout.lower()
+
+            # AppleScript 判定が失敗する環境向けフォールバック
+            code, _, _ = await self._run_exec("pgrep", "-x", "Ghostty")
+            if code == 0:
+                return True
+            code, _, _ = await self._run_exec("pgrep", "-x", "ghostty")
+            return code == 0
         except Exception as e:
             logger.debug(f"Ghostty 実行チェックをスキップ: {e}")
             return False

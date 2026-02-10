@@ -90,7 +90,7 @@ class TestTmuxManagerTerminalOpen:
 
     @pytest.mark.asyncio
     async def test_open_session_in_terminal_uses_safe_attach_target(self):
-        """tmux attach は `-t -- <target>` 形式で実行文字列を構築する。"""
+        """tmux attach は `-t <target>` 形式で実行文字列を構築する。"""
         manager = TmuxManager(Settings())
         manager._open_in_iterm2 = AsyncMock(return_value=True)
 
@@ -100,7 +100,7 @@ class TestTmuxManagerTerminalOpen:
 
         assert success is True
         manager._open_in_iterm2.assert_awaited_once_with(
-            "tmux attach -t -- project-abc123"
+            "tmux attach -t project-abc123"
         )
 
     @pytest.mark.asyncio
@@ -126,5 +126,5 @@ class TestTmuxManagerTerminalOpen:
 
         assert success is True
         manager._open_in_iterm2.assert_awaited_once_with(
-            "tmux attach -t -- project:abc-1.2"
+            "tmux attach -t project:abc-1.2"
         )

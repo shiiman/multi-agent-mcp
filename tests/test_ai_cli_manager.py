@@ -491,6 +491,34 @@ class TestAiCliManagerTerminal:
             mock_exec.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_is_ghostty_running_uses_pgrep_fallback(self, ai_cli_manager):
+        """AppleScript 判定失敗時は pgrep 判定で既起動を検出する。"""
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            osascript_proc = AsyncMock()
+            osascript_proc.returncode = 1
+            osascript_proc.communicate = AsyncMock(return_value=(b"", b"osascript error"))
+
+            pgrep_ghostty_proc = AsyncMock()
+            pgrep_ghostty_proc.returncode = 1
+            pgrep_ghostty_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+            pgrep_lower_proc = AsyncMock()
+            pgrep_lower_proc.returncode = 0
+            pgrep_lower_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+            mock_exec.side_effect = [
+                osascript_proc,
+                pgrep_ghostty_proc,
+                pgrep_lower_proc,
+            ]
+
+            running = await ai_cli_manager._is_ghostty_running()
+
+            assert running is True
+            assert mock_exec.await_args_list[1].args[:3] == ("pgrep", "-x", "Ghostty")
+            assert mock_exec.await_args_list[2].args[:3] == ("pgrep", "-x", "ghostty")
+
+    @pytest.mark.asyncio
     async def test_open_in_iterm2_success(self, ai_cli_manager):
         """iTerm2 でターミナルを開くことをテスト。"""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
