@@ -119,7 +119,7 @@ async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
     sync_agents_from_file(app_ctx)
     for agent in app_ctx.agents.values():
         dashboard.update_agent_summary(agent)
-    # 実測コスト収集は Claude の statusLine みに限定する
+    # 実測コスト収集は Claude の statusLine のみに限定する
     claude_agents = []
     for candidate in app_ctx.agents.values():
         role_value = str(candidate.role)

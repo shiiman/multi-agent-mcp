@@ -457,10 +457,13 @@ class TmuxWorkspaceMixin:
         """ペイン送信後に必要なら Enter 再送で確定を保証する。"""
         effective_confirm_codex = confirm_codex_prompt
         if not effective_confirm_codex:
-            pane_command = await self.get_pane_current_command(session, window, pane)
+            # Codex TUI 実行中の可能性がある場合のみ pane コマンドを取得して
+            # 自動判定する（毎回の tmux 呼び出しを抑制）。
+            try:
+                pane_command = await self.get_pane_current_command(session, window, pane)
+            except Exception:
+                pane_command = None
             pane_command_normalized = (pane_command or "").strip().lower()
-            # 実行中コマンドが codex 系なら、呼び出し側フラグに依存せず
-            # queue モード復帰 + Enter 再送を有効化する。
             if pane_command_normalized.startswith("codex"):
                 effective_confirm_codex = True
 

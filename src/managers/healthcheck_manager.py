@@ -23,7 +23,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SHELL_COMMANDS = {"zsh", "bash", "sh", "fish"}
-_AI_RUNNING_COMMANDS = {"codex", "claude", "gemini", "agent", "cursor-agent"}
+_AI_RUNNING_COMMAND_PREFIXES = ("codex", "claude", "gemini", "agent", "cursor-agent")
+
+
+def _is_ai_running(pane_command: str) -> bool:
+    """pane_current_command が AI CLI 実行中かを判定する。
+
+    tmux の pane_current_command は ``codex-aarch64-a`` のように
+    アーキテクチャサフィックス付きの派生名を返すことがあるため、
+    前方一致で判定する。
+    """
+    normalized = pane_command.strip().lower()
+    return normalized.startswith(_AI_RUNNING_COMMAND_PREFIXES)
 
 
 @dataclass
@@ -585,9 +596,9 @@ class HealthcheckManager:
             and await self._is_in_progress_without_ipc(agent_id, agent, active_task, now)
         ):
             pane_command = (health.pane_current_command or "").strip().lower()
-            # Codex/Claude/Gemini が実行中でセッション健全な場合は
+            # AI CLI が実行中でセッション健全な場合は
             # no-IPC だけで強制復旧しない（長時間推論で誤検知しやすいため）。
-            if pane_command in _AI_RUNNING_COMMANDS:
+            if _is_ai_running(pane_command):
                 logger.info(
                     "in_progress_no_ipc をスキップ: agent=%s pane=%s",
                     agent_id,
@@ -598,7 +609,7 @@ class HealthcheckManager:
 
         if await self._is_worker_stalled(agent_id, agent, now):
             pane_command = (health.pane_current_command or "").strip().lower()
-            if pane_command in _AI_RUNNING_COMMANDS:
+            if _is_ai_running(pane_command):
                 logger.info(
                     "task_stalled をスキップ: agent=%s pane=%s（AI CLI 実行中）",
                     agent_id,
@@ -709,10 +720,16 @@ class HealthcheckManager:
 
         task_file_path = getattr(task, "task_file_path", None)
         if isinstance(task_file_path, str) and task_file_path.strip():
+            project_root = Path(str(app_ctx.project_root or ".")).resolve()
             file_path = Path(task_file_path)
             if not file_path.is_absolute():
-                project_root = Path(str(app_ctx.project_root or "."))
                 file_path = project_root / file_path
+            file_path = file_path.resolve()
+            # project_root 配下のみ許可（パストラバーサル防止）
+            try:
+                file_path.relative_to(project_root)
+            except ValueError:
+                return None, f"task_file_path is outside project_root: {task_file_path}"
             try:
                 text = file_path.read_text(encoding="utf-8").strip()
                 if text:
@@ -788,7 +805,8 @@ class HealthcheckManager:
         admin_ids = [
             aid
             for aid, a in app_ctx.agents.items()
-            if str(getattr(a, "role", "")) == "admin"
+            if str(getattr(getattr(a, "role", ""), "value", getattr(a, "role", "")))
+            == "admin"
         ]
         caller_agent_id = admin_ids[0] if admin_ids else None
 
