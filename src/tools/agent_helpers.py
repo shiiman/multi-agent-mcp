@@ -6,7 +6,10 @@ import re
 import shlex
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.managers.tmux_manager import TmuxManager
 
 from src.config.settings import AICli, Settings
 from src.config.workflow_guides import get_role_template_path
@@ -456,7 +459,7 @@ def _make_dispatch_result(
 async def _reset_bootstrap_state_if_shell(
     app_ctx: AppContext,
     agent: Agent,
-    tmux: Any,
+    tmux: "TmuxManager",
     worker_index: int,
 ) -> str | None:
     """pane の実行コマンドを確認し、shell なら bootstrap 状態をリセットする。"""

@@ -326,3 +326,65 @@ def mock_tmux_manager():
     mock._get_window_name = MagicMock(return_value="main")
     mock._run = AsyncMock(return_value="")
     return mock
+
+
+# ---------------------------------------------------------------------------
+# ツールテスト用の共通ヘルパー
+# ---------------------------------------------------------------------------
+
+def get_tool_fn(mcp, tool_name: str):
+    """MCP ツール関数をツール名から取得する共通ヘルパー。"""
+    for tool in mcp._tool_manager._tools.values():
+        if tool.name == tool_name:
+            return tool.fn
+    return None
+
+
+def add_test_agent(
+    mock_ctx,
+    agent_id: str,
+    role: AgentRole,
+    working_dir: str | None = None,
+    *,
+    status: AgentStatus = AgentStatus.IDLE,
+    tmux_session: str | None = None,
+    session_name: str | None = None,
+    window_index: int | None = None,
+    pane_index: int | None = None,
+    **extra_fields,
+) -> Agent:
+    """テスト用にエージェントを AppContext に追加する共通ヘルパー。
+
+    Returns:
+        追加された Agent インスタンス。
+    """
+    app_ctx = mock_ctx.request_context.lifespan_context
+    now = datetime.now()
+
+    # Worker のデフォルト tmux 値
+    if role == AgentRole.WORKER and tmux_session is None:
+        tmux_session = "test:0.1"
+    if role == AgentRole.ADMIN and tmux_session is None:
+        tmux_session = "test:0.0"
+        if session_name is None:
+            session_name = "test"
+        if window_index is None:
+            window_index = 0
+        if pane_index is None:
+            pane_index = 0
+
+    agent = Agent(
+        id=agent_id,
+        role=role,
+        status=status,
+        tmux_session=tmux_session,
+        session_name=session_name,
+        window_index=window_index,
+        pane_index=pane_index,
+        working_dir=working_dir,
+        created_at=now,
+        last_activity=now,
+        **extra_fields,
+    )
+    app_ctx.agents[agent_id] = agent
+    return agent

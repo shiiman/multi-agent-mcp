@@ -4,7 +4,11 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.config.settings import Settings
+    from src.context import AppContext
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -39,7 +43,7 @@ def _validate_batch_config(config: dict, worker_index: int) -> dict[str, Any] | 
 
 
 async def _assign_and_dispatch_task(
-    app_ctx: Any,
+    app_ctx: "AppContext",
     agent: Agent,
     task_id: str | None,
     task_content: str | None,
@@ -149,8 +153,8 @@ def _pre_assign_pane_slots(
 
 
 async def _setup_worker_tmux_pane(
-    app_ctx: Any,
-    settings: Any,
+    app_ctx: "AppContext",
+    settings: "Settings",
     project_name: str,
     repo_path: str,
     window_index: int,
@@ -208,9 +212,9 @@ async def _setup_worker_tmux_pane(
 
 
 async def _create_single_worker(
-    app_ctx: Any,
+    app_ctx: "AppContext",
     agents: dict[str, Agent],
-    settings: Any,
+    settings: "Settings",
     config: dict,
     worker_index: int,
     assigned_slot: tuple[int, int] | None,
@@ -336,8 +340,8 @@ async def _create_single_worker(
 
 
 async def _reuse_single_worker(
-    app_ctx: Any,
-    settings: Any,
+    app_ctx: "AppContext",
+    settings: "Settings",
     config: dict,
     worker_index: int,
     worker: Agent,

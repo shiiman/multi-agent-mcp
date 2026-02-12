@@ -21,7 +21,14 @@ from src.models.agent import Agent
 
 @dataclass
 class AppContext:
-    """アプリケーションコンテキスト。"""
+    """アプリケーションコンテキスト。
+
+    TODO: マネージャーフィールドが多い。将来的にグループ化を検討:
+    - core: settings, tmux, ai_cli, agents
+    - workflow: ipc_manager, dashboard_manager, scheduler_manager
+    - monitoring: healthcheck_manager, healthcheck_daemon_*
+    - optional: persona_manager, memory_manager
+    """
 
     settings: Settings
     tmux: TmuxManager

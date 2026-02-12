@@ -1,4 +1,8 @@
-"""Manager 初期化ヘルパー関数。"""
+"""Manager 初期化ヘルパー関数。
+
+TODO: 各 ensure_*_manager() は初回アクセス時に遅延初期化する lazy loading パターン。
+将来的に AppContext.__getattr__ で自動初期化するか、DI コンテナの導入を検討。
+"""
 
 import logging
 import os

@@ -8,10 +8,18 @@ MAIN_WINDOW_WORKER_PANES = [1, 2, 3, 4, 5, 6]
 def escape_applescript(value: str) -> str:
     """AppleScript 文字列リテラル用にエスケープする。
 
-    バックスラッシュとダブルクォートをエスケープして
+    バックスラッシュ、ダブルクォート、シングルクォート、
+    バッククォート、改行文字をエスケープして
     AppleScript インジェクションを防止する。
     """
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("'", "\\'")
+        .replace("`", "\\`")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
 
 
 def get_project_name(working_dir: str, enable_git: bool = True) -> str:

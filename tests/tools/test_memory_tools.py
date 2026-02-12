@@ -525,3 +525,214 @@ class TestDeleteMemoryEntry:
             ctx=memory_mock_ctx,
         )
         assert get_result["success"] is False
+
+
+class TestMemoryArchiveTools:
+    """メモリアーカイブ関連ツールのテスト。"""
+
+    def _setup_tools(self):
+        """アーカイブ関連ツールを取得するヘルパー。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.memory import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        tools = {}
+        for tool in mcp._tool_manager._tools.values():
+            tools[tool.name] = tool.fn
+        return tools
+
+    def _add_owner(self, mock_ctx, working_dir):
+        """Owner エージェントを追加するヘルパー。"""
+        app_ctx = mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=working_dir,
+            created_at=now,
+            last_activity=now,
+        )
+
+    @pytest.mark.asyncio
+    async def test_search_archive_empty(self, memory_mock_ctx, git_repo):
+        """アーカイブが空の場合に空の結果を返すことをテスト。"""
+        tools = self._setup_tools()
+        self._add_owner(memory_mock_ctx, str(git_repo))
+
+        result = await tools["search_memory_archive"](
+            query="test",
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_list_archive_empty(self, memory_mock_ctx, git_repo):
+        """アーカイブが空の場合に空の結果を返すことをテスト。"""
+        tools = self._setup_tools()
+        self._add_owner(memory_mock_ctx, str(git_repo))
+
+        result = await tools["list_memory_archive"](
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_archive_summary(self, memory_mock_ctx, git_repo):
+        """アーカイブサマリーを取得できることをテスト。"""
+        tools = self._setup_tools()
+        self._add_owner(memory_mock_ctx, str(git_repo))
+
+        result = await tools["get_memory_archive_summary"](
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert "summary" in result
+        assert result["summary"]["total_entries"] == 0
+
+    @pytest.mark.asyncio
+    async def test_restore_nonexistent_key_fails(self, memory_mock_ctx, git_repo):
+        """存在しないキーの復元がエラーになることをテスト。"""
+        tools = self._setup_tools()
+        self._add_owner(memory_mock_ctx, str(git_repo))
+
+        result = await tools["restore_from_memory_archive"](
+            key="nonexistent-key",
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "見つかりません" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_archive_roundtrip(self, memory_mock_ctx, git_repo):
+        """保存→prune→アーカイブ検索→復元のラウンドトリップをテスト。"""
+        tools = self._setup_tools()
+        self._add_owner(memory_mock_ctx, str(git_repo))
+
+        # まずエントリを保存
+        await tools["save_to_memory"](
+            key="archive-test",
+            content="アーカイブテスト用コンテンツ",
+            tags=["archive", "roundtrip"],
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+
+        # TTL を非常に短くして prune でアーカイブに移動
+        app_ctx = memory_mock_ctx.request_context.lifespan_context
+        memory = app_ctx.memory_manager
+        # TTL=0 にしてエントリをアーカイブに移動させる
+        original_ttl = memory.ttl_days
+        memory.ttl_days = 0
+        # エントリの更新日時を古くする
+        entry = memory.entries.get("archive-test")
+        if entry:
+            from datetime import timedelta
+            entry.updated_at = datetime.now() - timedelta(days=1)
+        pruned = memory.prune()
+        memory.ttl_days = original_ttl
+
+        assert pruned >= 1
+
+        # アーカイブを検索
+        search_result = await tools["search_memory_archive"](
+            query="アーカイブテスト",
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+        assert search_result["success"] is True
+        assert search_result["count"] >= 1
+
+        # アーカイブ一覧を取得
+        list_result = await tools["list_memory_archive"](
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+        assert list_result["success"] is True
+        assert list_result["count"] >= 1
+
+        # サマリーを取得
+        summary_result = await tools["get_memory_archive_summary"](
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+        assert summary_result["success"] is True
+        assert summary_result["summary"]["total_entries"] >= 1
+
+        # アーカイブから復元
+        restore_result = await tools["restore_from_memory_archive"](
+            key="archive-test",
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+        assert restore_result["success"] is True
+        assert "復元しました" in restore_result["message"]
+
+        # 復元後にメインメモリで取得できることを確認
+        get_result = await tools["get_memory_entry"](
+            key="archive-test",
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+        assert get_result["success"] is True
+        assert get_result["entry"]["key"] == "archive-test"
+
+    @pytest.mark.asyncio
+    async def test_search_archive_with_tags(self, memory_mock_ctx, git_repo):
+        """タグ付きでアーカイブを検索できることをテスト。"""
+        tools = self._setup_tools()
+        self._add_owner(memory_mock_ctx, str(git_repo))
+
+        # エントリを保存してアーカイブ
+        app_ctx = memory_mock_ctx.request_context.lifespan_context
+        memory = app_ctx.memory_manager
+
+        await tools["save_to_memory"](
+            key="tag-archive-a",
+            content="タグAのコンテンツ",
+            tags=["alpha"],
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+        await tools["save_to_memory"](
+            key="tag-archive-b",
+            content="タグBのコンテンツ",
+            tags=["beta"],
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+
+        # prune でアーカイブに移動
+        from datetime import timedelta
+        original_ttl = memory.ttl_days
+        memory.ttl_days = 0
+        for e in memory.entries.values():
+            e.updated_at = datetime.now() - timedelta(days=1)
+        memory.prune()
+        memory.ttl_days = original_ttl
+
+        # タグ alpha のみ検索
+        result = await tools["search_memory_archive"](
+            query="コンテンツ",
+            tags=["alpha"],
+            caller_agent_id="owner-001",
+            ctx=memory_mock_ctx,
+        )
+
+        assert result["success"] is True
+        for entry in result["entries"]:
+            assert "alpha" in entry["tags"]

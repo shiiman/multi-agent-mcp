@@ -1,6 +1,7 @@
 """ダッシュボード管理モジュール。
 
-複数プロセス対応: インメモリキャッシュを使わず、毎回ファイルから読み書きする。
+複数プロセス対応: 読み取り専用操作には mtime ベースの短命キャッシュを使用し、
+書き込み操作は毎回ファイルから読み書きする。
 YAML Front Matter 付き Markdown で統一管理。
 """
 
@@ -30,7 +31,11 @@ _TransactionResult = TypeVar("_TransactionResult")
 
 
 class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
-    """ダッシュボードを管理するクラス。"""
+    """ダッシュボードを管理するクラス。
+
+    TODO: DashboardManager は現在 5 つの mixin を継承しており責任が大きい。
+    将来的に DashboardReader（読み取り専用）と DashboardWriter（書き込み）に分離を検討。
+    """
 
     def __init__(
         self,
@@ -46,6 +51,9 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
         self.dashboard_dir = Path(dashboard_dir)
         self.settings = settings or load_settings_for_project(workspace_path)
         self._dashboard_lock_timeout_seconds = 1.0
+        # 読み取り専用操作用の mtime ベースキャッシュ
+        self._read_cache: Dashboard | None = None
+        self._read_cache_mtime: float = 0.0
 
     @staticmethod
     def _is_event_loop_running() -> bool:
@@ -161,14 +169,27 @@ class DashboardManager(DashboardRenderingMixin, DashboardCostMixin):
                 except OSError:
                     pass
                 raise
+            # 書き込み成功時にキャッシュを無効化
+            self._read_cache = None
+            self._read_cache_mtime = 0.0
         except OSError as e:
             logger.error(f"ダッシュボード保存エラー: {e}")
             raise
 
     def _read_dashboard(self) -> Dashboard:
-        """ダッシュボードをファイルから読み込む。"""
+        """ダッシュボードをファイルから読み込む（mtime ベースキャッシュ付き）。"""
+        dashboard_path = self._get_dashboard_path()
+        try:
+            current_mtime = dashboard_path.stat().st_mtime
+        except OSError:
+            current_mtime = 0.0
+        if self._read_cache is not None and current_mtime == self._read_cache_mtime:
+            return self._read_cache
         with self._dashboard_file_lock():
-            return self._read_dashboard_unlocked()
+            dashboard = self._read_dashboard_unlocked()
+        self._read_cache = dashboard
+        self._read_cache_mtime = current_mtime
+        return dashboard
 
     def _read_dashboard_unlocked(self) -> Dashboard:
         """ロック取得済み前提でダッシュボードを読み込む。"""

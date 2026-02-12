@@ -97,8 +97,13 @@ multi-agent-mcp/
 │       ├── model_profile.py     # Model profile (3)
 │       └── task_templates.py    # Task template generation (helper module)
 ├── templates/                   # Templates for agents and scripts
-│   ├── roles/                   # Role-based workflow guides (owner, admin, worker)
+│   ├── roles/                   # Role-based workflow guides
+│   │   ├── owner.md / admin.md / worker.md          # Git-enabled variants
+│   │   └── owner_no_git.md / admin_no_git.md / worker_no_git.md  # Non-git variants
 │   ├── tasks/                   # Task instruction templates
+│   │   ├── admin_task.md / worker_task.md            # Git-enabled variants
+│   │   ├── admin_task_no_git.md / worker_task_no_git.md  # Non-git variants
+│   │   └── admin_task_no_worktree.md                 # No-worktree variant
 │   └── scripts/                 # Script templates
 │       └── bash/                # Bash scripts (workspace_setup.sh)
 ├── tests/                       # Pytest test files

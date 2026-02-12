@@ -1,10 +1,18 @@
 """コマンド実行ツール。"""
 
+from __future__ import annotations
+
 import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.context import AppContext
+    from src.managers.dashboard_manager import DashboardManager
+    from src.models.agent import Agent
+    from src.models.dashboard import TaskInfo
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -43,6 +51,13 @@ _DANGEROUS_COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(^|\s)mkfs(\.| )", re.IGNORECASE), "filesystem format"),
     (re.compile(r"(^|\s)dd\s+if=", re.IGNORECASE), "raw disk write"),
     (re.compile(r":\s*\(\)\s*\{\s*:\s*\|\s*:\s*;\s*\}", re.IGNORECASE), "fork bomb"),
+    (re.compile(r"(^|\s)chmod\s+777\b", re.IGNORECASE), "chmod 777"),
+    (re.compile(r"(^|\s)sudo\b", re.IGNORECASE), "sudo"),
+    (re.compile(r"curl\s.*\|\s*(ba)?sh", re.IGNORECASE), "curl pipe to shell"),
+    (re.compile(r"wget\s.*\|\s*(ba)?sh", re.IGNORECASE), "wget pipe to shell"),
+    (re.compile(r"(^|\s)git\s+push\s+.*--force\b", re.IGNORECASE), "git force push"),
+    (re.compile(r"(^|\s)git\s+reset\s+--hard\b", re.IGNORECASE), "git reset hard"),
+    (re.compile(r">\s*/dev/sd[a-z]", re.IGNORECASE), "write to block device"),
 ]
 
 
@@ -253,7 +268,9 @@ def register_tools(mcp: FastMCP) -> None:
             "output": output,
         }
 
-    async def _resolve_worker_task_id(app_ctx, agent, agent_id, dashboard):
+    async def _resolve_worker_task_id(
+        app_ctx: AppContext, agent: Agent, agent_id: str, dashboard: DashboardManager
+    ) -> tuple[str | None, TaskInfo | None]:
         """Worker 用の task_id を解決する。"""
         effective_task_id = agent.current_task
         selected_task = None
@@ -269,7 +286,9 @@ def register_tools(mcp: FastMCP) -> None:
                 effective_task_id = selected_task.id
         return effective_task_id, selected_task
 
-    def _resolve_agent_enable_git(app_ctx, agent, strict: bool = False) -> bool:
+    def _resolve_agent_enable_git(
+        app_ctx: AppContext, agent: Agent, strict: bool = False
+    ) -> bool:
         """対象エージェント基準の enable_git を解決する。"""
         config_base = agent.worktree_path or agent.working_dir or app_ctx.project_root
         if not config_base:
@@ -280,13 +299,13 @@ def register_tools(mcp: FastMCP) -> None:
         return resolved
 
     async def _prepare_worker_worktree(
-        app_ctx,
-        agent,
-        project_root,
-        branch_name,
-        worker_no,
-        effective_task_id,
-    ):
+        app_ctx: AppContext,
+        agent: Agent,
+        project_root: Path,
+        branch_name: str | None,
+        worker_no: int,
+        effective_task_id: str,
+    ) -> tuple[str | None, str | None, str]:
         """Worker 用の worktree を準備する。"""
         worktree_manager = get_worktree_manager(app_ctx, str(project_root))
         base_branch = await worktree_manager.get_current_branch(str(project_root))
@@ -305,13 +324,13 @@ def register_tools(mcp: FastMCP) -> None:
         return wt_path, wt_error, generated_branch
 
     def _assign_task_to_dashboard(
-        dashboard,
-        effective_task_id,
-        agent_id,
-        dispatch_branch,
-        dispatch_worktree_path,
-        enable_wt,
-    ) -> dict | None:
+        dashboard: DashboardManager,
+        effective_task_id: str,
+        agent_id: str,
+        dispatch_branch: str | None,
+        dispatch_worktree_path: str,
+        enable_wt: bool,
+    ) -> dict[str, Any] | None:
         """dashboard にタスクを割り当てる。失敗時はエラー dict を返す。"""
         try:
             assigned, _ = dashboard.assign_task(
@@ -335,16 +354,16 @@ def register_tools(mcp: FastMCP) -> None:
         return None
 
     async def _send_task_to_worker_via_command(
-        app_ctx,
-        agent,
-        agent_id,
-        task_content,
-        session_id,
-        auto_enhance,
-        branch_name,
-        project_root,
-        profile_settings,
-        caller_agent_id,
+        app_ctx: AppContext,
+        agent: Agent,
+        agent_id: str,
+        task_content: str,
+        session_id: str,
+        auto_enhance: bool,
+        branch_name: str | None,
+        project_root: Path,
+        profile_settings: dict[str, Any],
+        caller_agent_id: str | None,
     ) -> dict[str, Any]:
         """Worker へのタスク送信処理。"""
         dashboard = ensure_dashboard_manager(app_ctx)
@@ -445,16 +464,16 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     async def _send_task_to_admin_via_command(
-        app_ctx,
-        agent,
-        agent_id,
-        final_task_content,
-        session_id,
-        auto_enhance,
-        branch_name,
-        project_root,
-        profile_settings,
-        agent_enable_git,
+        app_ctx: AppContext,
+        agent: Agent,
+        agent_id: str,
+        final_task_content: str,
+        session_id: str,
+        auto_enhance: bool,
+        branch_name: str | None,
+        project_root: Path,
+        profile_settings: dict[str, Any],
+        agent_enable_git: bool,
     ) -> dict[str, Any]:
         """Admin へのタスク送信処理。"""
         tmux = app_ctx.tmux
@@ -538,15 +557,15 @@ def register_tools(mcp: FastMCP) -> None:
         }
 
     def _enhance_admin_task(
-        app_ctx,
-        agent_id,
-        task_content,
-        branch_name,
-        session_id,
-        project_root,
-        effective_worker_count,
-        agent_enable_git,
-    ):
+        app_ctx: AppContext,
+        agent_id: str,
+        task_content: str,
+        branch_name: str | None,
+        session_id: str,
+        project_root: Path,
+        effective_worker_count: int,
+        agent_enable_git: bool,
+    ) -> str:
         """Admin 用タスク内容を自動拡張する。"""
         memory_context = search_memory_context(app_ctx, task_content)
         mcp_prefix = get_mcp_tool_prefix_from_config(str(project_root), strict=True)

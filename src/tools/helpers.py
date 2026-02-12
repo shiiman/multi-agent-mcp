@@ -259,6 +259,7 @@ def check_tool_permission(
     if caller_agent_id is None:
         return {
             "success": False,
+            "error_code": "MISSING_CALLER_ID",
             "error": (
                 f"`{tool_name}` の呼び出しには `caller_agent_id` が必須です。"
                 "自身のエージェント ID を指定してください。"
@@ -277,6 +278,7 @@ def check_tool_permission(
     if role is None:
         return {
             "success": False,
+            "error_code": "AGENT_NOT_FOUND",
             "error": f"エージェント {caller_agent_id} が見つかりません",
         }
 
@@ -287,6 +289,7 @@ def check_tool_permission(
             waiting_admin_id = owner_state.get("admin_id")
             return {
                 "success": False,
+                "error_code": "OWNER_WAIT_LOCKED",
                 "error": (
                     "owner_wait_locked: Admin からの通知待機中のため、"
                     f"`{tool_name}` は実行できません。"
@@ -304,6 +307,7 @@ def check_tool_permission(
         logger.error("ツール '%s' の権限が未定義のため拒否しました", tool_name)
         return {
             "success": False,
+            "error_code": "PERMISSION_UNDEFINED",
             "error": (
                 f"ツール `{tool_name}` の権限定義が存在しないため実行を拒否しました。"
                 " `src/config/role_permissions.py` に明示的な定義を追加してください。"
@@ -314,6 +318,7 @@ def check_tool_permission(
     if role.value not in allowed_roles:
         return {
             "success": False,
+            "error_code": "ROLE_NOT_ALLOWED",
             "error": get_role_error_message(tool_name, role.value),
         }
 
@@ -322,6 +327,7 @@ def check_tool_permission(
         if target_agent_id is None:
             return {
                 "success": False,
+                "error_code": "WORKER_SELF_SCOPE_MISSING",
                 "error": (
                     f"`{tool_name}` は Worker self-scope 対象ツールです。"
                     "`target_agent_id` が未指定のため拒否しました。"
@@ -330,6 +336,7 @@ def check_tool_permission(
         if target_agent_id != caller_agent_id:
             return {
                 "success": False,
+                "error_code": "WORKER_SELF_SCOPE_VIOLATION",
                 "error": (
                     f"Worker は `{tool_name}` を自分自身の agent_id でのみ実行できます。"
                     f"caller_agent_id={caller_agent_id}, target_agent_id={target_agent_id}"
@@ -427,11 +434,13 @@ def validate_sender_caller_match(
     if caller_agent_id is None:
         return {
             "success": False,
+            "error_code": "MISSING_CALLER_ID",
             "error": "caller_agent_id が必要です",
         }
     if sender_id != caller_agent_id:
         return {
             "success": False,
+            "error_code": "SENDER_CALLER_MISMATCH",
             "error": (
                 "sender_id と caller_agent_id が一致しないため拒否しました。"
                 f" sender_id={sender_id}, caller_agent_id={caller_agent_id}"

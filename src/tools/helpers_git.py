@@ -52,6 +52,8 @@ def resolve_main_repo_root(path: str | Path) -> str:
         else:
             # worktree: /path/to/main-repo/.git/worktrees/xxx → /path/to/main-repo
             git_dir_index = git_common_dir.find("/.git")
+            if git_dir_index == -1:
+                return repo_root
             return git_common_dir[:git_dir_index]
 
     except subprocess.CalledProcessError as e:
