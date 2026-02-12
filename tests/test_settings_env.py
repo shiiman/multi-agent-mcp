@@ -125,7 +125,6 @@ class TestGenerateEnvTemplate:
         assert "MCP_CLI_DEFAULT_CODEX_WORKER_MODEL" in template
         assert "MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL" in template
-        assert "MCP_CLI_DEFAULT_CURSOR_COMMAND" in template
         assert "MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL" in template
         assert ModelDefaults.OPUS in template

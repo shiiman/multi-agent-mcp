@@ -405,12 +405,6 @@ class Settings(BaseSettings):
     )
     """Gemini CLI で Worker に使用するデフォルトモデル"""
 
-    cli_default_cursor_command: str = Field(
-        default=DEFAULT_AI_CLI_COMMANDS[AICli.CURSOR],
-        description="Cursor CLI のデフォルトコマンド",
-    )
-    """Cursor CLI で使用するデフォルトコマンド"""
-
     cli_default_cursor_admin_model: str = Field(
         default=ModelDefaults.CURSOR_DEFAULT,
         description="Cursor CLI の Admin デフォルトモデル",
