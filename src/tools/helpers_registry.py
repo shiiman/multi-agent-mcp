@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
@@ -61,15 +60,22 @@ def save_agent_to_registry(
     if session_id:
         data["session_id"] = session_id
 
-    # アトミック書き込み: tempfile → os.replace で競合を防止
+    # アトミック書き込み: 共通ロックファイルで排他 → tempfile → os.replace
+    lock_file_path = registry_dir / f"{agent_id}.lock"
     fd, tmp_path = tempfile.mkstemp(dir=str(registry_dir), suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, str(agent_file))
+        with open(lock_file_path, "a+", encoding="utf-8") as lock_fh:
+            try:
+                import fcntl
+
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            except ImportError:
+                pass  # 非 POSIX 環境ではロックなしで続行
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(agent_file))
     except BaseException:
         # 書き込み失敗時は一時ファイルを削除
         try:

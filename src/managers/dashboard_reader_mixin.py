@@ -21,18 +21,18 @@ class DashboardReaderMixin:
     """
 
     def _read_dashboard(self) -> Dashboard:
-        """ダッシュボードをファイルから読み込む（mtime ベースキャッシュ付き）。"""
+        """ダッシュボードをファイルから読み込む（mtime_ns ベースキャッシュ付き）。"""
         dashboard_path = self._get_dashboard_path()
         try:
-            current_mtime = dashboard_path.stat().st_mtime
+            current_mtime_ns = dashboard_path.stat().st_mtime_ns
         except OSError:
-            current_mtime = 0.0
-        if self._read_cache is not None and current_mtime == self._read_cache_mtime:
+            current_mtime_ns = 0
+        if self._read_cache is not None and current_mtime_ns == self._read_cache_mtime:
             return self._read_cache
         with self._dashboard_file_lock():
             dashboard = self._read_dashboard_unlocked()
         self._read_cache = dashboard
-        self._read_cache_mtime = current_mtime
+        self._read_cache_mtime = current_mtime_ns
         return dashboard
 
     def _read_dashboard_unlocked(self) -> Dashboard:

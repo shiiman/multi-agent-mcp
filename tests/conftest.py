@@ -333,11 +333,14 @@ def mock_tmux_manager():
 # ---------------------------------------------------------------------------
 
 def get_tool_fn(mcp, tool_name: str):
-    """MCP ツール関数をツール名から取得する共通ヘルパー。"""
+    """MCP ツール関数をツール名から取得する共通ヘルパー。
+
+    指定したツール名が見つからない場合は KeyError を送出する。
+    """
     for tool in mcp._tool_manager._tools.values():
         if tool.name == tool_name:
             return tool.fn
-    return None
+    raise KeyError(f"MCP tool not found: {tool_name}")
 
 
 def add_test_agent(

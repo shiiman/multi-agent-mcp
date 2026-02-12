@@ -47,9 +47,9 @@ class DashboardManager(
         self.dashboard_dir = Path(dashboard_dir)
         self.settings = settings or load_settings_for_project(workspace_path)
         self._dashboard_lock_timeout_seconds = 1.0
-        # 読み取り専用操作用の mtime ベースキャッシュ
+        # 読み取り専用操作用の mtime_ns ベースキャッシュ
         self._read_cache: Dashboard | None = None
-        self._read_cache_mtime: float = 0.0
+        self._read_cache_mtime: int = 0
 
     @staticmethod
     def _is_event_loop_running() -> bool:

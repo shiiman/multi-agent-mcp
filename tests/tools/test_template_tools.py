@@ -5,18 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.conftest import get_tool_fn
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.tmux_manager import TmuxManager
 from src.models.agent import Agent, AgentRole, AgentStatus
-
-
-def _get_tool_fn(mcp, tool_name: str):
-    """MCP ツール関数をツール名から取得するヘルパー。"""
-    for tool in mcp._tool_manager._tools.values():
-        if tool.name == tool_name:
-            return tool.fn
-    return None
 
 
 @pytest.fixture
@@ -78,7 +71,7 @@ class TestListWorkspaceTemplates:
     async def test_list_templates_success(self, template_mock_ctx, git_repo):
         """テンプレート一覧を取得できることをテスト。"""
         mcp = _register_tools()
-        list_templates = _get_tool_fn(mcp, "list_workspace_templates")
+        list_templates = get_tool_fn(mcp, "list_workspace_templates")
         _add_agent(template_mock_ctx, "owner-001", AgentRole.OWNER, str(git_repo))
 
         result = await list_templates(
@@ -96,7 +89,7 @@ class TestListWorkspaceTemplates:
     async def test_list_templates_admin_allowed(self, template_mock_ctx, git_repo):
         """Admin からの呼び出しが許可されることをテスト。"""
         mcp = _register_tools()
-        list_templates = _get_tool_fn(mcp, "list_workspace_templates")
+        list_templates = get_tool_fn(mcp, "list_workspace_templates")
         _add_agent(template_mock_ctx, "admin-001", AgentRole.ADMIN, str(git_repo))
 
         result = await list_templates(
@@ -110,7 +103,7 @@ class TestListWorkspaceTemplates:
     async def test_list_templates_worker_denied(self, template_mock_ctx, git_repo):
         """Worker からの呼び出しが拒否されることをテスト。"""
         mcp = _register_tools()
-        list_templates = _get_tool_fn(mcp, "list_workspace_templates")
+        list_templates = get_tool_fn(mcp, "list_workspace_templates")
         _add_agent(template_mock_ctx, "worker-001", AgentRole.WORKER, str(git_repo))
 
         result = await list_templates(
@@ -129,8 +122,8 @@ class TestGetWorkspaceTemplate:
     async def test_get_template_success(self, template_mock_ctx, git_repo):
         """テンプレートを取得できることをテスト。"""
         mcp = _register_tools()
-        get_template = _get_tool_fn(mcp, "get_workspace_template")
-        list_templates = _get_tool_fn(mcp, "list_workspace_templates")
+        get_template = get_tool_fn(mcp, "get_workspace_template")
+        list_templates = get_tool_fn(mcp, "list_workspace_templates")
         _add_agent(template_mock_ctx, "owner-001", AgentRole.OWNER, str(git_repo))
 
         # テンプレート名を取得
@@ -156,7 +149,7 @@ class TestGetWorkspaceTemplate:
     async def test_get_nonexistent_template(self, template_mock_ctx, git_repo):
         """存在しないテンプレート名でエラーを返すことをテスト。"""
         mcp = _register_tools()
-        get_template = _get_tool_fn(mcp, "get_workspace_template")
+        get_template = get_tool_fn(mcp, "get_workspace_template")
         _add_agent(template_mock_ctx, "owner-001", AgentRole.OWNER, str(git_repo))
 
         result = await get_template(
@@ -176,7 +169,7 @@ class TestGetRoleGuide:
     async def test_get_role_guide_owner(self, template_mock_ctx, git_repo):
         """Owner ロールガイドを取得できることをテスト。"""
         mcp = _register_tools()
-        get_guide = _get_tool_fn(mcp, "get_role_guide")
+        get_guide = get_tool_fn(mcp, "get_role_guide")
         _add_agent(template_mock_ctx, "owner-001", AgentRole.OWNER, str(git_repo))
 
         result = await get_guide(
@@ -192,7 +185,7 @@ class TestGetRoleGuide:
     async def test_get_role_guide_worker(self, template_mock_ctx, git_repo):
         """Worker ロールガイドを取得できることをテスト。"""
         mcp = _register_tools()
-        get_guide = _get_tool_fn(mcp, "get_role_guide")
+        get_guide = get_tool_fn(mcp, "get_role_guide")
         _add_agent(template_mock_ctx, "worker-001", AgentRole.WORKER, str(git_repo))
 
         result = await get_guide(
@@ -208,7 +201,7 @@ class TestGetRoleGuide:
     async def test_get_role_guide_invalid_role(self, template_mock_ctx, git_repo):
         """無効なロールでエラーを返すことをテスト。"""
         mcp = _register_tools()
-        get_guide = _get_tool_fn(mcp, "get_role_guide")
+        get_guide = get_tool_fn(mcp, "get_role_guide")
         _add_agent(template_mock_ctx, "owner-001", AgentRole.OWNER, str(git_repo))
 
         result = await get_guide(
@@ -228,7 +221,7 @@ class TestListRoleGuides:
     async def test_list_role_guides_success(self, template_mock_ctx, git_repo):
         """ロールガイド一覧を取得できることをテスト。"""
         mcp = _register_tools()
-        list_guides = _get_tool_fn(mcp, "list_role_guides")
+        list_guides = get_tool_fn(mcp, "list_role_guides")
         _add_agent(template_mock_ctx, "owner-001", AgentRole.OWNER, str(git_repo))
 
         result = await list_guides(
@@ -244,7 +237,7 @@ class TestListRoleGuides:
     async def test_list_role_guides_worker_allowed(self, template_mock_ctx, git_repo):
         """Worker からの呼び出しが許可されることをテスト。"""
         mcp = _register_tools()
-        list_guides = _get_tool_fn(mcp, "list_role_guides")
+        list_guides = get_tool_fn(mcp, "list_role_guides")
         _add_agent(template_mock_ctx, "worker-001", AgentRole.WORKER, str(git_repo))
 
         result = await list_guides(

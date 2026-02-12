@@ -73,7 +73,7 @@ class DashboardWriterMixin:
                 raise
             # 書き込み成功時にキャッシュを無効化
             self._read_cache = None
-            self._read_cache_mtime = 0.0
+            self._read_cache_mtime = 0
         except OSError as e:
             logger.error(f"ダッシュボード保存エラー: {e}")
             raise
