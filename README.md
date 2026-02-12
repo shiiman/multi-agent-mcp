@@ -542,6 +542,48 @@ uv run pytest
 uv run ruff check src/
 ```
 
+## トラブルシューティング
+
+### tmux セッションが見つからない
+
+```
+エラー: tmux セッションが見つかりません
+```
+
+**原因**: tmux がインストールされていないか、ワークスペースが初期化されていません。
+
+**対処法**:
+1. `tmux -V` で tmux のインストールを確認
+2. `init_tmux_workspace` でワークスペースを初期化
+
+### Worker が応答しない（stall 検出）
+
+**原因**: AI CLI プロセスがハングアップしている可能性があります。
+
+**対処法**:
+1. `healthcheck_agent` で状態を確認
+2. `attempt_recovery` で軽量復旧を試行
+3. それでも改善しない場合は `full_recovery` で完全復旧
+
+### dashboard.md が読み込めない
+
+**原因**: YAML Front Matter のフォーマットが壊れている可能性があります。
+
+**対処法**:
+1. `.multi-agent-mcp/{session_id}/dashboard/dashboard.md` を削除
+2. `get_dashboard` を実行すると自動で再生成されます
+
+### MCP サーバーが起動しない
+
+**原因**: 依存パッケージのバージョン不整合の可能性があります。
+
+**対処法**:
+```bash
+# キャッシュクリア + 再インストール
+uv cache clean multi-agent-mcp
+uv tool install --force --from git+https://github.com/shiiman/multi-agent-mcp multi-agent-mcp
+```
+
 ## ライセンス
 
 MIT

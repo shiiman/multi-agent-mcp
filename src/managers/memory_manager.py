@@ -179,7 +179,7 @@ class MemoryManager:
 
             # YAML パース
             front_matter = yaml.safe_load(parts[1])
-            if not front_matter or "key" not in front_matter:
+            if not isinstance(front_matter, dict) or "key" not in front_matter:
                 return None
 
             # Markdown 本文
@@ -470,7 +470,7 @@ class MemoryManager:
         # 更新日時でソート（新しい順）
         entries.sort(key=lambda x: x.updated_at, reverse=True)
 
-        if limit:
+        if limit is not None:
             return entries[:limit]
         return entries
 

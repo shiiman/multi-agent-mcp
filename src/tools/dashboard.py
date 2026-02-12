@@ -564,6 +564,15 @@ def register_tools(mcp: FastMCP) -> None:
         if admin_notified and admin_ids:
             sync_agents_from_file(app_ctx)
             admin_agent = app_ctx.agents.get(admin_ids[0])
+            if admin_agent is None:
+                return {
+                    "success": False,
+                    "error": f"Admin エージェント {admin_ids[0]} が見つかりません",
+                    "task_id": task_id,
+                    "progress": actual_progress,
+                    "admin_notified": admin_notified,
+                    "notification_sent": False,
+                }
             notification_sent = await notify_agent_via_tmux(
                 app_ctx, admin_agent, "task_progress", caller_agent_id
             )

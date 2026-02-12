@@ -4,7 +4,10 @@ import logging
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.context import AppContext
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -46,12 +49,12 @@ def _owner_polling_blocked_response(waiting_admin_id: str | None) -> dict[str, A
     }
 
 
-def _mark_admin_waiting_for_ipc(app_ctx: Any, admin_id: str) -> None:
+def _mark_admin_waiting_for_ipc(app_ctx: "AppContext", admin_id: str) -> None:
     state = get_admin_poll_state(app_ctx, admin_id)
     state["waiting_for_ipc"] = True
 
 
-def _mark_admin_ipc_consumed(app_ctx: Any, admin_id: str) -> None:
+def _mark_admin_ipc_consumed(app_ctx: "AppContext", admin_id: str) -> None:
     state = get_admin_poll_state(app_ctx, admin_id)
     state["waiting_for_ipc"] = False
     state["allow_dashboard_until"] = datetime.now() + timedelta(
@@ -69,7 +72,7 @@ def _admin_polling_blocked_response(tool_name: str) -> dict[str, Any]:
 
 
 def _apply_admin_empty_polling_guard(
-    app_ctx: Any,
+    app_ctx: "AppContext",
     admin_id: str,
     *,
     should_guard: bool,
@@ -100,7 +103,7 @@ def _apply_admin_empty_polling_guard(
 
 
 def _auto_update_dashboard_from_messages(
-    app_ctx: Any, messages: list[Message]
+    app_ctx: "AppContext", messages: list[Message]
 ) -> tuple[bool, int, list[str]]:
     """Admin の read_messages 時に、タスク関連メッセージから Dashboard を自動更新する。"""
     task_messages = [
@@ -452,7 +455,7 @@ def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[di
 
 
 def _validate_admin_completion_gate(
-    app_ctx: Any, sender_id: str, receiver_id: str | None, msg_type: MessageType
+    app_ctx: "AppContext", sender_id: str, receiver_id: str | None, msg_type: MessageType
 ) -> tuple[bool, dict[str, Any]]:
     """Admin -> Owner の task_complete を品質ゲートで検証する。"""
     if msg_type != MessageType.TASK_COMPLETE or not receiver_id:

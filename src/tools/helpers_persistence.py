@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # sync_agents_from_file のキャッシュ TTL（秒）
-_SYNC_CACHE_TTL_SECONDS = 2.0
+_SYNC_CACHE_TTL_SECONDS = 5.0
 # scope（session/path）ごとの最終同期時刻を保持する
 _last_sync_times: dict[str, float] = {}
 
@@ -222,7 +222,7 @@ def load_agents_from_file(app_ctx: AppContext, agents_file: Path | None = None) 
 def sync_agents_from_file(app_ctx: AppContext, force: bool = False) -> int:
     """ファイルからエージェント情報をメモリに同期する。
 
-    キャッシュTTL（2秒）以内の再呼び出しはスキップする。
+    キャッシュTTL（5秒）以内の再呼び出しはスキップする。
     force=True で強制同期。
 
     Args:

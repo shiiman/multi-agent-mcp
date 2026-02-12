@@ -492,6 +492,64 @@ class Settings(BaseSettings):
         description="未定義モデル向け汎用単価（USD/1K tokens）",
     )
 
+    @field_validator("max_workers")
+    @classmethod
+    def validate_max_workers(cls, value: int) -> int:
+        """max_workers の範囲を検証する（1〜16）。"""
+        if not 1 <= value <= 16:
+            raise ValueError("MCP_MAX_WORKERS は 1〜16 の範囲で指定してください")
+        return value
+
+    @field_validator("healthcheck_interval_seconds")
+    @classmethod
+    def validate_healthcheck_interval(cls, value: int) -> int:
+        """healthcheck_interval_seconds の範囲を検証する（5〜3600）。"""
+        if not 5 <= value <= 3600:
+            raise ValueError("MCP_HEALTHCHECK_INTERVAL_SECONDS は 5〜3600 の範囲で指定してください")
+        return value
+
+    @field_validator("healthcheck_stall_timeout_seconds")
+    @classmethod
+    def validate_healthcheck_stall_timeout(cls, value: int) -> int:
+        """healthcheck_stall_timeout_seconds の範囲を検証する（60〜7200）。"""
+        if not 60 <= value <= 7200:
+            raise ValueError(
+                "MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS は 60〜7200 の範囲で指定してください"
+            )
+        return value
+
+    @field_validator("send_cooldown_seconds")
+    @classmethod
+    def validate_send_cooldown(cls, value: float) -> float:
+        """send_cooldown_seconds の範囲を検証する（0.0〜60.0）。"""
+        if not 0.0 <= value <= 60.0:
+            raise ValueError("MCP_SEND_COOLDOWN_SECONDS は 0.0〜60.0 の範囲で指定してください")
+        return value
+
+    @field_validator("cost_warning_threshold_usd")
+    @classmethod
+    def validate_cost_warning_threshold(cls, value: float) -> float:
+        """cost_warning_threshold_usd の範囲を検証する（0.0 超）。"""
+        if value <= 0.0:
+            raise ValueError("MCP_COST_WARNING_THRESHOLD_USD は正の値で指定してください")
+        return value
+
+    @field_validator("memory_max_entries")
+    @classmethod
+    def validate_memory_max_entries(cls, value: int) -> int:
+        """memory_max_entries の範囲を検証する（1〜100000）。"""
+        if not 1 <= value <= 100000:
+            raise ValueError("MCP_MEMORY_MAX_ENTRIES は 1〜100000 の範囲で指定してください")
+        return value
+
+    @field_validator("memory_ttl_days")
+    @classmethod
+    def validate_memory_ttl_days(cls, value: int) -> int:
+        """memory_ttl_days の範囲を検証する（1〜3650）。"""
+        if not 1 <= value <= 3650:
+            raise ValueError("MCP_MEMORY_TTL_DAYS は 1〜3650 の範囲で指定してください")
+        return value
+
     @field_validator("mcp_dir")
     @classmethod
     def validate_mcp_dir(cls, value: str) -> str:

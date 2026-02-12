@@ -40,7 +40,15 @@ class TemplateLoader:
             return self._cache[cache_key]
 
         ext = self._get_extension(category)
-        path = self._base_dir / category / f"{name}{ext}"
+        path = (self._base_dir / category / f"{name}{ext}").resolve()
+
+        # パストラバーサル防止: base_dir 配下であることを検証
+        try:
+            path.relative_to(self._base_dir.resolve())
+        except ValueError as e:
+            raise FileNotFoundError(
+                f"テンプレートディレクトリ外へのアクセスは許可されていません: {category}/{name}"
+            ) from e
 
         if not path.exists():
             raise FileNotFoundError(f"テンプレートが見つかりません: {path}")

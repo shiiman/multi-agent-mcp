@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -57,8 +59,31 @@ def save_agent_to_registry(
     }
     if session_id:
         data["session_id"] = session_id
-    with open(agent_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # アトミック書き込み: 共通ロックファイルで排他 → tempfile → os.replace
+    lock_file_path = registry_dir / f"{agent_id}.lock"
+    fd, tmp_path = tempfile.mkstemp(dir=str(registry_dir), suffix=".tmp")
+    try:
+        with open(lock_file_path, "a+", encoding="utf-8") as lock_fh:
+            try:
+                import fcntl
+
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            except ImportError:
+                pass  # 非 POSIX 環境ではロックなしで続行
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(agent_file))
+    except BaseException:
+        # 書き込み失敗時は一時ファイルを削除
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
     logger.debug(
         f"エージェントをレジストリに保存: {agent_id} -> {project_root} (session: {session_id})"
     )

@@ -507,8 +507,8 @@ class AiCliManager:
             stdout, _ = await proc.communicate()
             if proc.returncode == 0:
                 return "true" in stdout.decode().lower()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Ghostty 起動確認の AppleScript 判定に失敗: %s", e)
 
         # AppleScript 判定が失敗する環境向けフォールバック
         for process_name in ("Ghostty", "ghostty"):
@@ -523,7 +523,8 @@ class AiCliManager:
                 await proc.communicate()
                 if proc.returncode == 0:
                     return True
-            except Exception:
+            except Exception as e:
+                logger.debug("pgrep による Ghostty 検出に失敗 (%s): %s", process_name, e)
                 continue
         return False
 
@@ -573,7 +574,8 @@ class AiCliManager:
                 stderr.decode().strip() if stderr else "unknown",
             )
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug("Ghostty タブ追加の AppleScript 実行に失敗: %s", e)
             return False
 
     async def _open_in_iterm2(self, worktree_path: str, command: str) -> tuple[bool, str]:

@@ -75,7 +75,7 @@ async def test_healthcheck_daemon_auto_stops_on_idle(temp_dir, settings):
 
     daemon_task = app_ctx.healthcheck_daemon_task
     assert daemon_task is not None
-    await asyncio.wait_for(daemon_task, timeout=2.0)
+    await asyncio.wait_for(daemon_task, timeout=5.0)
 
     assert is_healthcheck_daemon_running(app_ctx) is False
 
@@ -106,7 +106,7 @@ async def test_healthcheck_daemon_notifies_on_auto_stop(temp_dir, settings):
         assert started is True
         daemon_task = app_ctx.healthcheck_daemon_task
         assert daemon_task is not None
-        await asyncio.wait_for(daemon_task, timeout=2.0)
+        await asyncio.wait_for(daemon_task, timeout=5.0)
 
     notify.assert_awaited_once()
     assert notify.await_args.kwargs["stop_reason"] == "auto_stop_idle"
@@ -129,7 +129,7 @@ async def test_healthcheck_daemon_notifies_on_auto_stop_check_failure(temp_dir, 
         assert started is True
         daemon_task = app_ctx.healthcheck_daemon_task
         assert daemon_task is not None
-        await asyncio.wait_for(daemon_task, timeout=2.0)
+        await asyncio.wait_for(daemon_task, timeout=5.0)
 
     notify.assert_awaited_once()
     assert notify.await_args.kwargs["stop_reason"] == "auto_stop_check_failed"

@@ -1,4 +1,10 @@
-"""Manager 初期化ヘルパー関数。"""
+"""Manager 初期化ヘルパー関数。
+
+設計メモ: __getattr__ による自動初期化を検討したが、AppContext が dataclass で
+全マネージャーフィールドに None デフォルト値を持つため __getattr__ はトリガーされない。
+sentinel 値パターンは既存の `is None` チェック・テスト・型アノテーションとの互換性を
+壊すため不採用。現行の ensure_*() 直接呼び出しパターンで十分。
+"""
 
 import logging
 import os

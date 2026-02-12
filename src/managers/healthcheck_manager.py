@@ -13,8 +13,11 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from src.context import AppContext
+    from src.managers.dashboard_manager import DashboardManager
     from src.managers.tmux_manager import TmuxManager
     from src.models.agent import Agent
+    from src.models.dashboard import TaskInfo
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +157,7 @@ class HealthcheckManager:
         return unchanged_for >= timedelta(seconds=self.stall_timeout_seconds)
 
     @staticmethod
-    def _task_activity_at(active_task: Any) -> datetime | None:
+    def _task_activity_at(active_task: "TaskInfo") -> datetime | None:
         """Task の最終活動時刻を取得する。"""
         metadata = getattr(active_task, "metadata", {}) or {}
         raw_last_update = metadata.get("last_in_progress_update_at")
@@ -181,7 +184,7 @@ class HealthcheckManager:
         self,
         agent_id: str,
         agent: "Agent",
-        active_task: Any,
+        active_task: "TaskInfo",
         now: datetime,
     ) -> bool:
         """in_progress タスクの長時間無通信を判定する。"""
@@ -284,11 +287,11 @@ class HealthcheckManager:
         )
 
     async def check_all_agents(self) -> list[HealthStatus]:
-        """全エージェントのヘルスチェックを行う。"""
-        statuses = []
-        for agent_id in self.agents:
-            statuses.append(await self.check_agent(agent_id))
-        return statuses
+        """全エージェントのヘルスチェックを並列で行う。"""
+        import asyncio
+
+        coros = [self.check_agent(agent_id) for agent_id in self.agents]
+        return list(await asyncio.gather(*coros))
 
     async def get_unhealthy_agents(self) -> list[HealthStatus]:
         """異常なエージェント一覧を取得する。"""
@@ -342,7 +345,9 @@ class HealthcheckManager:
             results.append((status.agent_id, success, message))
         return results
 
-    async def _run_full_recovery(self, app_ctx: Any, agent_id: str) -> dict[str, Any]:
+    async def _run_full_recovery(
+        self, app_ctx: "AppContext", agent_id: str
+    ) -> dict[str, Any]:
         """段階復旧の 2 段目として full_recovery を実行する。"""
         try:
             from src.tools.healthcheck import execute_full_recovery
@@ -385,7 +390,7 @@ class HealthcheckManager:
 
     def _notify_admins_task_failed(
         self,
-        app_ctx: Any,
+        app_ctx: "AppContext",
         agent_id: str,
         task_id: str,
         reason: str,
@@ -430,7 +435,7 @@ class HealthcheckManager:
 
     async def _finalize_failed_task(
         self,
-        app_ctx: Any,
+        app_ctx: "AppContext | None",
         agent_id: str,
         agent: "Agent",
         reason: str,
@@ -475,9 +480,9 @@ class HealthcheckManager:
         self,
         agent_id: str,
         agent: "Agent",
-        dashboard: Any | None,
-        app_ctx: Any | None,
-    ) -> tuple[Any, str | None]:
+        dashboard: "DashboardManager | None",
+        app_ctx: "AppContext | None",
+    ) -> tuple["TaskInfo | None", str | None]:
         """Dashboard からアクティブタスクを同期し、エージェント状態を補正する。
 
         Returns:
@@ -542,7 +547,7 @@ class HealthcheckManager:
         self,
         agent_id: str,
         agent: "Agent",
-        active_task: Any,
+        active_task: "TaskInfo | None",
         now: datetime,
     ) -> tuple[str | None, bool]:
         """Worker の異常原因を診断する。
@@ -604,7 +609,7 @@ class HealthcheckManager:
 
     def _save_agent_after_recovery(
         self,
-        app_ctx: Any | None,
+        app_ctx: "AppContext | None",
         agent: "Agent",
         label: str,
     ) -> None:
@@ -621,7 +626,7 @@ class HealthcheckManager:
 
     def _increment_recovery_counter(
         self,
-        app_ctx: Any | None,
+        app_ctx: "AppContext | None",
         agent_id: str,
         task_id: str | None,
         recovery_reason: str,
@@ -681,7 +686,7 @@ class HealthcheckManager:
 
     async def _attempt_staged_recovery(
         self,
-        app_ctx: Any | None,
+        app_ctx: "AppContext | None",
         agent_id: str,
         agent: "Agent",
         recovery_reason: str,
@@ -783,7 +788,9 @@ class HealthcheckManager:
             return {"status": "failed", "detail": escalation, "failed_task": failed}
         return {"status": "escalated", "detail": escalation}
 
-    async def monitor_and_recover_workers(self, app_ctx: Any | None = None) -> dict:
+    async def monitor_and_recover_workers(
+        self, app_ctx: "AppContext | None" = None
+    ) -> dict[str, Any]:
         """Worker の健全性を監視し、必要なら段階復旧する。"""
         from src.models.agent import AgentRole, AgentStatus
 

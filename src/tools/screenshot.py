@@ -169,6 +169,12 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"path traversal は許可されていません: {filename}",
             }
 
+        if file_path.is_symlink():
+            return {
+                "success": False,
+                "error": f"symlink 経由の参照は許可されていません: {filename}",
+            }
+
         if not file_path.exists():
             return {
                 "success": False,
