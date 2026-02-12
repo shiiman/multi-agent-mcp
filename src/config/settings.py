@@ -218,8 +218,8 @@ class Settings(BaseSettings):
     """git 前提機能を有効にするか（デフォルト: True）。
     False の場合、git/worktree/gtr 前提の機能は無効化される。"""
 
-    enable_worktree: bool = True
-    """git worktree を使用するか（デフォルト: True）。
+    enable_worktree: bool = False
+    """git worktree を使用するか（デフォルト: False）。
     False にすると Worker は全て同一ディレクトリで作業する。"""
 
     # エージェント設定

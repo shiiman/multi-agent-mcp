@@ -78,7 +78,7 @@ Multi-Agent MCP が保存・編集するファイルの一覧と、そのディ�
 
 ```env
 MCP_MAX_WORKERS=6
-MCP_ENABLE_WORKTREE=true
+MCP_ENABLE_WORKTREE=false
 MCP_COST_WARNING_THRESHOLD_USD=10.0
 ```
 

@@ -431,7 +431,7 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_MCP_DIR` | .multi-agent-mcp | MCP設定ディレクトリ名 |
 | `MCP_MAX_WORKERS` | 6 | Workerの最大数 |
 | `MCP_ENABLE_GIT` | true | git 前提機能を有効化するか（falseで非gitディレクトリ許可） |
-| `MCP_ENABLE_WORKTREE` | true | worktreeを使用するか（`MCP_ENABLE_GIT=false` の場合は無効） |
+| `MCP_ENABLE_WORKTREE` | false | worktreeを使用するか（`MCP_ENABLE_GIT=false` の場合は無効） |
 | `MCP_WINDOW_NAME_MAIN` | main | メインウィンドウ名（Admin + Worker 1-6） |
 | `MCP_WINDOW_NAME_WORKER_PREFIX` | workers- | 追加Workerウィンドウ名のプレフィックス |
 | `MCP_EXTRA_WORKER_ROWS` | 2 | 追加ウィンドウの行数 |

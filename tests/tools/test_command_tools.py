@@ -1121,6 +1121,7 @@ class TestSendTask:
         assert send_task is not None
 
         app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_worktree = True
         now = datetime.now()
         app_ctx.agents["owner-001"] = Agent(
             id="owner-001",

@@ -670,8 +670,11 @@ class TestMarkdownDashboard:
         assert loaded.status == TaskStatus.IN_PROGRESS
         assert loaded.status.value == "in_progress"
 
-    def test_task_worktree_is_rendered_as_relative_path(self, dashboard_manager, temp_dir):
+    def test_task_worktree_is_rendered_as_relative_path(
+        self, dashboard_manager, temp_dir, monkeypatch
+    ):
         """タスクの Worktree が workspace 相対パスで表示されることをテスト。"""
+        monkeypatch.setenv("MCP_ENABLE_WORKTREE", "true")
         dashboard = dashboard_manager.get_dashboard()
         dashboard.agents.append(
             AgentSummary(

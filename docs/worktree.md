@@ -245,7 +245,7 @@ branch refs/heads/feature-a
 | 変数 | デフォルト | 説明 |
 | ---- | ---------- | ---- |
 | `MCP_ENABLE_GIT` | true | git 前提機能を有効にするか（false で非gitディレクトリ対応） |
-| `MCP_ENABLE_WORKTREE` | true | Worktree を使用するか（`MCP_ENABLE_GIT=false` の場合は無効） |
+| `MCP_ENABLE_WORKTREE` | false | Worktree を使用するか（`MCP_ENABLE_GIT=false` の場合は無効） |
 
 ## トラブルシューティング
 

@@ -248,7 +248,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_MCP_DIR` | MCP working directory name | .multi-agent-mcp |
 | `MCP_MAX_WORKERS` | Maximum number of worker agents | 6 |
 | `MCP_ENABLE_GIT` | Enable git-dependent features (false allows non-git directories) | true |
-| `MCP_ENABLE_WORKTREE` | Enable git worktree for workers (`enable_git=false` forces disabled) | true |
+| `MCP_ENABLE_WORKTREE` | Enable git worktree for workers (`enable_git=false` forces disabled) | false |
 | `MCP_WINDOW_NAME_MAIN` | Main tmux window name (Admin + Worker 1-6) | main |
 | `MCP_WINDOW_NAME_WORKER_PREFIX` | Prefix for extra worker windows | workers- |
 | `MCP_EXTRA_WORKER_ROWS` | Rows in each extra worker window | 2 |
