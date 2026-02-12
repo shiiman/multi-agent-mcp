@@ -178,6 +178,10 @@ MCP_CLI_DEFAULT_CODEX_WORKER_MODEL={v(s.cli_default_codex_worker_model)}
 MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL={v(s.cli_default_gemini_admin_model)}
 MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL={v(s.cli_default_gemini_worker_model)}
 
+# Cursor CLI
+MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL={v(s.cli_default_cursor_admin_model)}
+MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL={v(s.cli_default_cursor_worker_model)}
+
 # ========== コスト設定 ==========
 # コスト警告の閾値（USD）
 MCP_COST_WARNING_THRESHOLD_USD={v(s.cost_warning_threshold_usd)}

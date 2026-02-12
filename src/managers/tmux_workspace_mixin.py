@@ -455,10 +455,22 @@ class TmuxWorkspaceMixin:
         confirm_codex_prompt: bool = False,
     ) -> bool:
         """ペイン送信後に必要なら Enter 再送で確定を保証する。"""
+        effective_confirm_codex = confirm_codex_prompt
+        if not effective_confirm_codex:
+            # Codex TUI 実行中の可能性がある場合のみ pane コマンドを取得して
+            # 自動判定する（毎回の tmux 呼び出しを抑制）。
+            try:
+                pane_command = await self.get_pane_current_command(session, window, pane)
+            except Exception:
+                pane_command = None
+            pane_command_normalized = (pane_command or "").strip().lower()
+            if pane_command_normalized.startswith("codex"):
+                effective_confirm_codex = True
+
         # Codex TUI はテキストバッファリングに時間がかかるため、
         # テキスト送信と Enter 送信の間に遅延を入れる。
         # これにより Enter が「空のEnter」として処理されてテキストが滞留する問題を防ぐ。
-        codex_delay = 150 if confirm_codex_prompt else 0
+        codex_delay = 150 if effective_confirm_codex else 0
         sent = await self.send_keys_to_pane(
             session=session,
             window=window,
@@ -468,7 +480,7 @@ class TmuxWorkspaceMixin:
             clear_input=clear_input,
             enter_delay_ms=codex_delay,
         )
-        if not sent or not confirm_codex_prompt:
+        if not sent or not effective_confirm_codex:
             return sent
 
         retries = max(0, int(getattr(self.settings, "codex_enter_retry_max", 3)))

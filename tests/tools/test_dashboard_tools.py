@@ -1827,3 +1827,5 @@ class TestCostTools:
         # コストサマリーは summary キー内に含まれる
         assert "summary" in result
         assert "estimated_cost_usd" in result["summary"]
+        assert "by_cli" in result["summary"]
+        assert result["summary"]["by_cli"]["cursor"] == 0

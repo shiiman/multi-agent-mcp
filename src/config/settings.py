@@ -52,6 +52,9 @@ class AICli(str, Enum):
     GEMINI = "gemini"
     """Google Gemini CLI"""
 
+    CURSOR = "cursor"
+    """Cursor CLI"""
+
 
 class TerminalApp(str, Enum):
     """サポートするターミナルアプリ。"""
@@ -121,6 +124,10 @@ class ModelDefaults:
     CODEX_DEFAULT = "gpt-5.3-codex"
     """Codex デフォルトモデル"""
 
+    # Cursor CLI
+    CURSOR_DEFAULT = "composer1.5"
+    """Cursor デフォルトモデル"""
+
     # Gemini CLI
     GEMINI_DEFAULT = "gemini-3-pro"
     """Gemini デフォルトモデル"""
@@ -133,6 +140,7 @@ class ModelDefaults:
         "claude": {"admin": OPUS, "worker": SONNET},
         "codex": {"admin": CODEX_DEFAULT, "worker": CODEX_DEFAULT},
         "gemini": {"admin": GEMINI_DEFAULT, "worker": GEMINI_LIGHT},
+        "cursor": {"admin": CURSOR_DEFAULT, "worker": CURSOR_DEFAULT},
     }
 
     # Claude 固有のモデル名（非 Claude CLI で使用された場合、CLI デフォルトに置換）
@@ -151,7 +159,7 @@ def resolve_model_for_cli(
     その CLI のデフォルトモデルへフォールバックする。
 
     Args:
-        cli: AI CLI 名（"claude", "codex", "gemini"）
+        cli: AI CLI 名（"claude", "codex", "gemini", "cursor"）
         model: 設定されたモデル名
         role: ロール（"admin" or "worker"）
         cli_defaults: CLI 別デフォルトモデルマッピング（Settings から構築）。
@@ -174,6 +182,13 @@ def resolve_model_for_cli(
             return "codex" in value or value.startswith("gpt-")
         if target_cli == "gemini":
             return value.startswith("gemini")
+        if target_cli == "cursor":
+            return (
+                "codex" in value
+                or "cursor" in value
+                or "composer" in value
+                or value.startswith("gpt-")
+            )
         return True
 
     if not _is_model_compatible(cli, model):
@@ -187,6 +202,7 @@ DEFAULT_AI_CLI_COMMANDS: dict[str, str] = {
     AICli.CLAUDE: "claude",
     AICli.CODEX: "codex",
     AICli.GEMINI: "gemini",
+    AICli.CURSOR: "agent",
 }
 
 
@@ -389,6 +405,18 @@ class Settings(BaseSettings):
     )
     """Gemini CLI で Worker に使用するデフォルトモデル"""
 
+    cli_default_cursor_admin_model: str = Field(
+        default=ModelDefaults.CURSOR_DEFAULT,
+        description="Cursor CLI の Admin デフォルトモデル",
+    )
+    """Cursor CLI で Admin に使用するデフォルトモデル"""
+
+    cli_default_cursor_worker_model: str = Field(
+        default=ModelDefaults.CURSOR_DEFAULT,
+        description="Cursor CLI の Worker デフォルトモデル",
+    )
+    """Cursor CLI で Worker に使用するデフォルトモデル"""
+
     worker_cli_mode: WorkerCliMode = Field(
         default=WorkerCliMode.UNIFORM,
         description="Worker CLI 設定モード（uniform/per-worker）",
@@ -484,7 +512,7 @@ class Settings(BaseSettings):
     model_cost_table_json: str = Field(
         default='{"claude:opus":0.03,"claude:sonnet":0.015,'
         '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro":0.005,'
-        '"gemini:gemini-3-flash":0.0025}',
+        '"gemini:gemini-3-flash":0.0025,"cursor:composer1.5":0.01}',
         description="モデル別 1K トークン単価テーブル（JSON）",
     )
     model_cost_default_per_1k: float = Field(
@@ -588,6 +616,10 @@ class Settings(BaseSettings):
             "gemini": {
                 "admin": self.cli_default_gemini_admin_model,
                 "worker": self.cli_default_gemini_worker_model,
+            },
+            "cursor": {
+                "admin": self.cli_default_cursor_admin_model,
+                "worker": self.cli_default_cursor_worker_model,
             },
         }
 

@@ -301,8 +301,10 @@ class TestHealthcheckMonitoring:
         assert summary["process_crash_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_attempt_staged_recovery_resume_pending_is_escalated(self, temp_dir, settings):
-        """full_recovery が再開待ちの場合は recovered ではなく escalated にする。"""
+    async def test_attempt_staged_recovery_resume_pending_auto_resend_success(
+        self, temp_dir, settings
+    ):
+        """full_recovery が再開待ちでも自動再送が成功すれば recovered にする。"""
         now = datetime.now()
         worker = Agent(
             id="worker-001",
@@ -330,6 +332,65 @@ class TestHealthcheckMonitoring:
                 "resume_required_task_ids": ["task-001"],
             }
         )
+        healthcheck._auto_resume_tasks_after_recovery = AsyncMock(
+            return_value={"success": True, "resumed": ["task-001"], "failed": []}
+        )
+
+        app_ctx = SimpleNamespace(agents={worker.id: worker})
+        result = await healthcheck._attempt_staged_recovery(
+            app_ctx=app_ctx,
+            agent_id=worker.id,
+            agent=worker,
+            recovery_reason="ai_process_dead",
+            force_recovery=False,
+            task_key=healthcheck._recovery_key(worker.id, worker.current_task),
+        )
+
+        assert result["status"] == "recovered"
+        assert result["detail"]["method"] == "full_recovery_auto_resume"
+        assert result["detail"]["resumed_tasks"] == "task-001"
+        assert healthcheck._recovery_failures == {}
+
+    @pytest.mark.asyncio
+    async def test_attempt_staged_recovery_resume_pending_auto_resend_failure(
+        self, temp_dir, settings
+    ):
+        """full_recovery 後の自動再送が失敗した場合は escalated にする。"""
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task="task-001",
+            created_at=now,
+            last_activity=now,
+        )
+        tmux = MagicMock()
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={worker.id: worker},
+            max_recovery_attempts=2,
+        )
+        healthcheck.attempt_recovery = AsyncMock(return_value=(False, "attempt failed"))
+        healthcheck._run_full_recovery = AsyncMock(
+            return_value={
+                "status": "resume_pending",
+                "message": "タスク再開待ちです",
+                "resume_required_task_ids": ["task-001"],
+            }
+        )
+        healthcheck._auto_resume_tasks_after_recovery = AsyncMock(
+            return_value={
+                "success": False,
+                "error": "dispatch failed",
+                "resumed": [],
+                "failed": [{"task_id": "task-001", "error": "dispatch failed"}],
+            }
+        )
 
         app_ctx = SimpleNamespace(agents={worker.id: worker})
         result = await healthcheck._attempt_staged_recovery(
@@ -343,9 +404,9 @@ class TestHealthcheckMonitoring:
 
         assert result["status"] == "escalated"
         assert result["detail"]["status"] == "resume_pending"
-        assert result["detail"]["method"] == "full_recovery"
         assert result["detail"]["resume_required_tasks"] == "task-001"
-        assert healthcheck._recovery_failures == {}
+        assert result["detail"]["auto_resume_failed_tasks"] == "task-001"
+        assert "dispatch failed" in result["detail"]["auto_resume_error"]
 
     @pytest.mark.asyncio
     async def test_monitor_recovers_in_progress_no_ipc_timeout(self, temp_dir, settings):

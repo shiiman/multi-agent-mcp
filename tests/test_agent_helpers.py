@@ -115,6 +115,24 @@ class TestResolveHelpers:
 
         assert _resolve_agent_cli_name(agent, app_ctx) == "codex"
 
+    def test_resolve_worker_cli_name_prefers_cursor_from_env(self, app_ctx, temp_dir):
+        """Worker CLI が cursor 設定でも正規化して返す。"""
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        (mcp_dir / ".env").write_text(
+            "MCP_MODEL_PROFILE_ACTIVE=standard\n"
+            "MCP_MODEL_PROFILE_STANDARD_CLI=cursor\n",
+            encoding="utf-8",
+        )
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.settings.enable_git = False
+        refresh_app_settings(app_ctx, str(temp_dir))
+
+        agent = _make_worker_agent()
+        agent.ai_cli = "AICli.CODEX"
+
+        assert _resolve_agent_cli_name(agent, app_ctx) == "cursor"
+
 
 class TestSanitizeBranchPart:
     """_sanitize_branch_part のテスト。"""

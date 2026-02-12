@@ -34,6 +34,19 @@ from src.tools.model_profile import get_current_profile_settings
 logger = logging.getLogger(__name__)
 
 
+def _coerce_ai_cli(value: AICli | str | None) -> AICli | None:
+    """AICli enum/文字列を AICli に正規化する。"""
+    if value is None:
+        return None
+    if isinstance(value, AICli):
+        return value
+
+    normalized = str(value).strip().lower()
+    if normalized.startswith("aicli."):
+        normalized = normalized.split(".", 1)[1]
+    return AICli(normalized)
+
+
 def register_lifecycle_tools(mcp: FastMCP) -> None:
     """エージェント管理ツールを登録する。"""
 
@@ -58,7 +71,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         Args:
             role: エージェントの役割（owner/admin/worker）
             working_dir: 作業ディレクトリのパス
-            ai_cli: 使用するAI CLI（claude/codex/gemini、省略でデフォルト）
+            ai_cli: 使用するAI CLI（claude/codex/gemini/cursor、省略でデフォルト）
             caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
@@ -497,19 +510,26 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 cli = app_ctx.settings.get_worker_cli(worker_no)
             except Exception as e:
                 logger.debug("Worker CLI の再解決に失敗したため agent.ai_cli を使用: %s", e)
-                fallback_cli = agent.ai_cli
-                if isinstance(fallback_cli, str):
-                    fallback_cli = AICli(fallback_cli)
+                try:
+                    fallback_cli = _coerce_ai_cli(agent.ai_cli)
+                except ValueError as cli_error:
+                    logger.debug(
+                        "agent.ai_cli の正規化に失敗したため default CLI を使用: %s",
+                        cli_error,
+                    )
+                    fallback_cli = None
                 cli = fallback_cli or ai_cli_manager.get_default_cli()
         else:
             # agent.ai_cli は use_enum_values=True により文字列になっている可能性がある
-            agent_cli = agent.ai_cli
-            if agent_cli is not None:
-                if isinstance(agent_cli, str):
-                    agent_cli = AICli(agent_cli)
-                cli = agent_cli
-            else:
-                cli = ai_cli_manager.get_default_cli()
+            try:
+                agent_cli = _coerce_ai_cli(agent.ai_cli)
+            except ValueError as cli_error:
+                logger.debug(
+                    "agent.ai_cli の正規化に失敗したため default CLI を使用: %s",
+                    cli_error,
+                )
+                agent_cli = None
+            cli = agent_cli or ai_cli_manager.get_default_cli()
         if not ai_cli_manager.is_available(cli):
             cli_command = ai_cli_manager.get_command(cli)
             return {

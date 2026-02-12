@@ -16,11 +16,13 @@ if TYPE_CHECKING:
 
 from mcp.server.fastmcp import Context, FastMCP
 
+from src.config.settings import AICli
 from src.config.workflow_guides import get_role_template_path
 from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus
 from src.tools.agent_helpers import (
     _create_worktree_for_worker,
+    _resolve_agent_cli_name,
     _send_task_to_worker,
     build_worker_task_branch,
     resolve_worker_number_from_slot,
@@ -92,6 +94,24 @@ def _audit_command_guard(
         "command": command,
     }
     logger.warning("command_guard=%s", payload)
+
+
+def _resolve_cli_name_for_dispatch(agent: Agent, app_ctx: AppContext) -> str:
+    """送信時に使用する CLI 名を正規化して解決する。"""
+    # Worker は agents.json 上の stale ai_cli より .env 設定を優先する。
+    if agent.role == AgentRole.WORKER:
+        return _resolve_agent_cli_name(agent, app_ctx)
+
+    if hasattr(agent.ai_cli, "value"):
+        return str(agent.ai_cli.value).lower()
+    if isinstance(agent.ai_cli, str):
+        raw = agent.ai_cli.strip().lower()
+    else:
+        raw = str(app_ctx.ai_cli.get_default_cli().value).lower()
+
+    if raw.startswith("aicli."):
+        raw = raw.split(".", 1)[1]
+    return raw
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -171,17 +191,13 @@ def register_tools(mcp: FastMCP) -> None:
                 target=agent_id,
             )
 
-        agent_cli_name = (
-            agent.ai_cli.value
-            if hasattr(agent.ai_cli, "value")
-            else str(agent.ai_cli or app_ctx.ai_cli.get_default_cli())
-        ).lower()
+        agent_cli_name = _resolve_cli_name_for_dispatch(agent, app_ctx)
         success = await tmux.send_with_rate_limit_to_pane(
             agent.session_name,
             agent.window_index,
             agent.pane_index,
             command,
-            confirm_codex_prompt=agent_cli_name == "codex",
+            confirm_codex_prompt=agent_cli_name == AICli.CODEX.value,
         )
 
         if success:
@@ -490,7 +506,8 @@ def register_tools(mcp: FastMCP) -> None:
             final_task_content,
         )
 
-        agent_cli = agent.ai_cli or app_ctx.ai_cli.get_default_cli()
+        agent_cli_name = _resolve_cli_name_for_dispatch(agent, app_ctx)
+        agent_cli = agent_cli_name
         agent_model = profile_settings.get("admin_model")
         thinking_tokens = profile_settings.get("admin_thinking_tokens", 4000)
         reasoning_effort = profile_settings.get("admin_reasoning_effort", "none")
@@ -523,7 +540,7 @@ def register_tools(mcp: FastMCP) -> None:
             agent.window_index,
             agent.pane_index,
             read_command,
-            confirm_codex_prompt=str(agent_cli).lower() == "codex",
+            confirm_codex_prompt=agent_cli_name == AICli.CODEX.value,
         )
         if success:
             agent.status = AgentStatus.BUSY
@@ -868,17 +885,13 @@ def register_tools(mcp: FastMCP) -> None:
             if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
                 continue
 
-            agent_cli_name = (
-                agent.ai_cli.value
-                if hasattr(agent.ai_cli, "value")
-                else str(agent.ai_cli or app_ctx.ai_cli.get_default_cli())
-            ).lower()
+            agent_cli_name = _resolve_cli_name_for_dispatch(agent, app_ctx)
             success = await tmux.send_with_rate_limit_to_pane(
                 agent.session_name,
                 agent.window_index,
                 agent.pane_index,
                 command,
-                confirm_codex_prompt=agent_cli_name == "codex",
+                confirm_codex_prompt=agent_cli_name == AICli.CODEX.value,
             )
             results[aid] = success
 

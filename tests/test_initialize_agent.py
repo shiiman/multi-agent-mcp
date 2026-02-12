@@ -249,6 +249,20 @@ class TestBuildCliArgsWithPrompt:
         assert "--prompt" in args
         assert "テストプロンプト" in args
 
+    def test_cursor_with_prompt_uses_interactive_mode(self, ai_cli_manager):
+        """Cursor CLI は print モードを使わず、プロンプトを位置引数で渡すことをテスト。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                "/usr/local/bin/agent" if command == "agent" else None
+            )
+            args = ai_cli_manager._build_cli_args(
+                AICli.CURSOR, "/tmp/test", "テストプロンプト"
+            )
+
+        assert args == ["agent", "--force", "テストプロンプト"]
+        assert "--print" not in args
+        assert "--prompt" not in args
+
     def test_claude_without_prompt(self, ai_cli_manager):
         """プロンプトなしの場合 --prompt オプションが含まれないことをテスト。"""
         args = ai_cli_manager._build_cli_args(AICli.CLAUDE, "/tmp/test", None)
@@ -264,6 +278,17 @@ class TestBuildCliArgsWithPrompt:
         """Gemini CLI でプロンプトなしでも --yolo フラグが含まれることをテスト。"""
         args = ai_cli_manager._build_cli_args(AICli.GEMINI, "/tmp/test", None)
         assert "--yolo" in args
+
+    def test_cursor_without_prompt_uses_plain_command(self, ai_cli_manager):
+        """Cursor CLI は prompt なしでも通常起動コマンドのみを返すことをテスト。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                "/usr/local/bin/agent" if command == "agent" else None
+            )
+            args = ai_cli_manager._build_cli_args(AICli.CURSOR, "/tmp/test", None)
+
+        assert args == ["agent", "--force"]
+        assert "--print" not in args
 
 
 class TestInitializeAgentIntegration:

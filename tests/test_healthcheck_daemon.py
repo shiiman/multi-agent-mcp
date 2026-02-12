@@ -122,7 +122,10 @@ async def test_healthcheck_daemon_notifies_on_auto_stop_check_failure(temp_dir, 
     app_ctx = _make_daemon_ctx(temp_dir, settings, {worker.id: worker})
 
     with (
-        patch("src.managers.healthcheck_daemon._should_auto_stop", side_effect=RuntimeError("boom")),
+        patch(
+            "src.managers.healthcheck_daemon._should_auto_stop",
+            side_effect=RuntimeError("boom"),
+        ),
         patch("src.managers.healthcheck_daemon._notify_daemon_stopped", new=AsyncMock()) as notify,
     ):
         started = await start_healthcheck_daemon(app_ctx)

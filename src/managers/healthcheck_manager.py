@@ -10,6 +10,7 @@ import logging
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -22,6 +23,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SHELL_COMMANDS = {"zsh", "bash", "sh", "fish"}
+_AI_RUNNING_COMMAND_PREFIXES = ("codex", "claude", "gemini", "agent", "cursor-agent")
+
+
+def _is_ai_running(pane_command: str) -> bool:
+    """pane_current_command が AI CLI 実行中かを判定する。
+
+    tmux の pane_current_command は ``codex-aarch64-a`` のように
+    アーキテクチャサフィックス付きの派生名を返すことがあるため、
+    前方一致で判定する。
+    """
+    normalized = pane_command.strip().lower()
+    return normalized.startswith(_AI_RUNNING_COMMAND_PREFIXES)
 
 
 @dataclass
@@ -583,9 +596,9 @@ class HealthcheckManager:
             and await self._is_in_progress_without_ipc(agent_id, agent, active_task, now)
         ):
             pane_command = (health.pane_current_command or "").strip().lower()
-            # Codex/Claude/Gemini が実行中でセッション健全な場合は
+            # AI CLI が実行中でセッション健全な場合は
             # no-IPC だけで強制復旧しない（長時間推論で誤検知しやすいため）。
-            if pane_command in {"codex", "claude", "gemini"}:
+            if _is_ai_running(pane_command):
                 logger.info(
                     "in_progress_no_ipc をスキップ: agent=%s pane=%s",
                     agent_id,
@@ -596,7 +609,7 @@ class HealthcheckManager:
 
         if await self._is_worker_stalled(agent_id, agent, now):
             pane_command = (health.pane_current_command or "").strip().lower()
-            if pane_command in {"codex", "claude", "gemini"}:
+            if _is_ai_running(pane_command):
                 logger.info(
                     "task_stalled をスキップ: agent=%s pane=%s（AI CLI 実行中）",
                     agent_id,
@@ -684,6 +697,181 @@ class HealthcheckManager:
         ) as e:
             logger.debug("復旧カウンタ更新に失敗: %s", e)
 
+    @staticmethod
+    def _resolve_resume_task_content(
+        app_ctx: "AppContext",
+        task: "TaskInfo",
+    ) -> tuple[str | None, str | None]:
+        """resume_pending 時に再送する task_content を解決する。
+
+        優先順位:
+        1. metadata.requested_description
+        2. task_file_path の実ファイル内容
+        3. description
+        4. title
+
+        Returns:
+            (task_content, error_message)
+        """
+        metadata = dict(getattr(task, "metadata", {}) or {})
+        requested = metadata.get("requested_description")
+        if isinstance(requested, str) and requested.strip():
+            return requested.strip(), None
+
+        task_file_path = getattr(task, "task_file_path", None)
+        if isinstance(task_file_path, str) and task_file_path.strip():
+            project_root = Path(str(app_ctx.project_root or ".")).resolve()
+            file_path = Path(task_file_path)
+            if not file_path.is_absolute():
+                file_path = project_root / file_path
+            file_path = file_path.resolve()
+            # project_root 配下のみ許可（パストラバーサル防止）
+            try:
+                file_path.relative_to(project_root)
+            except ValueError:
+                return None, f"task_file_path is outside project_root: {task_file_path}"
+            try:
+                text = file_path.read_text(encoding="utf-8").strip()
+                if text:
+                    return text, None
+            except OSError as e:
+                return None, f"task_file read failed: {e}"
+
+        description = str(getattr(task, "description", "") or "").strip()
+        if description:
+            return description, None
+
+        title = str(getattr(task, "title", "") or "").strip()
+        if title:
+            return title, None
+        return None, "task content is empty"
+
+    async def _auto_resume_tasks_after_recovery(
+        self,
+        app_ctx: "AppContext | None",
+        agent_id: str,
+        resume_task_ids: list[str],
+    ) -> dict[str, Any]:
+        """full_recovery 後に resume_pending タスクを自動再送する。"""
+        if app_ctx is None:
+            return {"success": False, "error": "app_ctx is None", "resumed": [], "failed": []}
+        if not resume_task_ids:
+            return {"success": True, "resumed": [], "failed": []}
+
+        session_id = str(app_ctx.session_id or "")
+        if not session_id:
+            return {
+                "success": False,
+                "error": "session_id is missing",
+                "resumed": [],
+                "failed": [],
+            }
+
+        agent = app_ctx.agents.get(agent_id)
+        if agent is None:
+            return {
+                "success": False,
+                "error": f"agent not found: {agent_id}",
+                "resumed": [],
+                "failed": [],
+            }
+
+        try:
+            from src.tools.agent_helpers import (
+                _send_task_to_worker,
+                resolve_worker_number_from_slot,
+            )
+            from src.tools.helpers_managers import ensure_dashboard_manager
+            from src.tools.model_profile import get_current_profile_settings
+        except ImportError as e:
+            return {"success": False, "error": str(e), "resumed": [], "failed": []}
+
+        dashboard = app_ctx.dashboard_manager or ensure_dashboard_manager(app_ctx)
+        profile_settings = get_current_profile_settings(app_ctx)
+        enable_worktree = bool(app_ctx.settings.is_worktree_enabled())
+
+        worker_no = 1
+        if agent.window_index is not None and agent.pane_index is not None:
+            try:
+                worker_no = resolve_worker_number_from_slot(
+                    app_ctx.settings,
+                    agent.window_index,
+                    agent.pane_index,
+                )
+            except (ValueError, TypeError):
+                worker_no = 1
+        worker_index = max(worker_no - 1, 0)
+
+        admin_ids = [
+            aid
+            for aid, a in app_ctx.agents.items()
+            if str(getattr(getattr(a, "role", ""), "value", getattr(a, "role", "")))
+            == "admin"
+        ]
+        caller_agent_id = admin_ids[0] if admin_ids else None
+
+        resumed: list[str] = []
+        failed: list[dict[str, str]] = []
+        for task_id in resume_task_ids:
+            task = dashboard.get_task(task_id)
+            if task is None:
+                failed.append({"task_id": task_id, "error": "task not found"})
+                continue
+
+            task_content, content_error = self._resolve_resume_task_content(app_ctx, task)
+            if task_content is None:
+                failed.append(
+                    {
+                        "task_id": task_id,
+                        "error": content_error or "task content unavailable",
+                    }
+                )
+                continue
+
+            branch = (
+                str(task.branch)
+                if getattr(task, "branch", None)
+                else str(getattr(agent, "branch", "") or "")
+            )
+            if not branch:
+                branch = f"worker-{worker_no}"
+
+            task_worktree = (
+                str(task.worktree_path)
+                if getattr(task, "worktree_path", None)
+                else str(agent.worktree_path or agent.working_dir or app_ctx.project_root or ".")
+            )
+
+            send_result = await _send_task_to_worker(
+                app_ctx,
+                agent,
+                task_content,
+                task_id,
+                branch,
+                task_worktree,
+                session_id,
+                worker_index,
+                enable_worktree,
+                profile_settings,
+                caller_agent_id,
+            )
+            if bool(send_result.get("task_sent")):
+                resumed.append(task_id)
+                continue
+
+            failed.append(
+                {
+                    "task_id": task_id,
+                    "error": str(send_result.get("dispatch_error") or "dispatch failed"),
+                }
+            )
+
+        return {
+            "success": len(failed) == 0,
+            "resumed": resumed,
+            "failed": failed,
+        }
+
     async def _attempt_staged_recovery(
         self,
         app_ctx: "AppContext | None",
@@ -746,13 +934,38 @@ class HealthcheckManager:
             }
 
         if full_status == "resume_pending":
-            # Worker 復旧自体は成功しているが、タスク再開確認までは完了扱いにしない。
+            # Worker 復旧自体は成功。再開対象タスクは healthcheck 側で自動再送を試みる。
             self._recovery_failures.pop(task_key, None)
             resume_ids = [
                 str(task_id)
                 for task_id in full_result.get("resume_required_task_ids", [])
                 if task_id
             ]
+            auto_resume = await self._auto_resume_tasks_after_recovery(
+                app_ctx,
+                agent_id,
+                resume_ids,
+            )
+            if auto_resume.get("success"):
+                return {
+                    "status": "recovered",
+                    "detail": {
+                        "agent_id": agent_id,
+                        "reason": recovery_reason,
+                        "method": "full_recovery_auto_resume",
+                        "resumed_tasks": ",".join(auto_resume.get("resumed", [])),
+                        "message": full_message,
+                    },
+                }
+
+            failed = auto_resume.get("failed", [])
+            failed_ids = ",".join(
+                [
+                    str(item.get("task_id"))
+                    for item in failed
+                    if isinstance(item, dict) and item.get("task_id")
+                ]
+            )
             return {
                 "status": "escalated",
                 "detail": {
@@ -761,6 +974,8 @@ class HealthcheckManager:
                     "method": "full_recovery",
                     "status": "resume_pending",
                     "resume_required_tasks": ",".join(resume_ids),
+                    "auto_resume_failed_tasks": failed_ids,
+                    "auto_resume_error": str(auto_resume.get("error", "")),
                     "message": full_message,
                 },
             }

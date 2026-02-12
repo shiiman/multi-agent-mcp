@@ -18,6 +18,8 @@ class DashboardCostMixin:
     _read_dashboard() と _write_dashboard() は DashboardManager で定義される。
     """
 
+    _SUPPORTED_COST_CLI_KEYS = ("claude", "codex", "gemini", "cursor")
+
     def record_api_call(
         self,
         ai_cli: str,
@@ -32,7 +34,7 @@ class DashboardCostMixin:
         """API呼び出しを記録する。
 
         Args:
-            ai_cli: 使用したAI CLI（claude/codex/gemini）
+            ai_cli: 使用したAI CLI（claude/codex/gemini/cursor）
             model: 使用モデル
             estimated_tokens: 推定トークン数（Noneでデフォルト値）
             agent_id: エージェントID（オプション）
@@ -112,7 +114,7 @@ class DashboardCostMixin:
 
     def _count_calls_by_cli(self, calls: list[ApiCallRecord]) -> dict[str, int]:
         """CLI 別の呼び出し回数をカウントする。"""
-        counts: dict[str, int] = {}
+        counts: dict[str, int] = {cli: 0 for cli in self._SUPPORTED_COST_CLI_KEYS}
         for call in calls:
             cli = call.ai_cli.lower()
             counts[cli] = counts.get(cli, 0) + 1
@@ -165,6 +167,7 @@ class DashboardCostMixin:
             "claude_calls": cli_counts.get("claude", 0),
             "codex_calls": cli_counts.get("codex", 0),
             "gemini_calls": cli_counts.get("gemini", 0),
+            "cursor_calls": cli_counts.get("cursor", 0),
         }
 
     def get_cost_summary(self) -> dict:
@@ -190,6 +193,7 @@ class DashboardCostMixin:
                 "claude": cli_counts.get("claude", 0),
                 "codex": cli_counts.get("codex", 0),
                 "gemini": cli_counts.get("gemini", 0),
+                "cursor": cli_counts.get("cursor", 0),
             },
         }
 
@@ -283,7 +287,9 @@ class DashboardCostMixin:
 
         by_agent_estimated_non_actual: dict[str, float] = {}
         by_task: dict[str, float] = {}
-        by_cli: dict[str, dict] = {}
+        by_cli: dict[str, dict] = {
+            cli: {"calls": 0, "tokens": 0, "cost": 0.0} for cli in self._SUPPORTED_COST_CLI_KEYS
+        }
         by_model: dict[str, dict] = {}
 
         for call in dashboard.cost.calls:
@@ -305,11 +311,10 @@ class DashboardCostMixin:
 
             # CLI別
             cli = call.ai_cli.lower()
-            if cli not in by_cli:
-                by_cli[cli] = {"calls": 0, "tokens": 0, "cost": 0.0}
-            by_cli[cli]["calls"] += 1
-            by_cli[cli]["tokens"] += call.tokens
-            by_cli[cli]["cost"] += call_cost
+            cli_stats = by_cli.setdefault(cli, {"calls": 0, "tokens": 0, "cost": 0.0})
+            cli_stats["calls"] += 1
+            cli_stats["tokens"] += call.tokens
+            cli_stats["cost"] += call_cost
 
             model_key = call.model or "unknown"
             if model_key not in by_model:

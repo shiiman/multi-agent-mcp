@@ -369,6 +369,7 @@ Worker 2: src/utils-b.ts を編集 ✅
 | Claude Code | `claude` | デフォルト |
 | OpenAI Codex | `codex` | `ai_cli="codex"` で指定 |
 | Google Gemini | `gemini` | `ai_cli="gemini"` で指定 |
+| Cursor | `cursor` | `ai_cli="cursor"` で指定 |
 
 #### No Git モードで使わないツール
 

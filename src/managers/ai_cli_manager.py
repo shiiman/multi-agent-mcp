@@ -1,6 +1,6 @@
 """AI CLI管理マネージャー。
 
-複数のAI CLIツール（Claude Code, Codex, Gemini）を管理する。
+複数のAI CLIツール（Claude Code, Codex, Gemini, Cursor）を管理する。
 """
 
 import asyncio
@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 class AiCliManager:
     """複数のAI CLIツールを管理するマネージャー。"""
 
+    _CURSOR_FALLBACK_COMMAND = "cursor-agent"
+
     def __init__(self, settings: "Settings") -> None:
         """AiCliManagerを初期化する。
 
@@ -36,12 +38,41 @@ class AiCliManager:
     def _detect_available_clis(self) -> None:
         """利用可能なAI CLIを検出する。"""
         for cli in AICli:
-            cmd = self._cli_commands.get(cli, cli.value)
-            self._available_clis[cli] = shutil.which(cmd) is not None
-            if self._available_clis[cli]:
-                logger.info(f"AI CLI '{cli.value}' が利用可能です")
+            cmd, is_available = self._resolve_cli_command(cli)
+            self._available_clis[cli] = is_available
+            if is_available:
+                logger.info(f"AI CLI '{cli.value}' が利用可能です (command: {cmd})")
             else:
                 logger.debug(f"AI CLI '{cli.value}' は見つかりませんでした")
+
+    def _resolve_cli_command(self, cli: AICli) -> tuple[str, bool]:
+        """実行に利用する CLI コマンドを解決する。
+
+        Args:
+            cli: AI CLI
+
+        Returns:
+            (解決されたコマンド, 利用可能かどうか)
+        """
+        configured = self._cli_commands.get(cli, cli.value)
+
+        if cli != AICli.CURSOR:
+            return configured, shutil.which(configured) is not None
+
+        # Cursor は agent を第一候補にし、未検出時のみ cursor-agent にフォールバック。
+        if shutil.which(configured) is not None:
+            return configured, True
+
+        fallback = self._CURSOR_FALLBACK_COMMAND
+        if configured != fallback and shutil.which(fallback) is not None:
+            return fallback, True
+
+        return configured, False
+
+    def _get_runtime_command(self, cli: AICli) -> str:
+        """起動時に実行するコマンド文字列を取得する。"""
+        command, _ = self._resolve_cli_command(cli)
+        return command
 
     def is_available(self, cli: AICli | str) -> bool:
         """指定のAI CLIが利用可能か確認する。
@@ -88,7 +119,8 @@ class AiCliManager:
         """
         self._cli_commands[cli] = command
         # 利用可能性を再検出
-        self._available_clis[cli] = shutil.which(command) is not None
+        _, is_available = self._resolve_cli_command(cli)
+        self._available_clis[cli] = is_available
 
     def get_default_cli(self) -> AICli:
         """デフォルトのAI CLIを取得する。
@@ -136,13 +168,15 @@ class AiCliManager:
         # 文字列が渡された場合は enum に変換
         if isinstance(cli, str):
             cli = AICli(cli)
-        cmd = self.get_command(cli)
+        cmd = self._get_runtime_command(cli)
 
         # Settings から CLI 別デフォルトモデルを構築
         cli_defaults = self.settings.get_cli_default_models()
 
         # CLI に応じてモデル名を解決
         resolved_model = resolve_model_for_cli(cli.value, model, role, cli_defaults)
+        if cli == AICli.CURSOR and model is None:
+            resolved_model = None
 
         effort = (reasoning_effort or "none").lower()
         valid_efforts = {"low", "medium", "high", "xhigh", "none"}
@@ -208,7 +242,7 @@ class AiCliManager:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
-        else:  # AICli.GEMINI
+        elif cli == AICli.GEMINI:
             # export MCP_PROJECT_ROOT=... && cd <path> &&
             # gemini --model <model> --yolo --prompt "<instruction>"
             parts = [cmd]
@@ -221,6 +255,23 @@ class AiCliManager:
                 )
             parts.append("--yolo")
             parts.extend(["--prompt", quoted_prompt])
+            command = " ".join(parts)
+            if working_dir:
+                return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
+            return f"{env_prefix}{command}"
+
+        else:  # AICli.CURSOR
+            # Cursor は print モードを使わず、通常起動で対話継続できる形にする。
+            parts = [cmd]
+            if resolved_model:
+                parts.extend(["--model", resolved_model])
+            if effort != "none":
+                logger.warning(
+                    "Cursor CLI では reasoning_effort=%s は未対応のため無視します",
+                    effort,
+                )
+            parts.append("--force")
+            parts.append(quoted_prompt)
             command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
@@ -242,7 +293,7 @@ class AiCliManager:
         Returns:
             コマンドライン引数のリスト
         """
-        cmd = self.get_command(cli)
+        cmd = self._get_runtime_command(cli)
         args = [cmd]
 
         if cli == AICli.CLAUDE:
@@ -259,6 +310,11 @@ class AiCliManager:
             args.append("--yolo")
             if prompt:
                 args.extend(["--prompt", prompt])
+        elif cli == AICli.CURSOR:
+            # Cursor は print モードを使わず、通常起動でプロンプトを位置引数に渡す。
+            args.append("--force")
+            if prompt:
+                args.append(prompt)
 
         return args
 

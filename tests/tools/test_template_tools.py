@@ -5,11 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests.conftest import get_tool_fn
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.tmux_manager import TmuxManager
 from src.models.agent import Agent, AgentRole, AgentStatus
+from tests.conftest import get_tool_fn
 
 
 @pytest.fixture
