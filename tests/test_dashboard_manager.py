@@ -640,6 +640,37 @@ class TestMarkdownDashboard:
         md_content = dashboard_manager.generate_markdown_dashboard()
         assert "`claude1`" in md_content
 
+    def test_save_markdown_dashboard_uses_cursor_worker_name(self, dashboard_manager):
+        """cursor worker の表示名が CLI + 番号になることをテスト。"""
+        session_dir = dashboard_manager.dashboard_dir.parent
+        agents_file = session_dir / "agents.json"
+        agents_file.write_text(
+            json.dumps(
+                {
+                    "worker-b": {
+                        "id": "worker-b",
+                        "role": "worker",
+                        "status": "idle",
+                        "current_task": None,
+                        "worktree_path": None,
+                        "window_index": 0,
+                        "pane_index": 2,
+                        "ai_cli": "cursor",
+                        "last_activity": datetime.now().isoformat(),
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        project_root = session_dir / "project"
+        project_root.mkdir(exist_ok=True)
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+
+        md_content = dashboard_manager.generate_markdown_dashboard()
+        assert "`cursor2`" in md_content
+
     def test_markdown_dashboard_with_completed_task(self, dashboard_manager, temp_dir):
         """完了タスクを含むMarkdownダッシュボードをテスト。"""
         project_root = temp_dir / "project"
@@ -1033,18 +1064,21 @@ class TestDashboardCost:
         assert estimate["total_api_calls"] == 1
         assert estimate["estimated_tokens"] == 1000
         assert estimate["claude_calls"] == 1
+        assert estimate["cursor_calls"] == 0
 
     def test_record_multiple_cli_calls(self, dashboard_manager):
         """複数 CLI の呼び出しが正しくカウントされることをテスト。"""
         dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=500)
         dashboard_manager.record_api_call(ai_cli="codex", estimated_tokens=300)
         dashboard_manager.record_api_call(ai_cli="gemini", estimated_tokens=200)
+        dashboard_manager.record_api_call(ai_cli="cursor", estimated_tokens=100)
         estimate = dashboard_manager.get_cost_estimate()
-        assert estimate["total_api_calls"] == 3
-        assert estimate["estimated_tokens"] == 1000
+        assert estimate["total_api_calls"] == 4
+        assert estimate["estimated_tokens"] == 1100
         assert estimate["claude_calls"] == 1
         assert estimate["codex_calls"] == 1
         assert estimate["gemini_calls"] == 1
+        assert estimate["cursor_calls"] == 1
 
     def test_cost_summary_with_warning(self, dashboard_manager):
         """閾値超過時に警告メッセージが含まれることをテスト。"""
@@ -1053,6 +1087,7 @@ class TestDashboardCost:
         summary = dashboard_manager.get_cost_summary()
         assert summary["warning_message"] is not None
         assert "警告" in summary["warning_message"]
+        assert "cursor" in summary["by_cli"]
 
     def test_check_cost_warning_below_threshold(self, dashboard_manager):
         """閾値未満で None を返すことをテスト。"""

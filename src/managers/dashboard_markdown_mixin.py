@@ -128,7 +128,7 @@ class DashboardMarkdownMixin:
     ) -> str:
         """Worker の表示名を作成する（cli + index）。"""
         cli_prefix = fallback.lower()
-        if cli_prefix not in ("claude", "codex", "gemini"):
+        if cli_prefix not in ("claude", "codex", "gemini", "cursor"):
             cli_prefix = "worker"
         worker_index = self._resolve_worker_index(window_index, pane_index)
         if worker_index is not None:

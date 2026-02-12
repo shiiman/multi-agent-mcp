@@ -12,6 +12,7 @@ from src.config.settings import (
     get_mcp_dir,
     get_project_env_file,
     load_settings_for_project,
+    resolve_model_for_cli,
 )
 from src.tools.session import generate_env_template
 
@@ -124,11 +125,15 @@ class TestGenerateEnvTemplate:
         assert "MCP_CLI_DEFAULT_CODEX_WORKER_MODEL" in template
         assert "MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL" in template
+        assert "MCP_CLI_DEFAULT_CURSOR_COMMAND" in template
+        assert "MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL" in template
+        assert "MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL" in template
         assert ModelDefaults.OPUS in template
         assert ModelDefaults.SONNET in template
         assert ModelDefaults.CODEX_DEFAULT in template
         assert ModelDefaults.GEMINI_DEFAULT in template
         assert ModelDefaults.GEMINI_LIGHT in template
+        assert ModelDefaults.CURSOR_DEFAULT in template
 
     def test_template_contains_thinking_tokens(self):
         """テンプレートにプロファイル別 Thinking Tokens 設定が含まれることをテスト。"""
@@ -255,6 +260,41 @@ class TestWorkerCliAndModelResolution:
         settings.worker_cli_2 = "gemini"
         assert settings.get_worker_cli(1) == AICli.CLAUDE
         assert settings.get_worker_cli(2) == AICli.GEMINI
+
+    def test_get_worker_cli_uniform_cursor(self):
+        settings = load_settings_for_project(None)
+        settings.worker_cli_mode = WorkerCliMode.UNIFORM
+        settings.model_profile_active = "standard"
+        settings.model_profile_standard_cli = AICli.CURSOR
+        assert settings.get_worker_cli(1) == AICli.CURSOR
+        assert settings.get_worker_cli(16) == AICli.CURSOR
+
+    def test_get_cli_default_models_contains_cursor(self):
+        settings = load_settings_for_project(None)
+        cli_defaults = settings.get_cli_default_models()
+        assert cli_defaults["cursor"]["admin"] == settings.cli_default_cursor_admin_model
+        assert cli_defaults["cursor"]["worker"] == settings.cli_default_cursor_worker_model
+
+    def test_resolve_model_for_cursor_fallback(self):
+        result = resolve_model_for_cli("cursor", "opus", "worker")
+        assert result == ModelDefaults.CURSOR_DEFAULT
+
+    def test_resolve_model_for_cli_cursor_none_returns_default(self):
+        """cursor で model=None の場合 CLI デフォルトを返すことをテスト。"""
+        result = resolve_model_for_cli("cursor", None, "worker")
+        assert result == ModelDefaults.CURSOR_DEFAULT
+        result_admin = resolve_model_for_cli("cursor", None, "admin")
+        assert result_admin == ModelDefaults.CURSOR_DEFAULT
+
+    def test_get_worker_cli_per_worker_cursor(self):
+        """per-worker モードで cursor を指定した Worker が正しく解決されることをテスト。"""
+        settings = load_settings_for_project(None)
+        settings.worker_cli_mode = WorkerCliMode.PER_WORKER
+        settings.model_profile_active = "standard"
+        settings.model_profile_standard_cli = AICli.CLAUDE
+        settings.worker_cli_3 = "cursor"
+        assert settings.get_worker_cli(1) == AICli.CLAUDE
+        assert settings.get_worker_cli(3) == AICli.CURSOR
 
     def test_get_worker_model_depends_on_worker_model_mode(self):
         settings = load_settings_for_project(None)

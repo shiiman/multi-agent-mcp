@@ -37,6 +37,16 @@ logger = logging.getLogger(__name__)
 _SHELL_COMMANDS = {"zsh", "bash", "sh", "fish"}
 
 
+def _normalize_cli_name(cli: AICli | str | None) -> str:
+    """CLI 名を正規化して返す。"""
+    if hasattr(cli, "value"):
+        cli = str(cli.value)
+    raw = str(cli or "").strip().lower()
+    if raw.startswith("aicli."):
+        raw = raw.split(".", 1)[1]
+    return raw
+
+
 def _get_next_worker_slot(
     agents: dict[str, Agent],
     settings: Settings,
@@ -129,8 +139,8 @@ def _resolve_agent_cli_name(agent: Agent, app_ctx: AppContext) -> str:
             logger.debug("Worker CLI の再解決に失敗したため agent.ai_cli を使用: %s", e)
 
     if agent.ai_cli:
-        return agent.ai_cli.value if hasattr(agent.ai_cli, "value") else str(agent.ai_cli)
-    return str(app_ctx.ai_cli.get_default_cli().value)
+        return _normalize_cli_name(agent.ai_cli)
+    return _normalize_cli_name(app_ctx.ai_cli.get_default_cli())
 
 
 def _resolve_agent_enable_git(

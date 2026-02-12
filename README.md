@@ -1,10 +1,11 @@
 # Multi-Agent MCP
 
-Claude Code + tmux + git worktree（または非gitディレクトリ）を使用したマルチエージェントワークフローの MCP サーバー。
+AI CLI（Claude Code / Codex / Gemini / Cursor）+ tmux + git worktree
+（または非gitディレクトリ）を使用したマルチエージェントワークフローの MCP サーバー。
 
 ## 概要
 
-このMCPサーバーは、複数のClaude Codeインスタンスを tmux セッションで管理し、並列作業を実現します。
+このMCPサーバーは、複数のAI CLIインスタンスを tmux セッションで管理し、並列作業を実現します。
 `MCP_ENABLE_GIT=false` を設定すると、git 管理されていないディレクトリでも実行できます。
 
 ### Gitモード
@@ -22,6 +23,15 @@ Claude Code + tmux + git worktree（または非gitディレクトリ）を使�
 - **Owner** (1体): 全体指揮、タスク分解、Issue作成
 - **Admin** (1体): Worker管理、進捗管理、ダッシュボード更新
 - **Worker** (標準6体 / 最大16体): 割り当てられたタスクの実行
+
+### 対応 AI CLI 一覧
+
+| CLI | 識別子 | 備考 |
+|------|------|------|
+| Claude Code | `claude` | デフォルト構成で利用可能 |
+| Codex | `codex` | デフォルト構成で利用可能 |
+| Gemini | `gemini` | デフォルト構成で利用可能 |
+| Cursor | `cursor` | 既定コマンドは `agent` |
 
 ## 必要条件
 
@@ -470,6 +480,9 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.3-codex | Codex CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro | Gemini CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash | Gemini CLIのWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_CURSOR_COMMAND` | agent | Cursor CLIのデフォルトコマンド |
+| `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer1.5 | Cursor CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer1.5 | Cursor CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
 | `MCP_WORKER_CLI_1..16` | (empty) | per-workerモードでのWorker別CLI設定（未設定時はアクティブプロファイルCLIを利用） |
 | `MCP_WORKER_MODEL_MODE` | uniform | Workerモデル設定モード（uniform/per-worker） |

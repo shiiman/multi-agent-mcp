@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.config.settings import Settings
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.gtrconfig_manager import GtrconfigManager

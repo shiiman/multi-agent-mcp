@@ -983,6 +983,58 @@ class TestCodexPromptConfirmation:
         ]
         manager._send_enter_key.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_send_and_confirm_auto_enables_codex_confirmation_from_pane_command(self):
+        """confirm フラグが false でも pane が codex なら復帰処理を有効化する。"""
+        manager = self._DummyTmux()
+        manager.send_keys_to_pane = AsyncMock(side_effect=[True, True])
+        manager.get_pane_current_command = AsyncMock(return_value="codex-aarch64-a")
+        manager.capture_pane_by_index = AsyncMock(
+            side_effect=[
+                "processed\n›\ntab to queue message\n",
+                "processed\n›\n",
+            ]
+        )
+        manager._send_enter_key = AsyncMock(return_value=True)
+        manager._run = AsyncMock(return_value=(0, "", ""))
+
+        with patch("src.managers.tmux_workspace_mixin.asyncio.sleep", new=AsyncMock()):
+            success = await manager.send_and_confirm_to_pane(
+                session="main",
+                window=0,
+                pane=1,
+                command="[IPC] 新しいメッセージ",
+                confirm_codex_prompt=False,
+            )
+
+        assert success is True
+        manager.get_pane_current_command.assert_awaited_once_with("main", 0, 1)
+        assert manager.send_keys_to_pane.await_count == 2
+        manager._run.assert_awaited_once_with("send-keys", "-t", "main:0.1", "Escape")
+
+    @pytest.mark.asyncio
+    async def test_send_and_confirm_keeps_non_codex_without_confirmation(self):
+        """pane が codex 以外なら confirm フラグ false のまま追加確認しない。"""
+        manager = self._DummyTmux()
+        manager.send_keys_to_pane = AsyncMock(return_value=True)
+        manager.get_pane_current_command = AsyncMock(return_value="zsh")
+        manager.capture_pane_by_index = AsyncMock(return_value="")
+        manager._send_enter_key = AsyncMock(return_value=True)
+        manager._run = AsyncMock(return_value=(0, "", ""))
+
+        success = await manager.send_and_confirm_to_pane(
+            session="main",
+            window=0,
+            pane=1,
+            command="echo test",
+            confirm_codex_prompt=False,
+        )
+
+        assert success is True
+        manager.get_pane_current_command.assert_awaited_once_with("main", 0, 1)
+        manager.capture_pane_by_index.assert_not_awaited()
+        manager._run.assert_not_awaited()
+
 
 class TestTmuxRateLimit:
     """TmuxWorkspaceMixin のレート制御送信テスト。"""

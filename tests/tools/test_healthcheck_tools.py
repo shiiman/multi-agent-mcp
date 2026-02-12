@@ -9,7 +9,7 @@ import pytest
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
-from src.managers.healthcheck_manager import HealthcheckManager
+from src.managers.healthcheck_manager import HealthcheckManager, HealthStatus
 from src.managers.ipc_manager import IPCManager
 from src.managers.memory_manager import MemoryManager
 from src.managers.persona_manager import PersonaManager
@@ -593,3 +593,115 @@ class TestFullRecovery:
         assert result["new_worktree_path"] is None
         assert "worktree 操作に失敗しました" in result["error"]
         assert worker.id in app_ctx.agents
+
+
+class TestHealthcheckAiCliCommands:
+    """HealthcheckManager の AI CLI 判定テスト。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("pane_command", ["agent", "cursor-agent"])
+    async def test_diagnose_worker_issue_skips_in_progress_recovery_for_cursor_commands(
+        self, healthcheck_mock_ctx, git_repo, pane_command
+    ):
+        """Cursor 系コマンド実行中は no-IPC 起因の強制復旧を行わない。"""
+        from src.models.dashboard import TaskStatus
+
+        app_ctx = healthcheck_mock_ctx.request_context.lifespan_context
+        healthcheck = app_ctx.healthcheck_manager
+        now = datetime.now()
+
+        worker = Agent(
+            id=f"worker-cursor-inprogress-{pane_command}",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents[worker.id] = worker
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="cursor in progress",
+            description="healthcheck",
+            assigned_agent_id=worker.id,
+        )
+        app_ctx.dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=10)
+        active_task = app_ctx.dashboard_manager.get_task(task.id)
+        assert active_task is not None
+        worker.current_task = task.id
+
+        healthcheck.check_agent = AsyncMock(
+            return_value=HealthStatus(
+                agent_id=worker.id,
+                is_healthy=True,
+                tmux_session_alive=True,
+                pane_current_command=pane_command,
+            )
+        )
+        healthcheck._is_in_progress_without_ipc = AsyncMock(return_value=True)
+        healthcheck._is_worker_stalled = AsyncMock(return_value=False)
+
+        recovery_reason, force_recovery = await healthcheck._diagnose_worker_issue(
+            worker.id, worker, active_task, now
+        )
+
+        assert recovery_reason is None
+        assert force_recovery is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("pane_command", ["agent", "cursor-agent"])
+    async def test_diagnose_worker_issue_skips_stalled_recovery_for_cursor_commands(
+        self, healthcheck_mock_ctx, git_repo, pane_command
+    ):
+        """Cursor 系コマンド実行中は stalled 起因の強制復旧を行わない。"""
+        from src.models.dashboard import TaskStatus
+
+        app_ctx = healthcheck_mock_ctx.request_context.lifespan_context
+        healthcheck = app_ctx.healthcheck_manager
+        now = datetime.now()
+
+        worker = Agent(
+            id=f"worker-cursor-stalled-{pane_command}",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents[worker.id] = worker
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="cursor stalled",
+            description="healthcheck",
+            assigned_agent_id=worker.id,
+        )
+        app_ctx.dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS, progress=10)
+        active_task = app_ctx.dashboard_manager.get_task(task.id)
+        assert active_task is not None
+        worker.current_task = task.id
+
+        healthcheck.check_agent = AsyncMock(
+            return_value=HealthStatus(
+                agent_id=worker.id,
+                is_healthy=True,
+                tmux_session_alive=True,
+                pane_current_command=pane_command,
+            )
+        )
+        healthcheck._is_in_progress_without_ipc = AsyncMock(return_value=False)
+        healthcheck._is_worker_stalled = AsyncMock(return_value=True)
+
+        recovery_reason, force_recovery = await healthcheck._diagnose_worker_issue(
+            worker.id, worker, active_task, now
+        )
+
+        assert recovery_reason is None
+        assert force_recovery is False

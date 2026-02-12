@@ -32,6 +32,9 @@ class TestAiCliManager:
         cmd = ai_cli_manager.get_command(AICli.GEMINI)
         assert cmd == "gemini"
 
+        cmd = ai_cli_manager.get_command(AICli.CURSOR)
+        assert cmd == "agent"
+
     def test_set_command(self, ai_cli_manager):
         """CLIコマンドを設定できることをテスト。"""
         ai_cli_manager.set_command(AICli.CLAUDE, "/custom/path/claude")
@@ -48,7 +51,7 @@ class TestAiCliManager:
     def test_get_all_cli_info(self, ai_cli_manager):
         """全CLI情報を取得できることをテスト。"""
         all_info = ai_cli_manager.get_all_cli_info()
-        assert len(all_info) == 3  # claude, codex, gemini
+        assert len(all_info) == 4  # claude, codex, gemini, cursor
 
     def test_refresh_availability(self, ai_cli_manager):
         """利用可能性を再検出できることをテスト。"""
@@ -57,6 +60,18 @@ class TestAiCliManager:
         # 全CLIについて結果があること
         for cli in AICli:
             assert cli in result
+
+    def test_refresh_availability_cursor_fallback(self, ai_cli_manager):
+        """Cursor は agent 未検出時に cursor-agent へフォールバックできることをテスト。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                None
+                if command == "agent"
+                else "/usr/local/bin/cursor-agent" if command == "cursor-agent" else None
+            )
+            result = ai_cli_manager.refresh_availability()
+
+        assert result[AICli.CURSOR] is True
 
 
 class TestBuildStdinCommand:
@@ -109,6 +124,43 @@ class TestBuildStdinCommand:
         assert "/path/to/worktree" in cmd
         assert "/tmp/task.md" in cmd
         assert "< /tmp/task.md" not in cmd
+
+    def test_build_stdin_command_cursor(self, ai_cli_manager):
+        """Cursor は print モードを使わず通常起動コマンドを構築することをテスト。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                "/usr/local/bin/agent" if command == "agent" else None
+            )
+            cmd = ai_cli_manager.build_stdin_command(
+                AICli.CURSOR, "/tmp/task.md", "/path/to/worktree"
+            )
+
+        assert "agent " in cmd
+        assert "cursor-agent" not in cmd
+        assert "--model" not in cmd
+        assert "--prompt" not in cmd
+        assert "--print" not in cmd
+        assert "--force" in cmd
+        assert "/tmp/task.md" in cmd
+
+    def test_build_stdin_command_cursor_with_model_and_fallback(self, ai_cli_manager):
+        """Cursor は model 指定時のみ --model を付与し、必要ならコマンドをフォールバックする。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                None
+                if command == "agent"
+                else "/usr/local/bin/cursor-agent" if command == "cursor-agent" else None
+            )
+            cmd = ai_cli_manager.build_stdin_command(
+                AICli.CURSOR, "/tmp/task.md", "/path/to/worktree",
+                model="opus",
+            )
+
+        assert "cursor-agent " in cmd
+        assert "--model" in cmd
+        assert ModelDefaults.CURSOR_DEFAULT in cmd
+        assert "--force" in cmd
+        assert "--print" not in cmd
 
     def test_build_stdin_command_claude_without_worktree(self, ai_cli_manager):
         """worktree なしで Claude Code コマンドが構築されることをテスト。"""
@@ -652,3 +704,31 @@ class TestAiCliManagerTerminal:
                 "--dangerously-skip-permissions",
                 "prompt with spaces",
             ]
+
+    @pytest.mark.asyncio
+    async def test_open_worktree_in_terminal_cursor_uses_fallback_command(self, ai_cli_manager):
+        """Cursor 起動時に agent 未検出なら cursor-agent を使用することをテスト。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                None
+                if command == "agent"
+                else "/usr/local/bin/cursor-agent" if command == "cursor-agent" else None
+            )
+            ai_cli_manager.refresh_availability()
+
+            with patch.object(
+                ai_cli_manager, "_open_in_ghostty", new_callable=AsyncMock
+            ) as mock_open:
+                mock_open.return_value = (True, "success")
+
+                success, _ = await ai_cli_manager.open_worktree_in_terminal(
+                    "/tmp/test",
+                    AICli.CURSOR,
+                    prompt="cursor prompt",
+                    terminal=TerminalApp.GHOSTTY,
+                )
+
+        assert success is True
+        called_workdir, called_args = mock_open.call_args.args
+        assert called_workdir == "/tmp/test"
+        assert called_args == ["cursor-agent", "--force", "cursor prompt"]

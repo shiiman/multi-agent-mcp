@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.config.settings import AICli
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
@@ -148,6 +149,115 @@ class TestSendCommand:
         assert result["success"] is True
         assert result["command"] == "ls -la"
         assert "送信しました" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_send_command_uses_confirm_when_default_cli_is_codex_enum(
+        self, command_mock_ctx, git_repo
+    ):
+        """agent.ai_cli 未設定でも default が codex なら confirm を有効化する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_command":
+                send_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        app_ctx.ai_cli.get_default_cli = MagicMock(return_value=AICli.CODEX)
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            ai_cli=None,
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_command(
+            agent_id="admin-001",
+            command="ls -la",
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        _, send_kwargs = app_ctx.tmux.send_with_rate_limit_to_pane.await_args
+        assert send_kwargs["confirm_codex_prompt"] is True
+
+    @pytest.mark.asyncio
+    async def test_send_command_keeps_cursor_without_codex_confirm(
+        self, command_mock_ctx, git_repo
+    ):
+        """cursor は codex confirm の対象外で送信されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_command":
+                send_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            ai_cli=AICli.CURSOR,
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_command(
+            agent_id="worker-001",
+            command="ls -la",
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        _, send_kwargs = app_ctx.tmux.send_with_rate_limit_to_pane.await_args
+        assert send_kwargs["confirm_codex_prompt"] is False
 
     @pytest.mark.asyncio
     async def test_send_command_to_nonexistent_agent_fails(
@@ -1043,6 +1153,78 @@ class TestSendTask:
         assert result["success"] is True
         assert "codex --model gpt-5.3-codex" in result["command_sent"]
         assert "codex exec" not in result["command_sent"]
+        _, send_kwargs = app_ctx.tmux.send_with_rate_limit_to_pane.await_args
+        assert send_kwargs["confirm_codex_prompt"] is True
+
+    @pytest.mark.asyncio
+    async def test_send_task_cursor_command_keeps_confirm_codex_prompt_false(
+        self, command_mock_ctx, git_repo
+    ):
+        """cursor 送信時は codex 専用 confirm を有効化しない。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_task = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_task":
+                send_task = tool.fn
+                break
+
+        assert send_task is not None
+
+        mcp_dir = git_repo / ".multi-agent-mcp"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        env_file = mcp_dir / ".env"
+        env_file.write_text(
+            "MCP_MODEL_PROFILE_STANDARD_CLI=cursor\n"
+            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=composer1.5\n",
+            encoding="utf-8",
+        )
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            ai_cli=AICli.CURSOR,
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_task(
+            agent_id="admin-001",
+            task_content="test task",
+            session_id="issue-cursor-001",
+            auto_enhance=False,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert "agent --model composer1.5" in result["command_sent"]
+        assert "--force" in result["command_sent"]
+        _, send_kwargs = app_ctx.tmux.send_with_rate_limit_to_pane.await_args
+        assert send_kwargs["confirm_codex_prompt"] is False
 
     @pytest.mark.asyncio
     async def test_send_task_auto_enhance_does_not_embed_role_guide(
@@ -1792,3 +1974,55 @@ class TestSendTask:
         assert result["success"] is True
         assert app_ctx.session_id == "issue-preserved"
         assert "/.multi-agent-mcp/issue-preserved/tasks/" in result["task_file"]
+
+
+class TestBuildStdinCommandCursor:
+    """build_stdin_command の Cursor CLI テスト。"""
+
+    def test_build_stdin_command_cursor_without_worktree(self, command_test_ctx):
+        """worktree なしで Cursor コマンドが構築されることをテスト。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                "/usr/local/bin/agent" if command == "agent" else None
+            )
+            cmd = command_test_ctx.ai_cli.build_stdin_command(
+                AICli.CURSOR, "/tmp/task.md"
+            )
+
+        assert "agent " in cmd
+        assert "--print" not in cmd
+        # worktree なしの場合は cd も含まれない
+        assert "cd" not in cmd
+        assert "/tmp/task.md" in cmd
+
+    def test_build_stdin_command_cursor_reasoning_effort(self, command_test_ctx):
+        """Cursor では reasoning_effort を渡しても CLI オプションに含めないことをテスト。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                "/usr/local/bin/agent" if command == "agent" else None
+            )
+            cmd = command_test_ctx.ai_cli.build_stdin_command(
+                AICli.CURSOR,
+                "/tmp/task.md",
+                "/path/to/worktree",
+                reasoning_effort="high",
+            )
+
+        assert "--effort" not in cmd
+        assert "--reasoning-effort" not in cmd
+        assert "reasoning.effort" not in cmd
+
+    def test_build_stdin_command_cursor_thinking_tokens(self, command_test_ctx):
+        """Cursor では MAX_THINKING_TOKENS が設定されないことをテスト。"""
+        with patch("src.managers.ai_cli_manager.shutil.which") as mock_which:
+            mock_which.side_effect = lambda command: (
+                "/usr/local/bin/agent" if command == "agent" else None
+            )
+            cmd = command_test_ctx.ai_cli.build_stdin_command(
+                AICli.CURSOR,
+                "/tmp/task.md",
+                "/path/to/worktree",
+                thinking_tokens=4000,
+            )
+
+        assert "MAX_THINKING_TOKENS" not in cmd
