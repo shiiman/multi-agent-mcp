@@ -495,9 +495,9 @@ class Settings(BaseSettings):
     @field_validator("max_workers")
     @classmethod
     def validate_max_workers(cls, value: int) -> int:
-        """max_workers の範囲を検証する（1〜100）。"""
-        if not 1 <= value <= 100:
-            raise ValueError("MCP_MAX_WORKERS は 1〜100 の範囲で指定してください")
+        """max_workers の範囲を検証する（1〜16）。"""
+        if not 1 <= value <= 16:
+            raise ValueError("MCP_MAX_WORKERS は 1〜16 の範囲で指定してください")
         return value
 
     @field_validator("healthcheck_interval_seconds")
