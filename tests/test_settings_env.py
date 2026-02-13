@@ -151,6 +151,10 @@ class TestGenerateEnvTemplate:
         template = generate_env_template()
         assert "MCP_COST_WARNING_THRESHOLD_USD" in template
         assert "MCP_MODEL_COST_TABLE_JSON" in template
+        assert "gemini:gemini-3-pro-preview" in template
+        assert "gemini:gemini-3-flash-preview" in template
+        assert "gemini:gemini-3-pro" in template
+        assert "gemini:gemini-3-flash" in template
         assert "MCP_MODEL_COST_DEFAULT_PER_1K" in template
         assert "MCP_COST_PER_1K_TOKENS_" not in template
 

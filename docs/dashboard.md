@@ -282,10 +282,13 @@ cost:
 | `claude:opus` | 0.03 |
 | `claude:sonnet` | 0.015 |
 | `codex:gpt-5.3-codex` | 0.01 |
-| `gemini:gemini-3-pro` | 0.005 |
-| `gemini:gemini-3-flash` | 0.0025 |
+| `gemini:gemini-3-pro-preview` | 0.012 |
+| `gemini:gemini-3-flash-preview` | 0.003 |
+| `gemini:gemini-3-pro` (legacy) | 0.005 |
+| `gemini:gemini-3-flash` (legacy) | 0.0025 |
 
 未定義モデルは `MCP_MODEL_COST_DEFAULT_PER_1K`（デフォルト 0.01）を使用します。
+後方互換のため legacy キーも同じテーブルに併存させています。
 
 ### コスト警告
 

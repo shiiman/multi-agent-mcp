@@ -129,10 +129,10 @@ class ModelDefaults:
     """Cursor デフォルトモデル"""
 
     # Gemini CLI
-    GEMINI_DEFAULT = "gemini-3-pro"
+    GEMINI_DEFAULT = "gemini-3-pro-preview"
     """Gemini デフォルトモデル"""
 
-    GEMINI_LIGHT = "gemini-3-flash"
+    GEMINI_LIGHT = "gemini-3-flash-preview"
     """Gemini 軽量モデル"""
 
     # CLI 別デフォルトモデルマッピング
@@ -511,8 +511,10 @@ class Settings(BaseSettings):
 
     model_cost_table_json: str = Field(
         default='{"claude:opus":0.03,"claude:sonnet":0.015,'
-        '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro":0.005,'
-        '"gemini:gemini-3-flash":0.0025,"cursor:composer1.5":0.01}',
+        '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro-preview":0.012,'
+        '"gemini:gemini-3-flash-preview":0.003,'
+        '"gemini:gemini-3-pro":0.005,"gemini:gemini-3-flash":0.0025,'
+        '"cursor:composer1.5":0.01}',
         description="モデル別 1K トークン単価テーブル（JSON）",
     )
     model_cost_default_per_1k: float = Field(

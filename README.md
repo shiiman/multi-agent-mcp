@@ -478,8 +478,8 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | sonnet | Claude CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.3-codex | Codex CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.3-codex | Codex CLIのWorkerデフォルトモデル |
-| `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro | Gemini CLIのAdminデフォルトモデル |
-| `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash | Gemini CLIのWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro-preview | Gemini CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash-preview | Gemini CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer1.5 | Cursor CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer1.5 | Cursor CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
@@ -492,6 +492,9 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリの最大エントリ数 |
 | `MCP_MEMORY_TTL_DAYS` | 90 | メモリエントリの保持期間（日） |
 | `MCP_SCREENSHOT_EXTENSIONS` | [".png",".jpg",...] | スクリーンショットとして認識する拡張子 |
+
+`MCP_MODEL_COST_TABLE_JSON` のデフォルトでは `gemini-3-pro-preview` / `gemini-3-flash-preview`
+を使用し、後方互換のため `gemini-3-pro` / `gemini-3-flash` キーも併記しています。
 
 ## ディレクトリ構造
 
