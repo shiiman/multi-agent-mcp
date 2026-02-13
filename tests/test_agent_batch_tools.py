@@ -1,5 +1,4 @@
 """agent_batch_tools のユニットテスト。"""
-
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,6 +8,7 @@ from src.config.settings import AICli
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.agent_batch_tools import (
     MAX_IMAGE_TASK_PARALLEL,
+    _pre_assign_pane_slots,
     _reuse_single_worker,
     _setup_worker_tmux_pane,
     _validate_batch_capacity,
@@ -80,6 +80,52 @@ class TestValidateBatchCapacity:
         )
         assert error is not None
         assert "上限を超えます" in error["error"]
+
+
+class TestPreAssignPaneSlots:
+    """_pre_assign_pane_slots のテスト。"""
+
+    def test_assigns_extra_window_slots_when_main_is_full(self):
+        """メインウィンドウが埋まっている場合は追加ウィンドウへ割り当てる。"""
+        agents = {}
+        for pane in range(1, 7):
+            agents[f"w-{pane}"] = _make_worker_agent(
+                agent_id=f"w-{pane}",
+                status=AgentStatus.BUSY,
+                pane_index=pane,
+            )
+
+        settings = MagicMock()
+        settings.workers_per_extra_window = 10
+        slots = _pre_assign_pane_slots(
+            agents=agents,
+            settings=settings,
+            project_name="test",
+            create_count=2,
+            profile_max_workers=16,
+        )
+        assert slots == [(1, 0), (1, 1)]
+
+    def test_returns_none_when_profile_limit_is_fully_used(self):
+        """プロファイル上限まで使用済みなら None を返す。"""
+        agents = {}
+        for pane in range(1, 7):
+            agents[f"w-{pane}"] = _make_worker_agent(
+                agent_id=f"w-{pane}",
+                status=AgentStatus.BUSY,
+                pane_index=pane,
+            )
+
+        settings = MagicMock()
+        settings.workers_per_extra_window = 10
+        slots = _pre_assign_pane_slots(
+            agents=agents,
+            settings=settings,
+            project_name="test",
+            create_count=1,
+            profile_max_workers=6,
+        )
+        assert slots == [None]
 
 
 class TestWorkerBranchNaming:

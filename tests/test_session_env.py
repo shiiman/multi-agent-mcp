@@ -122,6 +122,32 @@ class TestSetupMcpDirectories:
         assert result["env_created"] is False
         assert env_file.read_text() == "EXISTING=true"
 
+    def test_removes_legacy_worker_model_mode_keys_from_existing_env(self, temp_dir, settings):
+        """既存 .env から廃止済み Worker モデルモードキーを削除する。"""
+        mcp_dir = temp_dir / settings.mcp_dir
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+        env_file = mcp_dir / ".env"
+        env_file.write_text(
+            "\n".join(
+                [
+                    "EXISTING=true",
+                    "MCP_WORKER_MODEL_MODE=uniform",
+                    "MCP_WORKER_MODEL_UNIFORM=",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch("src.tools.session_env.resolve_main_repo_root", return_value=str(temp_dir)):
+            result = _setup_mcp_directories(str(temp_dir), settings=settings)
+
+        assert result["env_created"] is False
+        content = env_file.read_text(encoding="utf-8")
+        assert "EXISTING=true" in content
+        assert "MCP_WORKER_MODEL_MODE" not in content
+        assert "MCP_WORKER_MODEL_UNIFORM" not in content
+
     def test_updates_existing_config_json(self, temp_dir, settings):
         """既存の config.json の mcp_tool_prefix を更新する。"""
         mcp_dir = temp_dir / settings.mcp_dir

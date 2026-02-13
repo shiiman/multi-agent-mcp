@@ -101,15 +101,18 @@ def _get_next_worker_slot(
         if (0, pane_index) not in used_slots:
             return (0, pane_index)
 
-    # 追加ウィンドウの空きを探す
+    # 追加ウィンドウの空きを探す。
+    # total_workers に依存した探索だと、空きがあっても上位スロットを見逃すため、
+    # Worker 番号（1..max_workers）基準で候補を総当たりする。
     panes_per_extra = settings.workers_per_extra_window
-    extra_worker_index = 0
-    while total_workers + extra_worker_index < effective_max_workers:
-        window_index = 1 + (extra_worker_index // panes_per_extra)
-        pane_index = extra_worker_index % panes_per_extra
+    for worker_no in range(1, effective_max_workers + 1):
+        if worker_no <= len(MAIN_WINDOW_WORKER_PANES):
+            continue
+        extra_index = worker_no - len(MAIN_WINDOW_WORKER_PANES) - 1
+        window_index = 1 + (extra_index // panes_per_extra)
+        pane_index = extra_index % panes_per_extra
         if (window_index, pane_index) not in used_slots:
             return (window_index, pane_index)
-        extra_worker_index += 1
 
     return None
 

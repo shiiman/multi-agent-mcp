@@ -72,6 +72,22 @@ def set_env_value(env_file: Path, key: str, value: str) -> None:
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def remove_env_keys(env_file: Path, keys: list[str]) -> bool:
+    """`.env` から指定キーを削除する。"""
+    if not env_file.exists():
+        return False
+
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    key_prefixes = tuple(f"{key}=" for key in keys)
+    filtered = [line for line in lines if not line.strip().startswith(key_prefixes)]
+
+    if filtered == lines:
+        return False
+
+    env_file.write_text("\n".join(filtered) + "\n", encoding="utf-8")
+    return True
+
+
 def generate_env_template(settings: Settings | None = None) -> str:
     """設定可能な変数とデフォルト値を含む .env テンプレートを生成する。
 
@@ -136,10 +152,6 @@ MCP_MODEL_PROFILE_ACTIVE={v(s.model_profile_active)}
 
 # uniform: 全 Worker 同じCLI / per-worker: Worker 1..16 を個別設定
 MCP_WORKER_CLI_MODE={v(s.worker_cli_mode)}
-
-# uniform: 全 Worker 同じモデル / per-worker: Worker 1..16 を個別設定
-MCP_WORKER_MODEL_MODE={v(s.worker_model_mode)}
-MCP_WORKER_MODEL_UNIFORM={v(s.worker_model_uniform or "")}
 
 # standard プロファイル設定（バランス重視）
 MCP_MODEL_PROFILE_STANDARD_CLI={v(s.model_profile_standard_cli)}
@@ -308,6 +320,13 @@ def _setup_mcp_directories(
         env_file.write_text(generate_env_template(settings=settings))
         env_created = True
         logger.info(f".env テンプレートを作成しました: {env_file}")
+    else:
+        removed = remove_env_keys(
+            env_file,
+            keys=["MCP_WORKER_MODEL_MODE", "MCP_WORKER_MODEL_UNIFORM"],
+        )
+        if removed:
+            logger.info("旧 Worker モデルモード設定を .env から削除しました: %s", env_file)
 
     # config.json 作成（mcp_tool_prefix, session_id を保存、MCP インスタンス間で共有）
     # 注意: project_root はグローバルレジストリ (~/.multi-agent-mcp/agents/) で管理

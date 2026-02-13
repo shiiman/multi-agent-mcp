@@ -167,3 +167,45 @@ class TestGetModelProfile:
         assert result["success"] is True
         assert result["active_profile"] == "standard"
         assert result["persistence_policy"]["canonical_store"] == ".multi-agent-mcp/.env"
+        assert result["worker_model"]["policy"] == (
+            "profile-default, per-worker override when worker_cli_mode=per-worker"
+        )
+        assert "mode" not in result["worker_model"]
+        assert "uniform" not in result["worker_model"]
+
+
+class TestGetModelProfileSettings:
+    """get_model_profile_settings ツールのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_get_model_profile_settings_uses_worker_model_policy(
+        self, mock_mcp_context, temp_dir
+    ):
+        """worker_model は mode/uniform ではなく policy を返す。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.model_profile import register_tools
+
+        app_ctx = mock_mcp_context.request_context.lifespan_context
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.settings.enable_git = False
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+        get_model_profile_settings = next(
+            tool.fn
+            for tool in mcp._tool_manager._tools.values()
+            if tool.name == "get_model_profile_settings"
+        )
+
+        result = await get_model_profile_settings(
+            caller_agent_id="agent-001",
+            ctx=mock_mcp_context,
+        )
+
+        assert result["success"] is True
+        assert result["worker_model"]["policy"] == (
+            "profile-default, per-worker override when worker_cli_mode=per-worker"
+        )
+        assert "mode" not in result["worker_model"]
+        assert "uniform" not in result["worker_model"]

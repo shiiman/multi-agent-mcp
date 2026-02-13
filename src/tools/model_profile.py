@@ -110,8 +110,10 @@ def register_tools(mcp: FastMCP) -> None:
                 "uniform": settings.get_active_profile_cli().value,
             },
             "worker_model": {
-                "mode": settings.worker_model_mode.value,
-                "uniform": settings.worker_model_uniform,
+                "policy": (
+                    "profile-default, per-worker override when "
+                    "worker_cli_mode=per-worker"
+                ),
             },
             "available_profiles": [p.value for p in ModelProfile],
         }
@@ -251,8 +253,10 @@ def register_tools(mcp: FastMCP) -> None:
                     "uniform": settings.get_active_profile_cli().value,
                 },
                 "worker_model": {
-                    "mode": settings.worker_model_mode.value,
-                    "uniform": settings.worker_model_uniform,
+                    "policy": (
+                        "profile-default, per-worker override when "
+                        "worker_cli_mode=per-worker"
+                    ),
                 },
                 "profiles": all_profiles,
             }

@@ -102,13 +102,6 @@ class WorkerCliMode(str, Enum):
     PER_WORKER = "per-worker"
 
 
-class WorkerModelMode(str, Enum):
-    """Worker モデル設定モード。"""
-
-    UNIFORM = "uniform"
-    PER_WORKER = "per-worker"
-
-
 # モデル定数（重複を避けるため一元管理）
 class ModelDefaults:
     """デフォルトモデル名の定数。"""
@@ -434,14 +427,6 @@ class Settings(BaseSettings):
     worker_cli_15: str | None = Field(default=None, description="Worker 15 の CLI")
     worker_cli_16: str | None = Field(default=None, description="Worker 16 の CLI")
 
-    worker_model_mode: WorkerModelMode = Field(
-        default=WorkerModelMode.UNIFORM,
-        description="Worker モデル設定モード（uniform/per-worker）",
-    )
-    worker_model_uniform: str | None = Field(
-        default=None,
-        description="uniform モード時の Worker モデル（未設定なら profile の worker_model）",
-    )
     worker_model_1: str | None = Field(default=None, description="Worker 1 のモデル")
     worker_model_2: str | None = Field(default=None, description="Worker 2 のモデル")
     worker_model_3: str | None = Field(default=None, description="Worker 3 のモデル")
@@ -664,10 +649,14 @@ class Settings(BaseSettings):
 
     def get_worker_model(self, worker_index: int, profile_worker_model: str) -> str:
         """Worker index(1..16) に対するモデルを取得する。"""
-        if self.worker_model_mode == WorkerModelMode.UNIFORM:
-            return self.worker_model_uniform or profile_worker_model
         if not (1 <= worker_index <= 16):
             raise ValueError(f"worker_index は 1..16 で指定してください: {worker_index}")
+
+        # worker_cli_mode=uniform では profile 設定を固定値として使用する。
+        if self.worker_cli_mode == WorkerCliMode.UNIFORM:
+            return profile_worker_model
+
+        # worker_cli_mode=per-worker では worker_model_n があれば優先する。
         per_worker = getattr(self, f"worker_model_{worker_index}")
         return per_worker or profile_worker_model
 

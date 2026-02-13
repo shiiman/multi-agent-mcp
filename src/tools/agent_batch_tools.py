@@ -121,10 +121,25 @@ async def _assign_and_dispatch_task(
 
 def _pre_assign_pane_slots(
     agents: dict[str, Agent],
+    settings: "Settings",
     project_name: str,
     create_count: int,
+    profile_max_workers: int,
 ) -> list[tuple[int, int] | None]:
     """新規 Worker 用の pane スロットを事前割り当てする。"""
+
+    def _slot_for_worker_number(worker_no: int) -> tuple[int, int]:
+        """Worker 番号（1始まり）から tmux slot を逆変換する。"""
+        main_worker_count = len(MAIN_WINDOW_WORKER_PANES)
+        if worker_no <= main_worker_count:
+            return (0, MAIN_WINDOW_WORKER_PANES[worker_no - 1])
+
+        extra_index = worker_no - main_worker_count - 1
+        panes_per_extra = settings.workers_per_extra_window
+        window_index = 1 + (extra_index // panes_per_extra)
+        pane_index = extra_index % panes_per_extra
+        return (window_index, pane_index)
+
     used_slots: set[tuple[int, int]] = set()
     for agent in agents.values():
         if (
@@ -139,9 +154,10 @@ def _pre_assign_pane_slots(
     pre_assigned: list[tuple[int, int] | None] = []
     for i in range(create_count):
         slot = None
-        for pane_index in MAIN_WINDOW_WORKER_PANES:
-            if (0, pane_index) not in used_slots:
-                slot = (0, pane_index)
+        for worker_no in range(1, profile_max_workers + 1):
+            candidate = _slot_for_worker_number(worker_no)
+            if candidate not in used_slots:
+                slot = candidate
                 used_slots.add(slot)
                 break
         if slot is None:
@@ -169,12 +185,6 @@ async def _setup_worker_tmux_pane(
 ) -> tuple[Agent | None, dict[str, Any] | None]:
     """tmux セッション確保とエージェントオブジェクトを作成する。"""
     tmux = app_ctx.tmux
-    if not await tmux.create_main_session(repo_path):
-        return None, {
-            "success": False,
-            "error": f"Worker {worker_index + 1}: メインセッション作成失敗",
-            "worker_index": worker_index,
-        }
 
     if preferred_cli:
         from src.config.settings import AICli
@@ -189,22 +199,38 @@ async def _setup_worker_tmux_pane(
     else:
         worker_cli = settings.get_worker_cli(worker_no)
 
-    if window_index > 0:
-        ok = await tmux.add_extra_worker_window(
-            project_name=project_name,
-            window_index=window_index,
-            rows=settings.extra_worker_rows,
-            cols=settings.extra_worker_cols,
-        )
-        if not ok:
+    # batch では複数 Worker を並列作成するため、tmux レイアウト操作は排他する。
+    # （create_main_session の再採番と add_extra_worker_window が競合すると失敗しうる）
+    lock = getattr(app_ctx, "_worker_tmux_setup_lock", None)
+    if not isinstance(lock, asyncio.Lock):
+        lock = asyncio.Lock()
+        app_ctx._worker_tmux_setup_lock = lock
+
+    async with lock:
+        if not await tmux.create_main_session(repo_path):
             return None, {
                 "success": False,
-                "error": f"Worker {worker_index + 1}: 追加ウィンドウ作成失敗",
+                "error": f"Worker {worker_index + 1}: メインセッション作成失敗",
                 "worker_index": worker_index,
             }
 
-    agent_id = str(uuid.uuid4())[:8]
-    await tmux.set_pane_title(project_name, window_index, pane_index, f"worker-{agent_id}")
+        if window_index > 0:
+            ok = await tmux.add_extra_worker_window(
+                project_name=project_name,
+                window_index=window_index,
+                rows=settings.extra_worker_rows,
+                cols=settings.extra_worker_cols,
+            )
+            if not ok:
+                return None, {
+                    "success": False,
+                    "error": f"Worker {worker_index + 1}: 追加ウィンドウ作成失敗",
+                    "worker_index": worker_index,
+                }
+
+        agent_id = str(uuid.uuid4())[:8]
+        await tmux.set_pane_title(project_name, window_index, pane_index, f"worker-{agent_id}")
+
     tmux_session = f"{project_name}:{window_index}.{pane_index}"
 
     now = datetime.now()
@@ -642,7 +668,11 @@ def register_batch_tools(mcp: FastMCP) -> None:
 
         project_name = get_project_name(repo_path, enable_git=settings.enable_git)
         pre_assigned_slots = _pre_assign_pane_slots(
-            agents, project_name, len(create_configs)
+            agents,
+            settings,
+            project_name,
+            len(create_configs),
+            profile_settings["max_workers"],
         )
         logger.info(
             "Workerバッチ: reuse=%s, create=%s",

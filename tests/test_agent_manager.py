@@ -463,6 +463,46 @@ class TestGridLayout:
         slot = manager.get_next_worker_slot(settings)
         assert slot is None
 
+    def test_get_next_worker_slot_finds_slot_beyond_11_workers(self, settings):
+        """11稼働中でも12人目のスロットを追加ウィンドウから返す。"""
+        settings.model_profile_active = ModelProfile.PERFORMANCE
+        settings.model_profile_performance_max_workers = 16
+        settings.workers_per_extra_window = 10
+
+        mock_tmux = MagicMock()
+        manager = AgentManager(mock_tmux)
+        now = datetime.now()
+
+        # main window: panes 1..6
+        for pane in range(1, 7):
+            manager.agents[f"main-{pane}"] = Agent(
+                id=f"main-{pane}",
+                role=AgentRole.WORKER,
+                status=AgentStatus.IDLE,
+                tmux_session=f"test:0.{pane}",
+                session_name="test",
+                window_index=0,
+                pane_index=pane,
+                created_at=now,
+                last_activity=now,
+            )
+        # extra window 1: panes 0..4
+        for pane in range(0, 5):
+            manager.agents[f"extra-{pane}"] = Agent(
+                id=f"extra-{pane}",
+                role=AgentRole.WORKER,
+                status=AgentStatus.IDLE,
+                tmux_session=f"test:1.{pane}",
+                session_name="test",
+                window_index=1,
+                pane_index=pane,
+                created_at=now,
+                last_activity=now,
+            )
+
+        slot = manager.get_next_worker_slot(settings)
+        assert slot == (1, 5)
+
     def test_count_workers(self, sample_agents):
         """Worker数のカウントをテスト。"""
         mock_tmux = MagicMock()

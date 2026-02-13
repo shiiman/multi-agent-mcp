@@ -297,6 +297,33 @@ class TestGetNextWorkerSlot:
         slot = _get_next_worker_slot(agents, settings, "project")
         assert slot is None
 
+    def test_finds_slot_beyond_11_workers_in_extra_window(self, settings):
+        """11稼働中でも12人目のスロット（追加ウィンドウ）を返す。"""
+        settings.model_profile_active = ModelProfile.PERFORMANCE
+        settings.model_profile_performance_max_workers = 16
+        settings.workers_per_extra_window = 10
+
+        agents = {}
+        # main window: panes 1..6
+        for pane in range(1, 7):
+            agents[f"main-{pane}"] = _make_worker_agent(
+                f"main-{pane}",
+                session_name="project",
+                window_index=0,
+                pane_index=pane,
+            )
+        # extra window 1: panes 0..4（計11名稼働）
+        for pane in range(0, 5):
+            agents[f"extra-{pane}"] = _make_worker_agent(
+                f"extra-{pane}",
+                session_name="project",
+                window_index=1,
+                pane_index=pane,
+            )
+
+        slot = _get_next_worker_slot(agents, settings, "project")
+        assert slot == (1, 5)
+
 
 class TestPostCreateAgent:
     """_post_create_agent のテスト。"""

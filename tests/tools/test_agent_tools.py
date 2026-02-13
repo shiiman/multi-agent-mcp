@@ -1047,10 +1047,10 @@ class TestCreateWorkersBatchBehavior:
         assert result["workers"][0]["reused"] is True
 
     @pytest.mark.asyncio
-    async def test_create_workers_batch_reports_preassigned_slot_failure(
+    async def test_create_workers_batch_assigns_extra_window_slot_when_main_is_full(
         self, mock_ctx, git_repo, monkeypatch
     ):
-        """事前スロット割り当て失敗時にエラーになることをテスト。"""
+        """メインが満席でも追加ウィンドウへ割り当てできることをテスト。"""
         from mcp.server.fastmcp import FastMCP
 
         from src.managers.tmux_shared import get_project_name
@@ -1109,9 +1109,10 @@ class TestCreateWorkersBatchBehavior:
             ctx=mock_ctx,
         )
 
-        assert result["success"] is False
-        assert result["failed_count"] == 1
-        assert "利用可能なスロットがありません" in result["errors"][0]
+        assert result["success"] is True
+        assert result["failed_count"] == 0
+        assert len(result["workers"]) == 1
+        assert result["workers"][0]["tmux_session"].split(":")[1].startswith("1.")
 
     @pytest.mark.asyncio
     async def test_create_workers_batch_reuse_updates_agent_current_task(

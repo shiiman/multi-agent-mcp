@@ -294,9 +294,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | Cursor CLI Worker default model | composer-1.5 |
 | `MCP_WORKER_CLI_MODE` | Worker CLI mode (`uniform` / `per-worker`) | uniform |
 | `MCP_WORKER_CLI_1..16` | Per-worker CLI in `per-worker` mode | - |
-| `MCP_WORKER_MODEL_MODE` | Worker model mode (`uniform` / `per-worker`) | uniform |
-| `MCP_WORKER_MODEL_UNIFORM` | Uniform Worker model value (falls back to profile worker model) | - |
-| `MCP_WORKER_MODEL_1..16` | Per-worker model in `per-worker` mode | - |
+| `MCP_WORKER_MODEL_1..16` | Per-worker model in `per-worker` mode (falls back to profile worker model) | - |
 | `MCP_QUALITY_CHECK_MAX_ITERATIONS` | Max quality check iterations | 5 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | Same issue repeat limit | 3 |
 | `MCP_QUALITY_GATE_STRICT` | Apply strict quality gate checks | true |

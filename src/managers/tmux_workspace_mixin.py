@@ -267,30 +267,37 @@ class TmuxWorkspaceMixin:
         """
         window_name = f"{self.settings.window_name_worker_prefix}{window_index + 1}"
 
-        # ウィンドウが既に存在するか確認
-        windows = await self.list_windows(project_name)
-        existing_indices = {w["index"] for w in windows}
-        if window_index in existing_indices:
-            logger.info(f"ウィンドウ {window_index} は既に存在します")
+        # 同一追加ウィンドウの同時作成を防ぐ。
+        lock = getattr(self, "_extra_worker_window_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._extra_worker_window_lock = lock
+
+        async with lock:
+            # ウィンドウが既に存在するか確認
+            windows = await self.list_windows(project_name)
+            existing_indices = {w["index"] for w in windows}
+            if window_index in existing_indices:
+                logger.info(f"ウィンドウ {window_index} は既に存在します")
+                return True
+
+            # 新しいウィンドウを追加
+            if not await self._create_named_window(
+                project_name, window_name, "追加Workerウィンドウ作成エラー"
+            ):
+                return False
+
+            # ウィンドウに pane-base-index を設定（ユーザーのグローバル設定に依存しない）
+            window_target = f"{project_name}:{window_name}"
+            await self._run("set-window-option", "-t", window_target, "pane-base-index", "0")
+
+            # グリッドに分割（6×2 = 12ペイン）
+            success = await self._split_into_grid(project_name, window_index, rows, cols)
+            if not success:
+                return False
+
+            logger.info(f"追加Workerウィンドウ作成完了: {project_name}:{window_name}")
             return True
-
-        # 新しいウィンドウを追加
-        if not await self._create_named_window(
-            project_name, window_name, "追加Workerウィンドウ作成エラー"
-        ):
-            return False
-
-        # ウィンドウに pane-base-index を設定（ユーザーのグローバル設定に依存しない）
-        window_target = f"{project_name}:{window_name}"
-        await self._run("set-window-option", "-t", window_target, "pane-base-index", "0")
-
-        # グリッドに分割（6×2 = 12ペイン）
-        success = await self._split_into_grid(project_name, window_index, rows, cols)
-        if not success:
-            return False
-
-        logger.info(f"追加Workerウィンドウ作成完了: {project_name}:{window_name}")
-        return True
 
     async def _create_named_window(self, session: str, window_name: str, error_prefix: str) -> bool:
         """指定セッションに名前付きウィンドウを作成する。"""

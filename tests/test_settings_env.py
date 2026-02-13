@@ -8,7 +8,6 @@ from src.config.settings import (
     ModelDefaults,
     Settings,
     WorkerCliMode,
-    WorkerModelMode,
     get_mcp_dir,
     get_project_env_file,
     load_settings_for_project,
@@ -168,12 +167,11 @@ class TestGenerateEnvTemplate:
         assert "MCP_WORKER_CLI_16" in template
         assert f"MCP_WORKER_CLI_1={settings.get_worker_cli(1).value}" in template
 
-    def test_template_contains_worker_model_mode(self):
-        """テンプレートに Worker モデル設定が含まれることをテスト。"""
+    def test_template_does_not_contain_legacy_worker_model_mode(self):
+        """テンプレートに廃止済み Worker モデルモード設定が含まれないことをテスト。"""
         template = generate_env_template()
-        assert "MCP_WORKER_MODEL_MODE" in template
-        assert "MCP_WORKER_MODEL_UNIFORM" in template
-        assert "MCP_WORKER_MODEL_MODE=uniform" in template
+        assert "MCP_WORKER_MODEL_MODE" not in template
+        assert "MCP_WORKER_MODEL_UNIFORM" not in template
 
     def test_template_contains_worker_model_lines(self):
         """テンプレートに Worker モデル個別設定が含まれることをテスト。"""
@@ -300,14 +298,13 @@ class TestWorkerCliAndModelResolution:
         assert settings.get_worker_cli(1) == AICli.CLAUDE
         assert settings.get_worker_cli(3) == AICli.CURSOR
 
-    def test_get_worker_model_depends_on_worker_model_mode(self):
+    def test_get_worker_model_follows_worker_cli_mode(self):
         settings = load_settings_for_project(None)
-        settings.worker_model_mode = WorkerModelMode.UNIFORM
-        settings.worker_model_uniform = "gpt-5.3-codex"
+        settings.worker_cli_mode = WorkerCliMode.UNIFORM
         settings.worker_model_1 = "gpt-5.3-codex"
-        assert settings.get_worker_model(1, "opus") == "gpt-5.3-codex"
+        assert settings.get_worker_model(1, "opus") == "opus"
 
-        settings.worker_model_mode = WorkerModelMode.PER_WORKER
+        settings.worker_cli_mode = WorkerCliMode.PER_WORKER
         settings.worker_model_3 = "gemini-3-pro"
         assert settings.get_worker_model(3, "opus") == "gemini-3-pro"
         assert settings.get_worker_model(4, "opus") == "opus"

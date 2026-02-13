@@ -477,9 +477,7 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer-1.5 | Cursor CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
 | `MCP_WORKER_CLI_1..16` | (empty) | per-workerモードでのWorker別CLI設定（未設定時はアクティブプロファイルCLIを利用） |
-| `MCP_WORKER_MODEL_MODE` | uniform | Workerモデル設定モード（uniform/per-worker） |
-| `MCP_WORKER_MODEL_UNIFORM` | (empty) | uniformモード時のWorkerモデル（未設定時はプロファイルのWORKER_MODEL） |
-| `MCP_WORKER_MODEL_1..16` | (empty) | per-workerモードでのWorker別モデル設定（未設定時はUNIFORM→プロファイル順で解決） |
+| `MCP_WORKER_MODEL_1..16` | (empty) | per-workerモードでのWorker別モデル設定（未設定時はプロファイルのWORKER_MODEL） |
 | `MCP_QUALITY_CHECK_MAX_ITERATIONS` | 5 | 品質チェックの最大イテレーション回数 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | 3 | 同一問題の繰り返し上限 |
 | `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリの最大エントリ数 |
