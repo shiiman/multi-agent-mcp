@@ -38,7 +38,10 @@ class TestSettingsModelProfile:
         expected_worker = cli_defaults[settings.model_profile_standard_cli.value]["worker"]
         assert settings.model_profile_standard_admin_model == expected_admin
         assert settings.model_profile_standard_worker_model == expected_worker
-        assert settings.model_profile_standard_max_workers == 6
+        assert (
+            settings.model_profile_standard_max_workers
+            == settings.get_active_profile_max_workers()
+        )
         assert settings.model_profile_standard_admin_thinking_tokens == 4000
         assert settings.model_profile_standard_worker_thinking_tokens == 4000
         assert settings.model_profile_standard_admin_reasoning_effort.value == "medium"

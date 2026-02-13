@@ -246,7 +246,6 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MCP_MCP_DIR` | MCP working directory name | .multi-agent-mcp |
-| `MCP_MAX_WORKERS` | Maximum number of worker agents | 6 |
 | `MCP_ENABLE_GIT` | Enable git-dependent features (false allows non-git directories) | true |
 | `MCP_ENABLE_WORKTREE` | Enable git worktree for workers (`enable_git=false` forces disabled) | false |
 | `MCP_WINDOW_NAME_MAIN` | Main tmux window name (Admin + Worker 1-6) | main |
@@ -304,6 +303,9 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_MEMORY_MAX_ENTRIES` | Max memory entries | 1000 |
 | `MCP_MEMORY_TTL_DAYS` | Memory entry TTL in days | 90 |
 | `MCP_SCREENSHOT_EXTENSIONS` | Recognized screenshot extensions | [".png",".jpg",...] |
+
+Worker limits are determined by the active profile:
+`MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` or `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS`.
 
 ## Common Patterns
 

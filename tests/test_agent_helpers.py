@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.config.settings import AICli
+from src.config.settings import AICli, ModelProfile
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.agent_helpers import (
     _get_next_worker_slot,
@@ -251,7 +251,7 @@ class TestGetNextWorkerSlot:
     def test_returns_none_when_full(self, settings):
         """スロットが全て使用済みの場合は None を返す。"""
         agents = {}
-        for i in range(1, 4):  # settings.max_workers=3
+        for i in range(1, 4):  # model_profile_standard_max_workers=3
             agents[f"w-{i}"] = _make_worker_agent(f"w-{i}", session_name="project", pane_index=i)
         slot = _get_next_worker_slot(agents, settings, "project")
         assert slot is None
@@ -280,10 +280,22 @@ class TestGetNextWorkerSlot:
         agents["w-3"] = _make_worker_agent("w-3", session_name="project", pane_index=3)
         agents["w-3"].status = AgentStatus.TERMINATED
 
-        # settings.max_workers=3 だが、実質 IDLE は 2 なので新規作成可能
+        # 標準プロファイル上限=3 だが、実質 IDLE は 2 なので新規作成可能
         # TERMINATED の pane 3 が空きとして再利用される
         slot = _get_next_worker_slot(agents, settings, "project", max_workers=3)
         assert slot == (0, 3)
+
+    def test_uses_active_profile_max_workers_by_default(self, settings):
+        """active profile の max_workers が既定上限として適用される。"""
+        settings.model_profile_active = ModelProfile.PERFORMANCE
+        settings.model_profile_performance_max_workers = 2
+
+        agents = {
+            "w-1": _make_worker_agent("w-1", session_name="project", pane_index=1),
+            "w-2": _make_worker_agent("w-2", session_name="project", pane_index=2),
+        }
+        slot = _get_next_worker_slot(agents, settings, "project")
+        assert slot is None
 
 
 class TestPostCreateAgent:

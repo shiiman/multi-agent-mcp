@@ -210,7 +210,7 @@ class Settings(BaseSettings):
     """MCP サーバーの設定。
 
     環境変数で上書き可能。プレフィックスは MCP_。
-    例: MCP_MAX_WORKERS=10
+    例: MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS=10
 
     優先順位:
     1. 環境変数（最優先）
@@ -237,10 +237,6 @@ class Settings(BaseSettings):
     enable_worktree: bool = False
     """git worktree を使用するか（デフォルト: False）。
     False にすると Worker は全て同一ディレクトリで作業する。"""
-
-    # エージェント設定
-    max_workers: int = 6
-    """Workerエージェントの最大数（デフォルト: メインウィンドウに収まる6）"""
 
     # tmux設定
     window_name_main: str = "main"
@@ -522,12 +518,14 @@ class Settings(BaseSettings):
         description="未定義モデル向け汎用単価（USD/1K tokens）",
     )
 
-    @field_validator("max_workers")
+    @field_validator("model_profile_standard_max_workers", "model_profile_performance_max_workers")
     @classmethod
-    def validate_max_workers(cls, value: int) -> int:
-        """max_workers の範囲を検証する（1〜16）。"""
+    def validate_profile_max_workers(cls, value: int) -> int:
+        """プロファイル別 max_workers の範囲を検証する（1〜16）。"""
         if not 1 <= value <= 16:
-            raise ValueError("MCP_MAX_WORKERS は 1〜16 の範囲で指定してください")
+            raise ValueError(
+                "MCP_MODEL_PROFILE_*_MAX_WORKERS は 1〜16 の範囲で指定してください"
+            )
         return value
 
     @field_validator("healthcheck_interval_seconds")
@@ -638,6 +636,12 @@ class Settings(BaseSettings):
         if self.model_profile_active == ModelProfile.STANDARD:
             return self.model_profile_standard_cli
         return self.model_profile_performance_cli
+
+    def get_active_profile_max_workers(self) -> int:
+        """現在アクティブなモデルプロファイルの Worker 上限を返す。"""
+        if self.model_profile_active == ModelProfile.STANDARD:
+            return self.model_profile_standard_max_workers
+        return self.model_profile_performance_max_workers
 
     def get_worker_cli(self, worker_index: int) -> AICli:
         """Worker index(1..16) に対する CLI を取得する。"""

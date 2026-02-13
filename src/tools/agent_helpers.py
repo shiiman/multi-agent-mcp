@@ -63,13 +63,15 @@ def _get_next_worker_slot(
         agents: エージェント辞書
         settings: 設定オブジェクト
         session_name: 対象のセッション名（プロジェクト名）
-        max_workers: Worker 上限（省略時は settings.max_workers を使用）
+        max_workers: Worker 上限（省略時はアクティブプロファイル設定を使用）
 
     Returns:
         (window_index, pane_index) のタプル、空きがない場合はNone
     """
     # プロファイル設定の max_workers を優先
-    effective_max_workers = max_workers if max_workers is not None else settings.max_workers
+    effective_max_workers = (
+        max_workers if max_workers is not None else settings.get_active_profile_max_workers()
+    )
 
     # 最大Worker数チェック（TERMINATED Worker を除外）
     total_workers = len(

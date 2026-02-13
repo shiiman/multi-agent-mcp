@@ -89,7 +89,7 @@ class TestGetProjectEnvFile:
         mcp_dir = temp_dir / ".multi-agent-mcp"
         mcp_dir.mkdir(parents=True, exist_ok=True)
         env_file = mcp_dir / ".env"
-        env_file.write_text("MCP_MAX_WORKERS=10")
+        env_file.write_text("MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS=10")
 
         result = get_project_env_file()
         assert result == str(env_file)
@@ -98,10 +98,10 @@ class TestGetProjectEnvFile:
 class TestGenerateEnvTemplate:
     """generate_env_template 関数のテスト。"""
 
-    def test_template_contains_max_workers(self):
-        """テンプレートに MCP_MAX_WORKERS が含まれることをテスト。"""
+    def test_template_does_not_contain_legacy_max_workers(self):
+        """テンプレートに旧キー MCP_MAX_WORKERS が含まれないことをテスト。"""
         template = generate_env_template()
-        assert "MCP_MAX_WORKERS" in template
+        assert "MCP_MAX_WORKERS" not in template
 
     def test_template_contains_model_profile_settings(self):
         """テンプレートにモデルプロファイル設定が含まれることをテスト。"""
@@ -203,7 +203,8 @@ class TestGenerateEnvTemplate:
         template = generate_env_template()
 
         # デフォルト値の確認
-        assert "MCP_MAX_WORKERS=6" in template
+        assert "MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS=6" in template
+        assert "MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS=16" in template
         assert "MCP_MODEL_PROFILE_ACTIVE=standard" in template
         assert ModelDefaults.SONNET in template
         assert ModelDefaults.OPUS in template

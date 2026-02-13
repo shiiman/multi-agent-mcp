@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.config.settings import ModelProfile
 from src.managers.agent_manager import AgentManager
 from src.managers.tmux_manager import (
     MAIN_SESSION,
@@ -419,9 +420,9 @@ class TestGridLayout:
         mock_tmux = MagicMock()
         manager = AgentManager(mock_tmux)
 
-        # max_workers 分のWorkerを追加
+        # プロファイル上限分のWorkerを追加
         now = datetime.now()
-        for i in range(settings.max_workers):
+        for i in range(settings.get_active_profile_max_workers()):
             manager.agents[f"worker-{i}"] = Agent(
                 id=f"worker-{i}",
                 role=AgentRole.WORKER,
@@ -436,6 +437,30 @@ class TestGridLayout:
 
         slot = manager.get_next_worker_slot(settings)
 
+        assert slot is None
+
+    def test_get_next_worker_slot_uses_active_profile_limit(self, settings):
+        """active profile の max_workers が上限判定に使われることをテスト。"""
+        settings.model_profile_active = ModelProfile.PERFORMANCE
+        settings.model_profile_performance_max_workers = 2
+
+        mock_tmux = MagicMock()
+        manager = AgentManager(mock_tmux)
+        now = datetime.now()
+        for i in range(2):
+            manager.agents[f"worker-{i}"] = Agent(
+                id=f"worker-{i}",
+                role=AgentRole.WORKER,
+                status=AgentStatus.IDLE,
+                tmux_session=f"test:0.{i + 2}",
+                session_name="test",
+                window_index=0,
+                pane_index=i + 2,
+                created_at=now,
+                last_activity=now,
+            )
+
+        slot = manager.get_next_worker_slot(settings)
         assert slot is None
 
     def test_count_workers(self, sample_agents):

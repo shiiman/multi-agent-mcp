@@ -102,8 +102,9 @@ def generate_env_template(settings: Settings | None = None) -> str:
 MCP_MCP_DIR={v(s.mcp_dir)}
 
 # ========== エージェント設定 ==========
-# Worker エージェントの最大数
-MCP_MAX_WORKERS={v(s.max_workers)}
+# Worker エージェントの最大数はプロファイル設定で管理
+# - MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS
+# - MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS
 
 # ========== Git 設定 ==========
 # git 前提機能を有効にするか（false で非gitディレクトリを許可）

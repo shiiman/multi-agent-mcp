@@ -673,7 +673,7 @@ class TestGetNextWorkerSlot:
 
         now = datetime.now()
         agents = {}
-        for i in range(settings.max_workers):
+        for i in range(settings.get_active_profile_max_workers()):
             agents[f"worker-{i}"] = Agent(
                 id=f"worker-{i}",
                 role=AgentRole.WORKER,

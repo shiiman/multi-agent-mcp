@@ -59,7 +59,7 @@ class TestGenerateEnvTemplate:
         result = generate_env_template(settings=settings)
         assert "MCP_MCP_DIR=" in result
         assert "MCP_ENABLE_GIT=" in result
-        assert "MCP_MAX_WORKERS=" in result
+        assert "MCP_MAX_WORKERS=" not in result
         assert "MCP_ENABLE_WORKTREE=" in result
 
     def test_template_contains_all_sections(self, settings):
@@ -77,7 +77,10 @@ class TestGenerateEnvTemplate:
     def test_template_values_match_settings(self, settings):
         """テンプレートの値が Settings と一致する。"""
         result = generate_env_template(settings=settings)
-        assert f"MCP_MAX_WORKERS={settings.max_workers}" in result
+        assert (
+            "MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS="
+            f"{settings.model_profile_standard_max_workers}"
+        ) in result
 
     def test_template_contains_send_cooldown_default(self, settings):
         """テンプレートに send cooldown の既定値が含まれることをテスト。"""

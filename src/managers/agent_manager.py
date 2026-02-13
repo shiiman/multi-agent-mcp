@@ -312,8 +312,9 @@ class AgentManager:
         Returns:
             (window_index, pane_index) のタプル、空きがない場合はNone
         """
+        max_workers = settings.get_active_profile_max_workers()
         total_workers = self.count_workers()
-        if total_workers >= settings.max_workers:
+        if total_workers >= max_workers:
             return None
 
         # 使用中のペイン位置を収集
@@ -335,7 +336,7 @@ class AgentManager:
         # 追加ウィンドウの空きを探す
         panes_per_extra = settings.workers_per_extra_window
         extra_worker_index = 0
-        while total_workers + extra_worker_index < settings.max_workers:
+        while total_workers + extra_worker_index < max_workers:
             window_index = 1 + (extra_worker_index // panes_per_extra)
             pane_index = extra_worker_index % panes_per_extra
             if (window_index, pane_index) not in used_slots:

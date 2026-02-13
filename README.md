@@ -83,10 +83,7 @@ codex mcp remove multi-agent-mcp
       "args": [
         "--from", "git+https://github.com/shiiman/multi-agent-mcp",
         "multi-agent-mcp"
-      ],
-      "env": {
-        "MCP_MAX_WORKERS": "6"
-      }
+      ]
     }
   }
 }
@@ -103,10 +100,7 @@ codex mcp remove multi-agent-mcp
       "args": [
         "--from", "git+https://github.com/shiiman/multi-agent-mcp",
         "multi-agent-mcp"
-      ],
-      "env": {
-        "MCP_MAX_WORKERS": "6"
-      }
+      ]
     }
   }
 }
@@ -439,7 +433,6 @@ cleanup_workspace(caller_agent_id="owner-id")
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
 | `MCP_MCP_DIR` | .multi-agent-mcp | MCP設定ディレクトリ名 |
-| `MCP_MAX_WORKERS` | 6 | Workerの最大数 |
 | `MCP_ENABLE_GIT` | true | git 前提機能を有効化するか（falseで非gitディレクトリ許可） |
 | `MCP_ENABLE_WORKTREE` | false | worktreeを使用するか（`MCP_ENABLE_GIT=false` の場合は無効） |
 | `MCP_WINDOW_NAME_MAIN` | main | メインウィンドウ名（Admin + Worker 1-6） |
@@ -492,6 +485,10 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリの最大エントリ数 |
 | `MCP_MEMORY_TTL_DAYS` | 90 | メモリエントリの保持期間（日） |
 | `MCP_SCREENSHOT_EXTENSIONS` | [".png",".jpg",...] | スクリーンショットとして認識する拡張子 |
+
+Worker上限は `MCP_MODEL_PROFILE_ACTIVE` に応じて
+`MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` / `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS`
+のどちらかが適用されます。
 
 `MCP_MODEL_COST_TABLE_JSON` のデフォルトでは `gemini-3-pro-preview` / `gemini-3-flash-preview`
 を使用し、後方互換のため `gemini-3-pro` / `gemini-3-flash` キーも併記しています。

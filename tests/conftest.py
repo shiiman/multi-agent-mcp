@@ -53,7 +53,7 @@ def settings(temp_dir, monkeypatch):
 
     return Settings(
         _env_file=None,
-        max_workers=3,
+        model_profile_standard_max_workers=3,
         tmux_prefix="test-mcp-agent",
         default_terminal=TerminalApp.AUTO,
     )
