@@ -316,6 +316,12 @@ class TestResolveModelForCli:
         assert resolve_model_for_cli("codex", "gpt-5.3-codex", "worker") == "gpt-5.3-codex"
         assert resolve_model_for_cli("gemini", "gemini-3-pro", "admin") == "gemini-3-pro"
         assert resolve_model_for_cli("claude", "claude-opus-4-6", "admin") == "claude-opus-4-6"
+        assert resolve_model_for_cli("cursor", "composer-1.5", "worker") == "composer-1.5"
+
+    def test_cursor_legacy_model_fallback_to_default(self):
+        """Cursor 旧モデル ID は非互換としてデフォルトへフォールバックすることをテスト。"""
+        result = resolve_model_for_cli("cursor", "composer1.5", "worker")
+        assert result == ModelDefaults.CURSOR_DEFAULT
 
     def test_explicit_model_mismatch_converted_to_cli_default(self):
         """CLI とモデルが不一致なら CLI デフォルトへ置換されることをテスト。"""

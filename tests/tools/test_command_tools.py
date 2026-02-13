@@ -1181,7 +1181,7 @@ class TestSendTask:
         env_file = mcp_dir / ".env"
         env_file.write_text(
             "MCP_MODEL_PROFILE_STANDARD_CLI=cursor\n"
-            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=composer1.5\n",
+            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=composer-1.5\n",
             encoding="utf-8",
         )
 
@@ -1221,7 +1221,7 @@ class TestSendTask:
         )
 
         assert result["success"] is True
-        assert "agent --model composer1.5" in result["command_sent"]
+        assert "agent --model composer-1.5" in result["command_sent"]
         assert "--force" in result["command_sent"]
         _, send_kwargs = app_ctx.tmux.send_with_rate_limit_to_pane.await_args
         assert send_kwargs["confirm_codex_prompt"] is False

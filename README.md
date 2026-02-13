@@ -480,8 +480,8 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.3-codex | Codex CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro-preview | Gemini CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash-preview | Gemini CLIのWorkerデフォルトモデル |
-| `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer1.5 | Cursor CLIのAdminデフォルトモデル |
-| `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer1.5 | Cursor CLIのWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer-1.5 | Cursor CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer-1.5 | Cursor CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
 | `MCP_WORKER_CLI_1..16` | (empty) | per-workerモードでのWorker別CLI設定（未設定時はアクティブプロファイルCLIを利用） |
 | `MCP_WORKER_MODEL_MODE` | uniform | Workerモデル設定モード（uniform/per-worker） |

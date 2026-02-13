@@ -125,7 +125,7 @@ class ModelDefaults:
     """Codex デフォルトモデル"""
 
     # Cursor CLI
-    CURSOR_DEFAULT = "composer1.5"
+    CURSOR_DEFAULT = "composer-1.5"
     """Cursor デフォルトモデル"""
 
     # Gemini CLI
@@ -186,7 +186,7 @@ def resolve_model_for_cli(
             return (
                 "codex" in value
                 or "cursor" in value
-                or "composer" in value
+                or value.startswith("composer-")
                 or value.startswith("gpt-")
             )
         return True
@@ -514,7 +514,7 @@ class Settings(BaseSettings):
         '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro-preview":0.012,'
         '"gemini:gemini-3-flash-preview":0.003,'
         '"gemini:gemini-3-pro":0.005,"gemini:gemini-3-flash":0.0025,'
-        '"cursor:composer1.5":0.01}',
+        '"cursor:composer-1.5":0.01}',
         description="モデル別 1K トークン単価テーブル（JSON）",
     )
     model_cost_default_per_1k: float = Field(
