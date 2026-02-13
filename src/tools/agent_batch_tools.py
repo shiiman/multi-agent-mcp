@@ -26,6 +26,8 @@ from src.tools.model_profile import get_current_profile_settings
 
 logger = logging.getLogger(__name__)
 
+MAX_IMAGE_TASK_PARALLEL = 2
+
 
 def _validate_batch_config(config: dict, worker_index: int) -> dict[str, Any] | None:
     """worker_config のバリデーション。エラー時は dict を返す。"""
@@ -163,6 +165,7 @@ async def _setup_worker_tmux_pane(
     worktree_path: str,
     enable_worktree: bool,
     worker_index: int,
+    preferred_cli: str | None = None,
 ) -> tuple[Agent | None, dict[str, Any] | None]:
     """tmux セッション確保とエージェントオブジェクトを作成する。"""
     tmux = app_ctx.tmux
@@ -173,7 +176,18 @@ async def _setup_worker_tmux_pane(
             "worker_index": worker_index,
         }
 
-    worker_cli = settings.get_worker_cli(worker_no)
+    if preferred_cli:
+        from src.config.settings import AICli
+
+        try:
+            worker_cli = AICli(preferred_cli)
+        except ValueError:
+            logger.warning(
+                "無効な preferred_cli '%s' → デフォルトCLIにフォールバック", preferred_cli
+            )
+            worker_cli = settings.get_worker_cli(worker_no)
+    else:
+        worker_cli = settings.get_worker_cli(worker_no)
 
     if window_index > 0:
         ok = await tmux.add_extra_worker_window(
@@ -235,6 +249,7 @@ async def _create_single_worker(
     task_title = config.get("task_title", f"Worker {worker_index + 1}")
     task_id = config.get("task_id")
     task_content = config.get("task_content")
+    preferred_cli = config.get("preferred_cli")
 
     try:
         if assigned_slot is None:
@@ -284,6 +299,7 @@ async def _create_single_worker(
             worktree_path,
             enable_worktree,
             worker_index,
+            preferred_cli=preferred_cli,
         )
         if tmux_error:
             return tmux_error
@@ -361,6 +377,25 @@ async def _reuse_single_worker(
     task_title = config.get("task_title", f"Worker {worker_index + 1}")
     task_id = config.get("task_id")
     task_content = config.get("task_content")
+    preferred_cli = config.get("preferred_cli")
+
+    if preferred_cli:
+        from src.config.settings import AICli
+
+        try:
+            requested_cli = AICli(preferred_cli)
+        except ValueError:
+            requested_cli = None
+        if requested_cli and worker.ai_cli != requested_cli:
+            return {
+                "success": False,
+                "worker_index": worker_index,
+                "error": (
+                    f"Worker {worker_index + 1}: preferred_cli='{preferred_cli}' "
+                    f"だが再利用Worker の CLI は '{worker.ai_cli}' です。"
+                    "CLI が異なる Worker は再利用できません。"
+                ),
+            }
 
     worktree_path = worker.worktree_path or repo_path
     worker_no = resolve_worker_number_from_slot(
@@ -522,7 +557,31 @@ def register_batch_tools(mcp: FastMCP) -> None:
 
         profile_settings = get_current_profile_settings(app_ctx)
         agents = app_ctx.agents
-        reusable_workers, reuse_count, capacity_error = _validate_batch_capacity(
+
+        # 画像生成タスク（Cursor CLI）の並列実行数上限チェック
+        from src.config.settings import AICli
+
+        cursor_request_count = sum(
+            1 for c in worker_configs if c.get("preferred_cli") == "cursor"
+        )
+        busy_cursor_count = sum(
+            1
+            for a in agents.values()
+            if a.role == AgentRole.WORKER
+            and a.status == AgentStatus.BUSY
+            and a.ai_cli == AICli.CURSOR
+        )
+        if cursor_request_count + busy_cursor_count > MAX_IMAGE_TASK_PARALLEL:
+            return {
+                "success": False,
+                "error": (
+                    f"画像生成タスクの並列実行数が上限を超えます"
+                    f"（新規要求: {cursor_request_count}, 実行中: {busy_cursor_count}, "
+                    f"上限: {MAX_IMAGE_TASK_PARALLEL}）"
+                ),
+            }
+
+        reusable_workers, _reuse_count, capacity_error = _validate_batch_capacity(
             agents,
             worker_configs,
             reuse_idle_workers,
@@ -532,20 +591,73 @@ def register_batch_tools(mcp: FastMCP) -> None:
             return capacity_error
 
         enable_wt = settings.is_worktree_enabled()
-        reuse_configs = worker_configs[:reuse_count]
-        create_configs = worker_configs[reuse_count:]
+
+        # preferred_cli を考慮した再利用候補マッチング
+        reuse_pairs: list[tuple[dict, Agent]] = []
+        create_configs: list[dict] = []
+        remaining_workers = list(reusable_workers)
+
+        for config in worker_configs:
+            pref_cli = config.get("preferred_cli")
+            matched = False
+            if remaining_workers and reuse_idle_workers:
+                if pref_cli:
+                    try:
+                        target_cli = AICli(pref_cli)
+                    except ValueError:
+                        target_cli = None
+                    if target_cli:
+                        for w in remaining_workers:
+                            if w.ai_cli == target_cli:
+                                reuse_pairs.append((config, w))
+                                remaining_workers.remove(w)
+                                matched = True
+                                break
+                else:
+                    reuse_pairs.append((config, remaining_workers.pop(0)))
+                    matched = True
+            if not matched:
+                create_configs.append(config)
+
+        # create_configs の数に基づいてキャパシティを再検証
+        current_worker_count = sum(
+            1
+            for a in agents.values()
+            if a.role == AgentRole.WORKER and a.status != AgentStatus.TERMINATED
+        )
+        new_worker_capacity = max(
+            profile_settings["max_workers"] - current_worker_count, 0
+        )
+        if len(create_configs) > new_worker_capacity:
+            return {
+                "success": False,
+                "error": (
+                    "Worker数が上限を超えます"
+                    f"（現在: {current_worker_count}, 要求: {len(worker_configs)}, "
+                    f"再利用: {len(reuse_pairs)}, 新規必要: {len(create_configs)}, "
+                    f"新規上限: {new_worker_capacity}, "
+                    f"総上限: {profile_settings['max_workers']}）"
+                ),
+            }
+
         project_name = get_project_name(repo_path, enable_git=settings.enable_git)
-        pre_assigned_slots = _pre_assign_pane_slots(agents, project_name, len(create_configs))
-        logger.info("Workerバッチ: reuse=%s, create=%s", reuse_count, len(create_configs))
+        pre_assigned_slots = _pre_assign_pane_slots(
+            agents, project_name, len(create_configs)
+        )
+        logger.info(
+            "Workerバッチ: reuse=%s, create=%s",
+            len(reuse_pairs),
+            len(create_configs),
+        )
 
         reuse_results = await asyncio.gather(
             *[
                 _reuse_single_worker(
                     app_ctx,
                     settings,
-                    c,
+                    config,
                     i,
-                    reusable_workers[i],
+                    worker,
                     repo_path,
                     base_branch,
                     enable_wt,
@@ -553,7 +665,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     profile_settings,
                     caller_agent_id,
                 )
-                for i, c in enumerate(reuse_configs)
+                for i, (config, worker) in enumerate(reuse_pairs)
             ],
             return_exceptions=True,
         )
@@ -564,7 +676,7 @@ def register_batch_tools(mcp: FastMCP) -> None:
                     agents,
                     settings,
                     c,
-                    i + len(reuse_configs),
+                    i + len(reuse_pairs),
                     pre_assigned_slots[i],
                     repo_path,
                     base_branch,
