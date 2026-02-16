@@ -139,69 +139,7 @@ for task in subtasks:
 - **終端状態（`completed` / `failed` / `cancelled`）からの再開は `reopen_task` を使用**します。
 - 終端状態から `update_task_status` で直接戻す運用は禁止です（監査履歴を壊すため）。
 
-#### 2.5. 画像生成タスクの Cursor Worker ルーティング
-
-**AI 自体が画像ファイルを生成するタスク**は **Cursor CLI Worker** に割り当てます。
-
-**🔴 画像生成タスクの定義（重要）:**
-
-| 画像生成タスク ✅（Cursor 対象） | 画像生成タスクではない ❌（通常 Worker） |
-| --- | --- |
-| ロゴ・アイコンの作成 | Playwright でのスクリーンショット取得 |
-| バナー・OGP 画像の生成 | UI テスト用のキャプチャ |
-| UI モックアップ・デザインカンプの生成 | 既存画像のリサイズ・変換処理 |
-| 図・ダイアグラムの AI 生成 | デバッグ用の画面録画 |
-
-**判定キーワード（AI による画像生成を示すもの）:**
-- 画像生成、画像を作成、ロゴ作成、アイコン作成
-- バナー作成、OGP 画像、モックアップ生成
-- 図を生成、ダイアグラム作成、ビジュアル生成
-
-**🔴 画像生成タスクの task_content 必須ルール:**
-- Cursor の画像生成機能を使い、**Google Nano Banana Pro** で生成する旨を task_content に明記する
-- Python スクリプト（Pillow / matplotlib / OpenCV など）や SVG/HTML 描画からの PNG 変換で代替しない
-- 「HTML を作ってスクリーンショットで PNG 化」は禁止
-- Playwright/ブラウザのキャプチャ画像を成果物として提出しない
-- 出力先パスを task_content に明記し、タスク要件に応じて Admin が決定する
-- 画像生成機能が使えない場合は Worker に代替実装させず、`request` で Admin が判断する
-
-**画像生成タスクの同時並列実行数: 最大 2**
-画像生成タスクが多くても、同時に実行できるのは 2 タスクまでです。
-3つ以上の画像タスクがある場合は、先行する画像タスクの完了を待ってから次を割り当ててください。
-（idle な Cursor Worker は制限にカウントされないため、完了後すぐ次の画像タスクを受け入れ可能）
-
-**初回バッチ作成時（Worker がまだいない場合）:**
-
-画像生成タスクがある場合、`worker_configs` で `preferred_cli: "cursor"` を指定します。
-コード実装タスク用の Worker 数は画像タスク分を差し引いて調整してください。
-
-```python
-worker_configs = [
-    {{
-        "task_title": "コード実装タスク",
-        "task_id": task_ids[0],
-        "task_content": "..."
-        # preferred_cli 省略 → デフォルト CLI (Claude)
-    }},
-    {{
-        "task_title": "ロゴ画像生成タスク",
-        "task_id": task_ids[1],
-        "task_content": "...",
-        "preferred_cli": "cursor"  # ← Cursor Worker で実行
-    }},
-]
-```
-
-**追加タスク時（既に Worker が稼働中の場合）:**
-
-1. `list_agents` で既存の idle Cursor Worker を探す
-2. idle Cursor Worker がある → `send_task` でタスクを割り当て
-3. idle Cursor Worker がない & 画像タスク並列実行数が 2 未満 & idle Claude Worker がある場合:
-   - idle Claude Worker を `terminate_agent` で終了
-   - `create_agent(role="worker", ai_cli="cursor", working_dir="...")` で Cursor Worker を作成
-   - `send_task` でタスクを割り当て
-4. 画像生成タスクが既に 2 つ並列実行中 → いずれかの完了を待ってから idle Cursor Worker に `send_task` で次の画像タスクを割り当て
-5. idle Worker が全くない → Worker 完了を待ってから上記を実行
+{image_task_routing_section}
 
 ### 3. Worker 一括作成・タスク割り当て・タスク送信
 
@@ -230,13 +168,13 @@ worker_configs = [
         "task_title": subtasks[0]["title"],
         "task_id": task_ids[0],      # ← create_task で取得した ID
         "task_content": subtasks[0]["description"],
-        # "preferred_cli": "cursor"  # 画像タスクの場合のみ指定
+        # 必要に応じて "preferred_cli" を指定
     }},
     {{
         "task_title": subtasks[1]["title"],
         "task_id": task_ids[1],      # ← create_task で取得した ID
         "task_content": subtasks[1]["description"],
-        # "preferred_cli": "cursor"  # 画像タスクの場合のみ指定
+        # 必要に応じて "preferred_cli" を指定
     }},
     # ... タスク数に応じて追加
 ]

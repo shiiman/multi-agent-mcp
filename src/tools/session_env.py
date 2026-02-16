@@ -130,6 +130,9 @@ MCP_ENABLE_GIT={v(s.enable_git)}
 # git worktree を使用するか（false で Non-Worktree モード）
 MCP_ENABLE_WORKTREE={v(s.enable_worktree)}
 
+# 画像生成タスク向け Cursor ルーティングを有効にするか（true で有効）
+MCP_ENABLE_CURSOR_IMAGE_ROUTING={v(s.enable_cursor_image_routing)}
+
 # ========== tmux 設定 ==========
 # メインウィンドウ名（Admin + Worker 1-6）
 MCP_WINDOW_NAME_MAIN={v(s.window_name_main)}

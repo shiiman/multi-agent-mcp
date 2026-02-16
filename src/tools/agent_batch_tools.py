@@ -658,6 +658,35 @@ def _validate_batch_capacity(
     return reusable_workers, reuse_count, None
 
 
+def _validate_cursor_image_task_parallel_limit(
+    settings: "Settings",
+    agents: dict[str, Agent],
+    worker_configs: list[dict],
+) -> dict[str, Any] | None:
+    """画像生成タスク向け Cursor 並列上限（2）を検証する。"""
+    if not settings.enable_cursor_image_routing:
+        return None
+
+    from src.config.settings import AICli
+
+    cursor_request_count = sum(1 for c in worker_configs if c.get("preferred_cli") == "cursor")
+    busy_cursor_count = sum(
+        1
+        for a in agents.values()
+        if a.role == AgentRole.WORKER and a.status == AgentStatus.BUSY and a.ai_cli == AICli.CURSOR
+    )
+    if cursor_request_count + busy_cursor_count > MAX_IMAGE_TASK_PARALLEL:
+        return {
+            "success": False,
+            "error": (
+                f"画像生成タスクの並列実行数が上限を超えます"
+                f"（新規要求: {cursor_request_count}, 実行中: {busy_cursor_count}, "
+                f"上限: {MAX_IMAGE_TASK_PARALLEL}）"
+            ),
+        }
+    return None
+
+
 def register_batch_tools(mcp: FastMCP) -> None:
     """batch 系エージェントツールを登録する。"""
 
@@ -681,29 +710,15 @@ def register_batch_tools(mcp: FastMCP) -> None:
 
         profile_settings = get_current_profile_settings(app_ctx)
         agents = app_ctx.agents
-
-        # 画像生成タスク（Cursor CLI）の並列実行数上限チェック
         from src.config.settings import AICli
 
-        cursor_request_count = sum(
-            1 for c in worker_configs if c.get("preferred_cli") == "cursor"
+        image_routing_error = _validate_cursor_image_task_parallel_limit(
+            settings,
+            agents,
+            worker_configs,
         )
-        busy_cursor_count = sum(
-            1
-            for a in agents.values()
-            if a.role == AgentRole.WORKER
-            and a.status == AgentStatus.BUSY
-            and a.ai_cli == AICli.CURSOR
-        )
-        if cursor_request_count + busy_cursor_count > MAX_IMAGE_TASK_PARALLEL:
-            return {
-                "success": False,
-                "error": (
-                    f"画像生成タスクの並列実行数が上限を超えます"
-                    f"（新規要求: {cursor_request_count}, 実行中: {busy_cursor_count}, "
-                    f"上限: {MAX_IMAGE_TASK_PARALLEL}）"
-                ),
-            }
+        if image_routing_error:
+            return image_routing_error
 
         reusable_workers, _reuse_count, capacity_error = _validate_batch_capacity(
             agents,

@@ -106,6 +106,7 @@ class TestGenerateEnvTemplate:
         """テンプレートにモデルプロファイル設定が含まれることをテスト。"""
         template = generate_env_template()
         assert "MCP_MODEL_PROFILE_ACTIVE" in template
+        assert "MCP_ENABLE_CURSOR_IMAGE_ROUTING" in template
         assert "MCP_MODEL_PROFILE_STANDARD_CLI" in template
         assert "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL" in template
         assert "MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL" in template

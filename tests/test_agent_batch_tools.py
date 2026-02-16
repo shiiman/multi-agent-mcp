@@ -7,12 +7,12 @@ import pytest
 from src.config.settings import AICli
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.agent_batch_tools import (
-    MAX_IMAGE_TASK_PARALLEL,
     _align_create_configs_with_slots,
     _pre_assign_pane_slots,
     _reuse_single_worker,
     _setup_worker_tmux_pane,
     _validate_batch_capacity,
+    _validate_cursor_image_task_parallel_limit,
 )
 from src.tools.agent_helpers import build_worker_task_branch
 
@@ -408,27 +408,13 @@ class TestPreferredCliReuse:
 class TestImageTaskParallelLimit:
     """画像生成タスク（Cursor CLI）の並列実行数上限チェック。
 
-    create_workers_batch 内のカウントロジックと同等のロジックを検証する。
+    フラグON時のみ制約を適用し、フラグOFF時は無効化されることを検証する。
     """
 
-    @staticmethod
-    def _count_busy_cursor(agents: dict[str, Agent]) -> int:
-        """BUSY な Cursor Worker の数をカウントする（ソースコードと同じロジック）。"""
-        return sum(
-            1
-            for a in agents.values()
-            if a.role == AgentRole.WORKER
-            and a.status == AgentStatus.BUSY
-            and a.ai_cli == AICli.CURSOR
-        )
-
-    @staticmethod
-    def _count_cursor_requests(worker_configs: list[dict]) -> int:
-        """Cursor CLI リクエスト数をカウントする。"""
-        return sum(1 for c in worker_configs if c.get("preferred_cli") == "cursor")
-
-    def test_busy_2_plus_request_1_exceeds_limit(self):
-        """BUSY Cursor Worker 2 台 + 新規 cursor 1 台 → 上限超過でエラー。"""
+    def test_busy_2_plus_request_1_exceeds_limit_when_enabled(self):
+        """BUSY Cursor Worker 2 台 + 新規 cursor 1 台 → ON時は上限超過エラー。"""
+        settings = MagicMock()
+        settings.enable_cursor_image_routing = True
         agents = {
             "w-1": _make_worker_agent(
                 "w-1", status=AgentStatus.BUSY, ai_cli=AICli.CURSOR, pane_index=1
@@ -439,15 +425,14 @@ class TestImageTaskParallelLimit:
         }
         configs = [{"preferred_cli": "cursor"}]
 
-        busy = self._count_busy_cursor(agents)
-        req = self._count_cursor_requests(configs)
+        error = _validate_cursor_image_task_parallel_limit(settings, agents, configs)
+        assert error is not None
+        assert "上限を超えます" in error["error"]
 
-        assert busy == 2
-        assert req == 1
-        assert busy + req > MAX_IMAGE_TASK_PARALLEL
-
-    def test_busy_1_plus_request_1_within_limit(self):
-        """BUSY Cursor Worker 1 台 + 新規 cursor 1 台 → 上限以内で成功。"""
+    def test_busy_1_plus_request_1_within_limit_when_enabled(self):
+        """BUSY Cursor Worker 1 台 + 新規 cursor 1 台 → ON時も上限以内で成功。"""
+        settings = MagicMock()
+        settings.enable_cursor_image_routing = True
         agents = {
             "w-1": _make_worker_agent(
                 "w-1", status=AgentStatus.BUSY, ai_cli=AICli.CURSOR, pane_index=1
@@ -455,15 +440,13 @@ class TestImageTaskParallelLimit:
         }
         configs = [{"preferred_cli": "cursor"}]
 
-        busy = self._count_busy_cursor(agents)
-        req = self._count_cursor_requests(configs)
+        error = _validate_cursor_image_task_parallel_limit(settings, agents, configs)
+        assert error is None
 
-        assert busy == 1
-        assert req == 1
-        assert busy + req <= MAX_IMAGE_TASK_PARALLEL
-
-    def test_idle_cursor_not_counted_as_busy(self):
-        """IDLE Cursor Worker 2 台 + 新規 cursor 1 台 → 成功（idle はカウント外）。"""
+    def test_idle_cursor_not_counted_as_busy_when_enabled(self):
+        """IDLE Cursor Worker 2 台 + 新規 cursor 1 台 → ON時も成功（idle はカウント外）。"""
+        settings = MagicMock()
+        settings.enable_cursor_image_routing = True
         agents = {
             "w-1": _make_worker_agent(
                 "w-1", status=AgentStatus.IDLE, ai_cli=AICli.CURSOR, pane_index=1
@@ -474,9 +457,22 @@ class TestImageTaskParallelLimit:
         }
         configs = [{"preferred_cli": "cursor"}]
 
-        busy = self._count_busy_cursor(agents)
-        req = self._count_cursor_requests(configs)
+        error = _validate_cursor_image_task_parallel_limit(settings, agents, configs)
+        assert error is None
 
-        assert busy == 0
-        assert req == 1
-        assert busy + req <= MAX_IMAGE_TASK_PARALLEL
+    def test_limit_is_disabled_when_routing_flag_is_off(self):
+        """フラグOFF時は上限超過条件でもエラーにしない。"""
+        settings = MagicMock()
+        settings.enable_cursor_image_routing = False
+        agents = {
+            "w-1": _make_worker_agent(
+                "w-1", status=AgentStatus.BUSY, ai_cli=AICli.CURSOR, pane_index=1
+            ),
+            "w-2": _make_worker_agent(
+                "w-2", status=AgentStatus.BUSY, ai_cli=AICli.CURSOR, pane_index=2
+            ),
+        }
+        configs = [{"preferred_cli": "cursor"}]
+
+        error = _validate_cursor_image_task_parallel_limit(settings, agents, configs)
+        assert error is None

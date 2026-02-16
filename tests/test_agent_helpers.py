@@ -495,6 +495,81 @@ class TestSendTaskToWorker:
         assert app_ctx.tmux.send_keys_to_pane.await_count == 2
 
     @pytest.mark.asyncio
+    async def test_worker_task_template_receives_image_routing_flag(self, app_ctx, temp_dir):
+        """Worker タスクテンプレート生成に画像ルーティング設定が伝搬される。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            worktree_path=str(temp_dir),
+            created_at=now,
+            last_activity=now,
+            ai_bootstrapped=False,
+        )
+        app_ctx.agents[agent.id] = agent
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.session_id = "session-001"
+        app_ctx.settings.enable_cursor_image_routing = True
+
+        app_ctx.tmux.send_keys_to_pane = AsyncMock(return_value=True)
+        app_ctx.ai_cli.build_stdin_command = MagicMock(return_value="bootstrap-command")
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.write_task_file.return_value = Path(temp_dir) / "task.md"
+        mock_dashboard.save_markdown_dashboard.return_value = None
+        mock_dashboard.record_api_call.return_value = None
+
+        mock_persona_manager = MagicMock()
+        mock_persona_manager.get_optimal_persona.return_value = MagicMock(
+            name="coder",
+            system_prompt_addition="focus on fixes",
+        )
+
+        with (
+            patch("src.tools.agent_helpers.search_memory_context", return_value=[]),
+            patch(
+                "src.tools.agent_helpers.ensure_persona_manager",
+                return_value=mock_persona_manager,
+            ),
+            patch(
+                "src.tools.agent_helpers.get_mcp_tool_prefix_from_config",
+                return_value="mcp__x__",
+            ),
+            patch(
+                "src.tools.agent_helpers.generate_7section_task",
+                return_value="task body",
+            ) as mock_generate_task,
+            patch("src.tools.agent_helpers.ensure_dashboard_manager", return_value=mock_dashboard),
+            patch("src.tools.agent_helpers.resolve_main_repo_root", return_value=str(temp_dir)),
+            patch("src.tools.agent_helpers.save_agent_to_file", return_value=True),
+        ):
+            await _send_task_to_worker(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content="assets/banner.png を生成する",
+                task_id="task-001",
+                branch="feature/task-001",
+                worktree_path=str(temp_dir),
+                session_id="session-001",
+                worker_index=0,
+                enable_worktree=False,
+                profile_settings={
+                    "worker_model": "opus",
+                    "worker_thinking_tokens": 4000,
+                    "worker_reasoning_effort": "none",
+                },
+                caller_agent_id="admin-001",
+            )
+
+        assert mock_generate_task.call_args.kwargs["enable_cursor_image_routing"] is True
+
+    @pytest.mark.asyncio
     async def test_worker_bootstrap_resolves_cli_from_env(self, app_ctx, temp_dir):
         """受入条件 #1/#2: Worker 起動時に env の CLI を優先して再解決する。"""
         mcp_dir = temp_dir / ".multi-agent-mcp"

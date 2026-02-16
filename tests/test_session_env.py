@@ -61,6 +61,7 @@ class TestGenerateEnvTemplate:
         assert "MCP_ENABLE_GIT=" in result
         assert "MCP_MAX_WORKERS=" not in result
         assert "MCP_ENABLE_WORKTREE=" in result
+        assert "MCP_ENABLE_CURSOR_IMAGE_ROUTING=" in result
 
     def test_template_contains_all_sections(self, settings):
         """テンプレートが全てのセクションを含む。"""

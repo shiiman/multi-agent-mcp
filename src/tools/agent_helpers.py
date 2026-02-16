@@ -577,6 +577,7 @@ def _prepare_worker_task_content(
         admin_id=caller_agent_id,
         mcp_tool_prefix=mcp_prefix,
         enable_git=agent_enable_git,
+        enable_cursor_image_routing=app_ctx.settings.enable_cursor_image_routing,
     )
 
     # タスクファイル作成

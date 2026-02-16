@@ -231,6 +231,12 @@ class Settings(BaseSettings):
     """git worktree を使用するか（デフォルト: False）。
     False にすると Worker は全て同一ディレクトリで作業する。"""
 
+    enable_cursor_image_routing: bool = Field(
+        default=False,
+        description="画像生成タスク向け Cursor ルーティング機能を有効化するか",
+    )
+    """画像生成タスク向け Cursor ルーティング機能の ON/OFF（デフォルト: False）。"""
+
     # tmux設定
     window_name_main: str = "main"
     """メインウィンドウ名（Admin + Worker 1-6）"""

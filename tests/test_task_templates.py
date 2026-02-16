@@ -245,6 +245,46 @@ class TestGenerateAdminTask:
         assert ".multi-agent-mcp/123/reports" in result
         assert ".multi-agent-mcp/123/reports/*.md" in result
 
+    def test_admin_task_hides_image_routing_section_by_default(self):
+        """画像ルーティング設定OFF（デフォルト）では専用セクションを表示しない。"""
+        settings = Settings()
+        settings.enable_cursor_image_routing = False
+
+        result = generate_admin_task(
+            session_id="123",
+            agent_id="admin-001",
+            plan_content="ロゴ画像を生成する",
+            branch_name="feature/test",
+            worker_count=2,
+            memory_context="",
+            project_name="test-project",
+            working_dir="/tmp/project",
+            settings=settings,
+        )
+
+        assert "画像生成タスクの Cursor Worker ルーティング" not in result
+        assert "Google Nano Banana Pro" not in result
+
+    def test_admin_task_shows_image_routing_section_when_enabled(self):
+        """画像ルーティング設定ON時は専用セクションを表示する。"""
+        settings = Settings()
+        settings.enable_cursor_image_routing = True
+
+        result = generate_admin_task(
+            session_id="123",
+            agent_id="admin-001",
+            plan_content="ロゴ画像を生成する",
+            branch_name="feature/test",
+            worker_count=2,
+            memory_context="",
+            project_name="test-project",
+            working_dir="/tmp/project",
+            settings=settings,
+        )
+
+        assert "画像生成タスクの Cursor Worker ルーティング" in result
+        assert "Google Nano Banana Pro" in result
+
 
 class TestGenerate7SectionTask:
     """generate_7section_task 関数のテスト。"""
@@ -486,8 +526,8 @@ class TestGenerate7SectionTask:
         )
         assert "mcp__multi-agent-mcp__report_task_completion" in result
 
-    def test_includes_image_task_policy_for_image_generation_tasks(self):
-        """画像生成タスクではスクリーンショット代替禁止ポリシーが入ることをテスト。"""
+    def test_includes_image_task_policy_for_image_generation_tasks_when_enabled(self):
+        """画像ルーティング設定ON時のみ画像生成ポリシーが挿入されることをテスト。"""
         result = generate_7section_task(
             task_id="IMG-001",
             agent_id="worker-001",
@@ -496,14 +536,28 @@ class TestGenerate7SectionTask:
             persona_prompt="...",
             memory_context="",
             project_name="test-project",
+            enable_cursor_image_routing=True,
         )
         assert "## Image Task Policy（画像生成タスク専用）" in result
         assert "Google Nano Banana Pro" in result
         assert "Python スクリプト（Pillow / matplotlib / OpenCV など）" in result
         assert "ブラウザ/Playwright でスクリーンショットして PNG 化する方法は不可" in result
 
+    def test_does_not_include_image_task_policy_when_routing_disabled(self):
+        """画像生成タスクでも設定OFFなら画像生成専用ポリシーを挿入しないことをテスト。"""
+        result = generate_7section_task(
+            task_id="IMG-002",
+            agent_id="worker-001",
+            task_description="banner.png を画像生成で作成する",
+            persona_name="Backend Engineer",
+            persona_prompt="...",
+            memory_context="",
+            project_name="test-project",
+        )
+        assert "## Image Task Policy（画像生成タスク専用）" not in result
+
     def test_does_not_include_image_task_policy_for_non_image_tasks(self):
-        """通常実装タスクでは画像生成専用ポリシーを挿入しないことをテスト。"""
+        """通常実装タスクでは設定ONでも画像生成専用ポリシーを挿入しないことをテスト。"""
         result = generate_7section_task(
             task_id="TASK-API-001",
             agent_id="worker-001",
@@ -512,5 +566,6 @@ class TestGenerate7SectionTask:
             persona_prompt="...",
             memory_context="",
             project_name="test-project",
+            enable_cursor_image_routing=True,
         )
         assert "## Image Task Policy（画像生成タスク専用）" not in result
