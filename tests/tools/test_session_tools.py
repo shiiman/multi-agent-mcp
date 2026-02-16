@@ -312,7 +312,9 @@ class TestInitTmuxWorkspace:
         )
 
         assert result["success"] is True
-        assert app_ctx.session_id == "issue-234"
+        assert re.fullmatch(r"\d{8}-\d{6}-issue-234", app_ctx.session_id or "")
+        assert result["requested_session_id"] == "issue-234"
+        assert result["session_id_prefix"]["prefix_applied"] is True
         assert app_ctx.ipc_manager is None
 
     @pytest.mark.asyncio

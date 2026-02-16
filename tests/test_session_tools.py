@@ -1,5 +1,6 @@
 """session_tools.py のユニットテスト。"""
 
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,8 +11,8 @@ from src.tools.session_state import (
     cleanup_session_resources,
 )
 from src.tools.session_tools import (
+    _apply_sortable_session_prefix,
     _migrate_provisional_session_dir,
-    _resolve_non_colliding_session_id,
 )
 
 # cleanup_session_resources 内で resolve_main_repo_root が呼ばれるのをモック
@@ -275,46 +276,22 @@ class TestProvisionalSessionMigration:
         assert not second.exists()
 
 
-class TestSessionIdCollisionResolution:
-    """session_id の重複回避ロジックのテスト。"""
+class TestSessionPrefixing:
+    """session_id プレフィックス付与のテスト。"""
 
-    def test_keeps_requested_session_id_when_no_collision(self, temp_dir):
-        """同名ディレクトリがなければ requested_session_id をそのまま使う。"""
-        resolved, meta = _resolve_non_colliding_session_id(
-            project_root=str(temp_dir),
-            mcp_dir_name=".multi-agent-mcp",
-            requested_session_id="task-alpha",
-            current_session_id=None,
-        )
-        assert resolved == "task-alpha"
-        assert meta["collision_avoided"] is False
+    def test_applies_sortable_prefix(self):
+        """新規 session_id に YYYYMMDD-HHMMSS- を付与する。"""
+        prefixed, meta = _apply_sortable_session_prefix("task-alpha")
 
-    def test_appends_numeric_suffix_when_collision_exists(self, temp_dir):
-        """同名ディレクトリが既にある場合は -2 以降を付与して一意化する。"""
-        mcp_dir = temp_dir / ".multi-agent-mcp"
-        (mcp_dir / "task-alpha").mkdir(parents=True, exist_ok=True)
-        (mcp_dir / "task-alpha-2").mkdir(parents=True, exist_ok=True)
+        assert prefixed is not None
+        assert re.fullmatch(r"\d{8}-\d{6}-task-alpha", prefixed)
+        assert meta["prefix_applied"] is True
+        assert meta["prefixed_session_id"] == prefixed
 
-        resolved, meta = _resolve_non_colliding_session_id(
-            project_root=str(temp_dir),
-            mcp_dir_name=".multi-agent-mcp",
-            requested_session_id="task-alpha",
-            current_session_id=None,
-        )
-        assert resolved == "task-alpha-3"
-        assert meta["collision_avoided"] is True
-        assert meta["suffix"] == 3
+    def test_keeps_already_prefixed_session_id(self):
+        """既にプレフィックス済みの場合は再付与しない。"""
+        session_id = "20260216-123456-task-alpha"
+        prefixed, meta = _apply_sortable_session_prefix(session_id)
 
-    def test_keeps_current_session_id_even_if_directory_exists(self, temp_dir):
-        """現在セッションと同じ requested_session_id なら重複回避しない。"""
-        mcp_dir = temp_dir / ".multi-agent-mcp"
-        (mcp_dir / "task-alpha").mkdir(parents=True, exist_ok=True)
-
-        resolved, meta = _resolve_non_colliding_session_id(
-            project_root=str(temp_dir),
-            mcp_dir_name=".multi-agent-mcp",
-            requested_session_id="task-alpha",
-            current_session_id="task-alpha",
-        )
-        assert resolved == "task-alpha"
-        assert meta["collision_avoided"] is False
+        assert prefixed == session_id
+        assert meta["prefix_applied"] is False

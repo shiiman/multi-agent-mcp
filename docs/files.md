@@ -339,13 +339,14 @@ read_at: null
 
 ### セッションディレクトリ
 
-- `session_id` がセッションディレクトリ名として使用される
+- `session_id` には `{YYYYMMDD}-{HHMMSS}-` の時系列プレフィックスが自動付与される
+- 付与後の ID がセッションディレクトリ名として使用される
 - 通常は Issue 番号や UUID
 
 ```
 .multi-agent-mcp/
-├── issue-123/          # session_id = "issue-123"
-├── feature-456/        # session_id = "feature-456"
+├── 20260216-104501-issue-123/          # session_id = "issue-123"
+├── 20260216-104953-feature-456/        # session_id = "feature-456"
 └── memory/             # session_id なしの場合はこちら
 ```
 

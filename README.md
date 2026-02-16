@@ -502,7 +502,7 @@ Worker上限は `MCP_MODEL_PROFILE_ACTIVE` に応じて
 ├── config.json             # 実行時設定（session_id / enable_git など）
 ├── memory/                 # プロジェクトメモリ
 ├── screenshot/             # スクリーンショット保存先
-└── {session_id}/           # セッション別
+└── {YYYYMMDD}-{HHMMSS}-{session_id}/  # セッション別（時系列プレフィックス）
     ├── dashboard/          # ダッシュボード
     ├── tasks/              # タスクファイル
     └── reports/            # 調査/検証レポート（*.md）

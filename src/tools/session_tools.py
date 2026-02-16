@@ -2,6 +2,7 @@
 
 import logging
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,38 +30,32 @@ from src.tools.session_state import (
 logger = logging.getLogger(__name__)
 
 
-def _resolve_non_colliding_session_id(
-    project_root: str,
-    mcp_dir_name: str,
-    requested_session_id: str | None,
-    current_session_id: str | None = None,
-) -> tuple[str | None, dict[str, Any]]:
-    """session_id の衝突を回避して一意な ID を解決する。"""
-    resolution: dict[str, Any] = {
-        "requested_session_id": requested_session_id,
-        "resolved_session_id": requested_session_id,
-        "collision_avoided": False,
+def _apply_sortable_session_prefix(session_id: str | None) -> tuple[str | None, dict[str, Any]]:
+    """一覧表示時に新しいセッションが下に並ぶ時系列プレフィックスを付与する。"""
+    metadata: dict[str, Any] = {
+        "requested_session_id": session_id,
+        "prefixed_session_id": session_id,
+        "prefix_applied": False,
     }
-    if not requested_session_id:
-        return requested_session_id, resolution
-    if current_session_id and requested_session_id == current_session_id:
-        return requested_session_id, resolution
+    if not session_id:
+        return session_id, metadata
 
-    base_dir = Path(project_root) / mcp_dir_name
-    requested_dir = base_dir / requested_session_id
-    if not requested_dir.exists():
-        return requested_session_id, resolution
+    # 既に YYYYMMDD-HHMMSS- 形式なら再付与しない。
+    if (
+        len(session_id) >= 16
+        and session_id[8] == "-"
+        and session_id[15] == "-"
+        and session_id[0:8].isdigit()
+        and session_id[9:15].isdigit()
+    ):
+        return session_id, metadata
 
-    suffix = 2
-    while True:
-        candidate = f"{requested_session_id}-{suffix}"
-        candidate_dir = base_dir / candidate
-        if not candidate_dir.exists():
-            resolution["resolved_session_id"] = candidate
-            resolution["collision_avoided"] = True
-            resolution["suffix"] = suffix
-            return candidate, resolution
-        suffix += 1
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    prefixed_session_id = f"{timestamp}-{session_id}"
+    metadata["prefixed_session_id"] = prefixed_session_id
+    metadata["prefix_applied"] = True
+    metadata["prefix"] = timestamp
+    return prefixed_session_id, metadata
 
 
 def _migrate_provisional_session_dir(
@@ -397,28 +392,30 @@ def register_tools(mcp: FastMCP) -> None:
             "resolved_session_id": session_id,
             "collision_avoided": False,
         }
+        session_id_prefix = {
+            "requested_session_id": session_id,
+            "prefixed_session_id": session_id,
+            "prefix_applied": False,
+        }
         provisional_cleanup_result = {
             "removed_count": 0,
             "removed_dirs": [],
             "errors": [],
         }
         if session_id:
-            resolved_session_id, session_id_resolution = _resolve_non_colliding_session_id(
-                project_root=resolved_project_root,
-                mcp_dir_name=app_ctx.settings.mcp_dir,
-                requested_session_id=session_id,
-                current_session_id=app_ctx.session_id,
-            )
+            prefixed_session_id, session_id_prefix = _apply_sortable_session_prefix(session_id)
             if (
-                session_id_resolution.get("collision_avoided")
-                and resolved_session_id
-                and resolved_session_id != session_id
+                session_id_prefix.get("prefix_applied")
+                and prefixed_session_id
+                and prefixed_session_id != session_id
             ):
                 logger.info(
-                    "session_id の重複を検出したため一意化します: %s -> %s",
+                    "session_id に時系列プレフィックスを付与します: %s -> %s",
                     session_id,
-                    resolved_session_id,
+                    prefixed_session_id,
                 )
+            resolved_session_id = prefixed_session_id
+            session_id_resolution["resolved_session_id"] = resolved_session_id
             migration_result = _migrate_provisional_session_dir(
                 project_root=resolved_project_root,
                 mcp_dir_name=app_ctx.settings.mcp_dir,
@@ -549,6 +546,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_id": resolved_session_id,
                     "requested_session_id": session_id,
                     "session_id_resolution": session_id_resolution,
+                    "session_id_prefix": session_id_prefix,
                     "gtr_status": gtr_status,
                     "mode": {
                         "enable_git": app_ctx.settings.enable_git,
@@ -564,6 +562,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_id": resolved_session_id,
                     "requested_session_id": session_id,
                     "session_id_resolution": session_id_resolution,
+                    "session_id_prefix": session_id_prefix,
                     "gtr_status": gtr_status,
                     "mode": {
                         "enable_git": app_ctx.settings.enable_git,
@@ -583,6 +582,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_id": resolved_session_id,
                     "requested_session_id": session_id,
                     "session_id_resolution": session_id_resolution,
+                    "session_id_prefix": session_id_prefix,
                     "gtr_status": gtr_status,
                     "mode": {
                         "enable_git": app_ctx.settings.enable_git,
@@ -598,6 +598,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "session_id": resolved_session_id,
                     "requested_session_id": session_id,
                     "session_id_resolution": session_id_resolution,
+                    "session_id_prefix": session_id_prefix,
                     "gtr_status": gtr_status,
                     "mode": {
                         "enable_git": app_ctx.settings.enable_git,
