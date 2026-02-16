@@ -9,6 +9,48 @@ from pathlib import Path
 from src.config.settings import Settings, load_effective_settings_for_project
 from src.config.template_loader import get_template_loader
 
+_IMAGE_TASK_HINTS = (
+    "image generation",
+    "generate image",
+    "infographic",
+    "ogp",
+    "banner",
+    "icon",
+    "logo",
+    "画像生成",
+    "画像を作成",
+    "画像を生成",
+    "インフォグラフィック",
+    "図を生成",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".svg",
+)
+
+
+def _looks_like_image_generation_task(task_description: str) -> bool:
+    """タスク説明が画像生成タスクかどうかを判定する。"""
+    normalized = (task_description or "").lower()
+    return any(hint in normalized for hint in _IMAGE_TASK_HINTS)
+
+
+def _build_image_task_policy_section(task_description: str) -> str:
+    """画像生成タスク用の追加ポリシー文面を返す。"""
+    if not _looks_like_image_generation_task(task_description):
+        return ""
+
+    return """
+## Image Task Policy（画像生成タスク専用）
+
+- 最終成果物は画像生成機能や画像描画ツールで直接作成する
+- HTML を作ってブラウザ/Playwright でスクリーンショットして PNG 化する方法は不可
+- UI テスト用キャプチャ画像を成果物として提出しない
+- 画像生成が実行不能な場合は勝手に代替せず `send_message(message_type=\"request\")` で Admin にエスカレーションする
+- 完了報告には生成手段・使用ツール/モデル・最終画像パスを明記する
+""".strip()
+
 
 def generate_admin_task(
     session_id: str,
@@ -153,6 +195,7 @@ def generate_7section_task(
 
     loader = get_template_loader()
     template_name = "worker_task" if enable_git else "worker_task_no_git"
+    image_task_policy_section = _build_image_task_policy_section(task_description)
     return loader.render(
         "tasks",
         template_name,
@@ -168,4 +211,5 @@ def generate_7section_task(
         timestamp=timestamp,
         admin_id=admin_id if admin_id else "{{ADMIN_ID}}",
         mcp_tool_prefix=mcp_tool_prefix,
+        image_task_policy_section=image_task_policy_section,
     )

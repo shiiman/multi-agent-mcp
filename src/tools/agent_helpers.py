@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.managers.tmux_manager import TmuxManager
 
-from src.config.settings import AICli, Settings
+from src.config.settings import AICli, Settings, resolve_model_for_cli
 from src.config.workflow_guides import get_role_template_path_for_workspace
 from src.context import AppContext
 from src.managers.tmux_manager import (
@@ -162,6 +162,31 @@ def _resolve_agent_enable_git(
     if resolved is None:
         return app_ctx.settings.enable_git
     return resolved
+
+
+def _resolve_worker_model_for_cli(
+    app_ctx: AppContext,
+    agent: Agent,
+    profile_settings: dict,
+    agent_cli_name: str | None = None,
+) -> str | None:
+    """Worker の実行 CLI に整合するモデル名を解決する。"""
+    cli_name = (agent_cli_name or _resolve_agent_cli_name(agent, app_ctx)).lower()
+    worker_no = resolve_worker_number_from_slot(
+        app_ctx.settings,
+        agent.window_index,
+        agent.pane_index,
+    )
+    configured_model = app_ctx.settings.get_worker_model(
+        worker_no,
+        profile_settings.get("worker_model"),
+    )
+    return resolve_model_for_cli(
+        cli_name,
+        configured_model,
+        role="worker",
+        cli_defaults=app_ctx.settings.get_cli_default_models(),
+    )
 
 
 def _build_change_directory_command(cli_name: str, worktree_path: str) -> str:
@@ -581,13 +606,12 @@ async def _dispatch_bootstrap_command(
     """AI CLI の初回起動コマンドを tmux に送信する。"""
     tmux = app_ctx.tmux
     agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
-    worker_no = resolve_worker_number_from_slot(
-        app_ctx.settings,
-        agent.window_index,
-        agent.pane_index,
+    worker_model = _resolve_worker_model_for_cli(
+        app_ctx,
+        agent,
+        profile_settings,
+        agent_cli_name=agent_cli_name,
     )
-    worker_model_default = profile_settings.get("worker_model")
-    worker_model = app_ctx.settings.get_worker_model(worker_no, worker_model_default)
     thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
     reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
 
@@ -808,14 +832,11 @@ async def _send_task_to_worker(
             return _make_dispatch_result(False, dispatch_error="Workerペインが未設定です")
 
         agent_cli_name = _resolve_agent_cli_name(agent, app_ctx)
-        worker_no = resolve_worker_number_from_slot(
-            app_ctx.settings,
-            agent.window_index,
-            agent.pane_index,
-        )
-        worker_model = app_ctx.settings.get_worker_model(
-            worker_no,
-            profile_settings.get("worker_model"),
+        worker_model = _resolve_worker_model_for_cli(
+            app_ctx,
+            agent,
+            profile_settings,
+            agent_cli_name=agent_cli_name,
         )
         thinking_tokens = profile_settings.get("worker_thinking_tokens", 4000)
         should_bootstrap = not bool(getattr(agent, "ai_bootstrapped", False))

@@ -29,6 +29,40 @@ from src.tools.session_state import (
 logger = logging.getLogger(__name__)
 
 
+def _resolve_non_colliding_session_id(
+    project_root: str,
+    mcp_dir_name: str,
+    requested_session_id: str | None,
+    current_session_id: str | None = None,
+) -> tuple[str | None, dict[str, Any]]:
+    """session_id の衝突を回避して一意な ID を解決する。"""
+    resolution: dict[str, Any] = {
+        "requested_session_id": requested_session_id,
+        "resolved_session_id": requested_session_id,
+        "collision_avoided": False,
+    }
+    if not requested_session_id:
+        return requested_session_id, resolution
+    if current_session_id and requested_session_id == current_session_id:
+        return requested_session_id, resolution
+
+    base_dir = Path(project_root) / mcp_dir_name
+    requested_dir = base_dir / requested_session_id
+    if not requested_dir.exists():
+        return requested_session_id, resolution
+
+    suffix = 2
+    while True:
+        candidate = f"{requested_session_id}-{suffix}"
+        candidate_dir = base_dir / candidate
+        if not candidate_dir.exists():
+            resolution["resolved_session_id"] = candidate
+            resolution["collision_avoided"] = True
+            resolution["suffix"] = suffix
+            return candidate, resolution
+        suffix += 1
+
+
 def _migrate_provisional_session_dir(
     project_root: str,
     mcp_dir_name: str,
@@ -357,22 +391,47 @@ def register_tools(mcp: FastMCP) -> None:
             "target_session_id": session_id,
             "source_removed": False,
         }
+        resolved_session_id = session_id
+        session_id_resolution = {
+            "requested_session_id": session_id,
+            "resolved_session_id": session_id,
+            "collision_avoided": False,
+        }
         provisional_cleanup_result = {
             "removed_count": 0,
             "removed_dirs": [],
             "errors": [],
         }
         if session_id:
+            resolved_session_id, session_id_resolution = _resolve_non_colliding_session_id(
+                project_root=resolved_project_root,
+                mcp_dir_name=app_ctx.settings.mcp_dir,
+                requested_session_id=session_id,
+                current_session_id=app_ctx.session_id,
+            )
+            if (
+                session_id_resolution.get("collision_avoided")
+                and resolved_session_id
+                and resolved_session_id != session_id
+            ):
+                logger.info(
+                    "session_id の重複を検出したため一意化します: %s -> %s",
+                    session_id,
+                    resolved_session_id,
+                )
             migration_result = _migrate_provisional_session_dir(
                 project_root=resolved_project_root,
                 mcp_dir_name=app_ctx.settings.mcp_dir,
                 previous_session_id=app_ctx.session_id,
-                new_session_id=session_id,
+                new_session_id=resolved_session_id,
             )
-            app_ctx.session_id = session_id
+            app_ctx.session_id = resolved_session_id
             if app_ctx.ipc_manager is not None:
                 expected_ipc_dir = (
-                    Path(resolved_project_root) / app_ctx.settings.mcp_dir / session_id / "ipc"
+                    Path(resolved_project_root)
+                    / app_ctx.settings.mcp_dir
+                    / resolved_session_id
+                    / "ipc"
                 )
                 current_ipc_dir = Path(app_ctx.ipc_manager.ipc_dir)
                 is_session_scoped_ipc = f"/{app_ctx.settings.mcp_dir}/" in str(
@@ -409,7 +468,7 @@ def register_tools(mcp: FastMCP) -> None:
                     agent_id=agent.id,
                     owner_id=owner_id,
                     project_root=resolved_project_root,
-                    session_id=session_id,
+                    session_id=resolved_session_id,
                 )
             provisional_cleanup_result = cleanup_orphan_provisional_sessions(
                 resolved_project_root,
@@ -450,7 +509,7 @@ def register_tools(mcp: FastMCP) -> None:
             mcp_setup = _setup_mcp_directories(
                 working_dir,
                 settings=project_settings,
-                session_id=session_id,
+                session_id=resolved_session_id,
                 enable_git_override=effective_enable_git,
             )
         except ValueError as e:
@@ -487,7 +546,9 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "session_name": session_name,
-                    "session_id": session_id,
+                    "session_id": resolved_session_id,
+                    "requested_session_id": session_id,
+                    "session_id_resolution": session_id_resolution,
                     "gtr_status": gtr_status,
                     "mode": {
                         "enable_git": app_ctx.settings.enable_git,
@@ -500,6 +561,9 @@ def register_tools(mcp: FastMCP) -> None:
             else:
                 return {
                     "success": False,
+                    "session_id": resolved_session_id,
+                    "requested_session_id": session_id,
+                    "session_id_resolution": session_id_resolution,
                     "gtr_status": gtr_status,
                     "mode": {
                         "enable_git": app_ctx.settings.enable_git,
@@ -516,7 +580,9 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "session_name": session_name,
-                    "session_id": session_id,
+                    "session_id": resolved_session_id,
+                    "requested_session_id": session_id,
+                    "session_id_resolution": session_id_resolution,
                     "gtr_status": gtr_status,
                     "mode": {
                         "enable_git": app_ctx.settings.enable_git,
@@ -529,6 +595,9 @@ def register_tools(mcp: FastMCP) -> None:
             else:
                 return {
                     "success": False,
+                    "session_id": resolved_session_id,
+                    "requested_session_id": session_id,
+                    "session_id_resolution": session_id_resolution,
                     "gtr_status": gtr_status,
                     "mode": {
                         "enable_git": app_ctx.settings.enable_git,

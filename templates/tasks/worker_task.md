@@ -22,6 +22,8 @@
 - ユーザーには質問せず、判断が必要な場合は `send_message` で Admin に質問する
 - 軽微な曖昧さは妥当な前提を置いて自己判断で前進し、判断内容を Admin に共有する
 
+{image_task_policy_section}
+
 ## Current State（現状）
 
 ### 作業環境

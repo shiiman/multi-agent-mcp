@@ -26,6 +26,8 @@
 - No Git モードのため git 操作は行わない
 - git commit / branch / worktree 操作は行わない
 
+{image_task_policy_section}
+
 ## Current State（現状）
 
 ### 作業環境

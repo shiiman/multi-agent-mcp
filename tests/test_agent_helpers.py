@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.config.settings import AICli, ModelProfile
+from src.config.settings import AICli, ModelProfile, WorkerCliMode
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.agent_helpers import (
     _get_next_worker_slot,
@@ -574,3 +574,81 @@ class TestSendTaskToWorker:
 
         assert result["task_sent"] is True
         assert app_ctx.ai_cli.build_stdin_command.call_args.kwargs["cli"] == "codex"
+
+    @pytest.mark.asyncio
+    async def test_worker_bootstrap_resolves_model_for_switched_cli(self, app_ctx, temp_dir):
+        """Cursor に切替時、非互換モデルを Cursor デフォルトへ解決して送信・記録する。"""
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.session_id = "session-003"
+        app_ctx.settings.worker_cli_mode = WorkerCliMode.PER_WORKER
+        app_ctx.settings.worker_model_1 = "gemini-3-flash-preview"
+        app_ctx.settings.cli_default_cursor_worker_model = "composer-1.5"
+
+        now = datetime.now()
+        agent = Agent(
+            id="worker-003",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            worktree_path=str(temp_dir),
+            ai_cli=AICli.CURSOR,
+            ai_cli_pinned=True,
+            ai_bootstrapped=False,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents[agent.id] = agent
+        app_ctx.ai_cli.build_stdin_command = MagicMock(return_value="bootstrap-cursor")
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.write_task_file.return_value = Path(temp_dir) / "task.md"
+        mock_dashboard.save_markdown_dashboard.return_value = None
+        mock_dashboard.record_api_call.return_value = None
+
+        mock_persona_manager = MagicMock()
+        mock_persona_manager.get_optimal_persona.return_value = MagicMock(
+            name="designer",
+            system_prompt_addition="focus on image task",
+        )
+
+        with (
+            patch("src.tools.agent_helpers.search_memory_context", return_value=[]),
+            patch(
+                "src.tools.agent_helpers.ensure_persona_manager",
+                return_value=mock_persona_manager,
+            ),
+            patch(
+                "src.tools.agent_helpers.get_mcp_tool_prefix_from_config",
+                return_value="mcp__x__",
+            ),
+            patch("src.tools.agent_helpers.generate_7section_task", return_value="task body"),
+            patch("src.tools.agent_helpers.ensure_dashboard_manager", return_value=mock_dashboard),
+            patch("src.tools.agent_helpers.resolve_main_repo_root", return_value=str(temp_dir)),
+            patch("src.tools.agent_helpers.save_agent_to_file", return_value=True),
+        ):
+            result = await _send_task_to_worker(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content="assets/infographic.png を作成",
+                task_id="task-003",
+                branch="worker-1",
+                worktree_path=str(temp_dir),
+                session_id="session-003",
+                worker_index=0,
+                enable_worktree=False,
+                profile_settings={
+                    "worker_model": "gpt-5.3-codex",
+                    "worker_thinking_tokens": 4000,
+                    "worker_reasoning_effort": "none",
+                },
+                caller_agent_id="admin-001",
+            )
+
+        assert result["task_sent"] is True
+        assert app_ctx.ai_cli.build_stdin_command.call_args.kwargs["cli"] == "cursor"
+        assert app_ctx.ai_cli.build_stdin_command.call_args.kwargs["model"] == "composer-1.5"
+        assert mock_dashboard.record_api_call.call_args.kwargs["model"] == "composer-1.5"

@@ -485,3 +485,30 @@ class TestGenerate7SectionTask:
             project_name="test-project",
         )
         assert "mcp__multi-agent-mcp__report_task_completion" in result
+
+    def test_includes_image_task_policy_for_image_generation_tasks(self):
+        """画像生成タスクではスクリーンショット代替禁止ポリシーが入ることをテスト。"""
+        result = generate_7section_task(
+            task_id="IMG-001",
+            agent_id="worker-001",
+            task_description="assets/ogp.png を画像生成で作成する",
+            persona_name="Designer",
+            persona_prompt="...",
+            memory_context="",
+            project_name="test-project",
+        )
+        assert "## Image Task Policy（画像生成タスク専用）" in result
+        assert "スクリーンショットで PNG 化する方法は不可" in result
+
+    def test_does_not_include_image_task_policy_for_non_image_tasks(self):
+        """通常実装タスクでは画像生成専用ポリシーを挿入しないことをテスト。"""
+        result = generate_7section_task(
+            task_id="TASK-API-001",
+            agent_id="worker-001",
+            task_description="API エンドポイントを実装する",
+            persona_name="Backend Engineer",
+            persona_prompt="...",
+            memory_context="",
+            project_name="test-project",
+        )
+        assert "## Image Task Policy（画像生成タスク専用）" not in result

@@ -9,7 +9,10 @@ from src.tools.session_state import (
     cleanup_orphan_provisional_sessions,
     cleanup_session_resources,
 )
-from src.tools.session_tools import _migrate_provisional_session_dir
+from src.tools.session_tools import (
+    _migrate_provisional_session_dir,
+    _resolve_non_colliding_session_id,
+)
 
 # cleanup_session_resources 内で resolve_main_repo_root が呼ばれるのをモック
 _RESOLVE_PATCH = "src.tools.helpers_persistence.resolve_main_repo_root"
@@ -270,3 +273,48 @@ class TestProvisionalSessionMigration:
         assert sorted(result["removed_dirs"]) == ["provisional-old1111", "provisional-old2222"]
         assert not first.exists()
         assert not second.exists()
+
+
+class TestSessionIdCollisionResolution:
+    """session_id の重複回避ロジックのテスト。"""
+
+    def test_keeps_requested_session_id_when_no_collision(self, temp_dir):
+        """同名ディレクトリがなければ requested_session_id をそのまま使う。"""
+        resolved, meta = _resolve_non_colliding_session_id(
+            project_root=str(temp_dir),
+            mcp_dir_name=".multi-agent-mcp",
+            requested_session_id="task-alpha",
+            current_session_id=None,
+        )
+        assert resolved == "task-alpha"
+        assert meta["collision_avoided"] is False
+
+    def test_appends_numeric_suffix_when_collision_exists(self, temp_dir):
+        """同名ディレクトリが既にある場合は -2 以降を付与して一意化する。"""
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        (mcp_dir / "task-alpha").mkdir(parents=True, exist_ok=True)
+        (mcp_dir / "task-alpha-2").mkdir(parents=True, exist_ok=True)
+
+        resolved, meta = _resolve_non_colliding_session_id(
+            project_root=str(temp_dir),
+            mcp_dir_name=".multi-agent-mcp",
+            requested_session_id="task-alpha",
+            current_session_id=None,
+        )
+        assert resolved == "task-alpha-3"
+        assert meta["collision_avoided"] is True
+        assert meta["suffix"] == 3
+
+    def test_keeps_current_session_id_even_if_directory_exists(self, temp_dir):
+        """現在セッションと同じ requested_session_id なら重複回避しない。"""
+        mcp_dir = temp_dir / ".multi-agent-mcp"
+        (mcp_dir / "task-alpha").mkdir(parents=True, exist_ok=True)
+
+        resolved, meta = _resolve_non_colliding_session_id(
+            project_root=str(temp_dir),
+            mcp_dir_name=".multi-agent-mcp",
+            requested_session_id="task-alpha",
+            current_session_id="task-alpha",
+        )
+        assert resolved == "task-alpha"
+        assert meta["collision_avoided"] is False
