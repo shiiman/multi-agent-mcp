@@ -42,6 +42,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
     old_working_dir = old_agent.working_dir or old_worktree_path or str(app_ctx.project_root or ".")
     old_branch = getattr(old_agent, "branch", None)
     old_ai_cli = old_agent.ai_cli
+    old_ai_cli_pinned = bool(getattr(old_agent, "ai_cli_pinned", False))
     old_session_name = old_agent.session_name
     old_window_index = old_agent.window_index
     old_pane_index = old_agent.pane_index
@@ -166,6 +167,7 @@ async def execute_full_recovery(app_ctx, agent_id: str) -> dict[str, Any]:
         last_activity=datetime.now(),
         worktree_path=new_worktree_path,
         ai_cli=old_ai_cli,
+        ai_cli_pinned=old_ai_cli_pinned,
         ai_bootstrapped=False,
         session_name=old_session_name,
         window_index=old_window_index,

@@ -133,6 +133,17 @@ class TestResolveHelpers:
 
         assert _resolve_agent_cli_name(agent, app_ctx) == "cursor"
 
+    def test_resolve_worker_cli_name_prefers_pinned_agent_cli(self):
+        """pin 済み Worker は slot/.env より agent.ai_cli を優先する。"""
+        agent = _make_worker_agent()
+        agent.ai_cli = AICli.CURSOR
+        agent.ai_cli_pinned = True
+
+        app_ctx = MagicMock()
+        app_ctx.settings.get_worker_cli.return_value = AICli.CODEX
+
+        assert _resolve_agent_cli_name(agent, app_ctx) == "cursor"
+
 
 class TestSanitizeBranchPart:
     """_sanitize_branch_part のテスト。"""

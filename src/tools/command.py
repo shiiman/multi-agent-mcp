@@ -98,7 +98,7 @@ def _audit_command_guard(
 
 def _resolve_cli_name_for_dispatch(agent: Agent, app_ctx: AppContext) -> str:
     """送信時に使用する CLI 名を正規化して解決する。"""
-    # Worker は agents.json 上の stale ai_cli より .env 設定を優先する。
+    # Worker は通常 .env 設定を優先するが、pin された CLI は agent 側を優先する。
     if agent.role == AgentRole.WORKER:
         return _resolve_agent_cli_name(agent, app_ctx)
 

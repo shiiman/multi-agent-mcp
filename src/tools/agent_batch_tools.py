@@ -185,12 +185,14 @@ async def _setup_worker_tmux_pane(
 ) -> tuple[Agent | None, dict[str, Any] | None]:
     """tmux セッション確保とエージェントオブジェクトを作成する。"""
     tmux = app_ctx.tmux
+    worker_cli_pinned = False
 
     if preferred_cli:
         from src.config.settings import AICli
 
         try:
             worker_cli = AICli(preferred_cli)
+            worker_cli_pinned = True
         except ValueError:
             logger.warning(
                 "無効な preferred_cli '%s' → デフォルトCLIにフォールバック", preferred_cli
@@ -245,6 +247,7 @@ async def _setup_worker_tmux_pane(
         window_index=window_index,
         pane_index=pane_index,
         ai_cli=worker_cli,
+        ai_cli_pinned=worker_cli_pinned,
         created_at=now,
         last_activity=now,
     )
@@ -404,6 +407,7 @@ async def _reuse_single_worker(
     task_id = config.get("task_id")
     task_content = config.get("task_content")
     preferred_cli = config.get("preferred_cli")
+    requested_cli = None
 
     if preferred_cli:
         from src.config.settings import AICli
@@ -429,7 +433,11 @@ async def _reuse_single_worker(
         worker.window_index or 0,
         worker.pane_index or 0,
     )
-    worker.ai_cli = settings.get_worker_cli(worker_no)
+    if requested_cli:
+        worker.ai_cli = requested_cli
+        worker.ai_cli_pinned = True
+    elif not getattr(worker, "ai_cli_pinned", False):
+        worker.ai_cli = settings.get_worker_cli(worker_no)
     branch = requested_branch or f"worker-{worker_no}"
     if enable_worktree:
         if not task_id:

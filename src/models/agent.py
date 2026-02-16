@@ -66,6 +66,10 @@ class Agent(BaseModel):
         default=None, description="AI CLI セッションの接続先識別子"
     )
     ai_cli: AICli | None = Field(default=None, description="使用するAI CLI（None=デフォルト）")
+    ai_cli_pinned: bool = Field(
+        default=False,
+        description="True の場合、Worker CLI 解決で slot/.env より agent.ai_cli を優先する",
+    )
     ai_bootstrapped: bool = Field(
         default=False,
         description="Worker が AI 起動済みかどうか（初回タスク送信後に True）",

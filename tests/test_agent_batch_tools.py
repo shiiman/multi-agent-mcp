@@ -169,6 +169,7 @@ class TestPreferredCliNewWorker:
         assert error is None
         assert agent is not None
         assert agent.ai_cli == AICli.CURSOR
+        assert agent.ai_cli_pinned is True
         # get_worker_cli はフォールバック時のみ呼ばれるため、ここでは呼ばれない
         mock_settings.get_worker_cli.assert_not_called()
 
@@ -200,6 +201,7 @@ class TestPreferredCliNewWorker:
         assert error is None
         assert agent is not None
         assert agent.ai_cli == AICli.CLAUDE
+        assert agent.ai_cli_pinned is False
         mock_settings.get_worker_cli.assert_called_once_with(1)
 
     @pytest.mark.asyncio
@@ -230,6 +232,7 @@ class TestPreferredCliNewWorker:
         assert error is None
         assert agent is not None
         assert agent.ai_cli == AICli.CLAUDE
+        assert agent.ai_cli_pinned is False
         mock_settings.get_worker_cli.assert_called_once_with(1)
 
 
@@ -299,6 +302,48 @@ class TestPreferredCliReuse:
 
         assert result["success"] is True
         assert result["reused"] is True
+        assert worker.ai_cli == AICli.CURSOR
+        assert worker.ai_cli_pinned is True
+
+    @pytest.mark.asyncio
+    @patch("src.tools.agent_batch_tools.save_agent_to_file")
+    @patch("src.tools.agent_batch_tools._assign_and_dispatch_task")
+    @patch("src.tools.agent_batch_tools.resolve_worker_number_from_slot")
+    async def test_reuse_preserves_pinned_cli_without_preferred(
+        self,
+        mock_resolve,
+        mock_dispatch,
+        mock_save,
+    ):
+        """pin 済み Worker は preferred_cli 未指定でも slot CLI で上書きしない。"""
+        worker = _make_worker_agent("w-1", status=AgentStatus.IDLE, ai_cli=AICli.CURSOR)
+        worker.ai_cli_pinned = True
+        config = {}
+
+        mock_resolve.return_value = 13
+        mock_dispatch.return_value = (False, None, False, "none", None)
+
+        mock_ctx = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.get_worker_cli.return_value = AICli.CODEX
+
+        result = await _reuse_single_worker(
+            app_ctx=mock_ctx,
+            settings=mock_settings,
+            config=config,
+            worker_index=0,
+            worker=worker,
+            repo_path="/tmp/repo",
+            base_branch="main",
+            enable_worktree=False,
+            session_id=None,
+            profile_settings={},
+            caller_agent_id=None,
+        )
+
+        assert result["success"] is True
+        assert worker.ai_cli == AICli.CURSOR
+        assert worker.ai_cli_pinned is True
 
 
 class TestImageTaskParallelLimit:

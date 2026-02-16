@@ -164,6 +164,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             window_index=pane_result["window_index"],
             pane_index=pane_result["pane_index"],
             ai_cli=selected_cli,
+            ai_cli_pinned=(agent_role == AgentRole.WORKER and ai_cli is not None),
             created_at=now,
             last_activity=now,
         )
