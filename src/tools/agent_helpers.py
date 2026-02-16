@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from src.managers.tmux_manager import TmuxManager
 
 from src.config.settings import AICli, Settings
-from src.config.workflow_guides import get_role_template_path
+from src.config.workflow_guides import get_role_template_path_for_workspace
 from src.context import AppContext
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
@@ -591,6 +591,12 @@ async def _dispatch_bootstrap_command(
     reasoning_effort = profile_settings.get("worker_reasoning_effort", "none")
 
     agent_enable_git = _resolve_agent_enable_git(app_ctx, agent)
+    working_dir_for_cli = worktree_path if enable_worktree else str(project_root)
+    role_template_path = get_role_template_path_for_workspace(
+        "worker",
+        workspace_root=working_dir_for_cli,
+        enable_git=agent_enable_git,
+    )
     bootstrap_command = app_ctx.ai_cli.build_stdin_command(
         cli=agent_cli_name,
         task_file_path=str(task_file),
@@ -598,7 +604,7 @@ async def _dispatch_bootstrap_command(
         project_root=str(project_root),
         model=worker_model,
         role="worker",
-        role_template_path=str(get_role_template_path("worker", enable_git=agent_enable_git)),
+        role_template_path=str(role_template_path),
         thinking_tokens=thinking_tokens,
         reasoning_effort=reasoning_effort,
     )

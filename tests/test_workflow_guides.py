@@ -1,8 +1,12 @@
 """workflow_guides のテスト。"""
 
+from pathlib import Path
+from unittest.mock import patch
+
 from src.config.workflow_guides import (
     get_role_guide,
     get_role_template_path,
+    get_role_template_path_for_workspace,
     list_role_guides,
 )
 
@@ -28,3 +32,42 @@ class TestWorkflowGuides:
         assert "admin" in roles
         assert "worker" in roles
         assert "owner_no_git" not in roles
+
+    def test_get_role_template_path_for_workspace_copies_outside_template(self, tmp_path: Path):
+        """ワークスペース外テンプレートは runtime 配下にミラーされる。"""
+        source_dir = tmp_path / "source_templates"
+        workspace_dir = tmp_path / "workspace"
+        source_dir.mkdir()
+        workspace_dir.mkdir()
+
+        source_template = source_dir / "worker_no_git.md"
+        source_template.write_text("# Worker No Git\n", encoding="utf-8")
+
+        with patch(
+            "src.config.workflow_guides.get_role_template_path",
+            return_value=source_template,
+        ):
+            resolved = get_role_template_path_for_workspace(
+                "worker",
+                workspace_dir,
+                enable_git=False,
+            )
+
+        expected = workspace_dir / ".multi-agent-mcp" / "runtime" / "roles" / "worker_no_git.md"
+        assert resolved == expected
+        assert resolved.read_text(encoding="utf-8") == "# Worker No Git\n"
+
+    def test_get_role_template_path_for_workspace_keeps_inside_template(self, tmp_path: Path):
+        """ワークスペース配下テンプレートはそのまま返す。"""
+        workspace_dir = tmp_path / "workspace"
+        template_path = workspace_dir / "templates" / "roles" / "admin.md"
+        template_path.parent.mkdir(parents=True)
+        template_path.write_text("# Admin\n", encoding="utf-8")
+
+        with patch(
+            "src.config.workflow_guides.get_role_template_path",
+            return_value=template_path,
+        ):
+            resolved = get_role_template_path_for_workspace("admin", workspace_dir, enable_git=True)
+
+        assert resolved == template_path

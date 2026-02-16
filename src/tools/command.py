@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.settings import AICli
-from src.config.workflow_guides import get_role_template_path
+from src.config.workflow_guides import get_role_template_path_for_workspace
 from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus
 from src.tools.agent_helpers import (
@@ -511,6 +511,12 @@ def register_tools(mcp: FastMCP) -> None:
         agent_model = profile_settings.get("admin_model")
         thinking_tokens = profile_settings.get("admin_thinking_tokens", 4000)
         reasoning_effort = profile_settings.get("admin_reasoning_effort", "none")
+        working_dir_for_cli = agent.worktree_path or str(project_root)
+        role_template_path = get_role_template_path_for_workspace(
+            "admin",
+            workspace_root=working_dir_for_cli,
+            enable_git=agent_enable_git,
+        )
 
         try:
             read_command = app_ctx.ai_cli.build_stdin_command(
@@ -520,9 +526,7 @@ def register_tools(mcp: FastMCP) -> None:
                 project_root=str(project_root),
                 model=agent_model,
                 role="admin",
-                role_template_path=str(
-                    get_role_template_path("admin", enable_git=agent_enable_git)
-                ),
+                role_template_path=str(role_template_path),
                 thinking_tokens=thinking_tokens,
                 reasoning_effort=reasoning_effort,
             )

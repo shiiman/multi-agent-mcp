@@ -3,8 +3,12 @@
 エージェントの役割に応じた振る舞いガイドを templates/ から読み込む。
 """
 
+import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -65,6 +69,54 @@ def get_role_template_path(role: str, enable_git: bool = True) -> Path:
     """ロールテンプレートファイルのパスを取得する。"""
     template_name = get_role_template_name(role, enable_git=enable_git)
     return _get_templates_dir() / "roles" / f"{template_name}.md"
+
+
+def _is_path_within(path: Path, root: Path) -> bool:
+    """path が root 配下かどうかを判定する。"""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def get_role_template_path_for_workspace(
+    role: str,
+    workspace_root: str | Path,
+    enable_git: bool = True,
+) -> Path:
+    """ワークスペースから参照可能なロールテンプレートパスを返す。
+
+    Gemini CLI では read_file の参照先がワークスペース外だと失敗するため、
+    テンプレートが workspace_root 配下に無い場合はミラーを作成して返す。
+
+    Args:
+        role: ロール名（owner, admin, worker）
+        workspace_root: CLI の作業ディレクトリ
+        enable_git: git 機能有効フラグ
+
+    Returns:
+        ワークスペースから参照可能なテンプレートパス
+    """
+    source = get_role_template_path(role, enable_git=enable_git)
+    workspace = Path(workspace_root).expanduser()
+
+    # 既にワークスペース配下ならそのまま使用
+    if _is_path_within(source, workspace):
+        return source
+
+    mirror_path = workspace / ".multi-agent-mcp" / "runtime" / "roles" / source.name
+    try:
+        mirror_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, mirror_path)
+        return mirror_path
+    except OSError as e:
+        logger.warning(
+            "ロールテンプレートのミラー作成に失敗したため元パスを使用します: %s (%s)",
+            mirror_path,
+            e,
+        )
+        return source
 
 
 # ロール説明
