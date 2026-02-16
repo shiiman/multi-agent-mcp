@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 class TmuxWorkspaceMixin:
     """tmux ワークスペース構築・ペイン操作機能を提供する mixin。"""
 
+    _CURSOR_TRUST_RETRY_MAX = 3
+    _CURSOR_TRUST_RETRY_INTERVAL_MS = 250
+
     @staticmethod
     def _pane_target(session: str, window: int, pane: int) -> str:
         """tmux target 文字列を構築する。"""
@@ -55,6 +58,56 @@ class TmuxWorkspaceMixin:
             logger.error("Codex queue モード復帰エラー: %s", stderr)
             return False
         return True
+
+    @staticmethod
+    def _command_may_launch_cursor_agent(command: str) -> bool:
+        """送信コマンドが Cursor Agent 起動を含む可能性を判定する。"""
+        normalized = command.strip().lower()
+        if not normalized:
+            return False
+        return (
+            re.search(
+                r"(^|&&\s*|;\s*|\|\|\s*)(?:\S+/)?(?:agent|cursor-agent)\b",
+                normalized,
+            )
+            is not None
+        )
+
+    @staticmethod
+    def _is_cursor_workspace_trust_prompt(output: str) -> bool:
+        """Cursor の Workspace Trust ダイアログ表示中か判定する。"""
+        normalized = output.lower()
+        if "workspace trust required" not in normalized:
+            return False
+        return "trust this workspace" in normalized
+
+    async def _confirm_cursor_workspace_trust(
+        self,
+        session: str,
+        window: int,
+        pane: int,
+    ) -> bool:
+        """Cursor の Workspace Trust ダイアログを自動で承認する。"""
+        target = self._pane_target(session, window, pane)
+        retries = max(1, int(self._CURSOR_TRUST_RETRY_MAX))
+        interval_ms = max(0, int(self._CURSOR_TRUST_RETRY_INTERVAL_MS))
+
+        for _ in range(retries):
+            output = await self.capture_pane_by_index(session, window, pane, lines=120)
+            if not self._is_cursor_workspace_trust_prompt(output):
+                return True
+
+            logger.info("Cursor Workspace Trust prompt を検知したため自動承認します")
+            code, _, stderr = await self._run("send-keys", "-t", target, "a")
+            if code != 0:
+                logger.error("Cursor Workspace Trust 承認キー送信エラー: %s", stderr)
+                return False
+
+            if interval_ms:
+                await asyncio.sleep(interval_ms / 1000)
+
+        output = await self.capture_pane_by_index(session, window, pane, lines=120)
+        return not self._is_cursor_workspace_trust_prompt(output)
 
     async def create_main_session(self, working_dir: str) -> bool:
         """メインセッション（左40:右60分離レイアウト）を作成する。
@@ -463,6 +516,7 @@ class TmuxWorkspaceMixin:
     ) -> bool:
         """ペイン送信後に必要なら Enter 再送で確定を保証する。"""
         effective_confirm_codex = confirm_codex_prompt
+        effective_confirm_cursor_trust = self._command_may_launch_cursor_agent(command)
         if not effective_confirm_codex:
             # Codex TUI 実行中の可能性がある場合のみ pane コマンドを取得して
             # 自動判定する（毎回の tmux 呼び出しを抑制）。
@@ -473,6 +527,8 @@ class TmuxWorkspaceMixin:
             pane_command_normalized = (pane_command or "").strip().lower()
             if pane_command_normalized.startswith("codex"):
                 effective_confirm_codex = True
+            if pane_command_normalized in {"agent", "cursor-agent"}:
+                effective_confirm_cursor_trust = True
 
         # Codex TUI はテキストバッファリングに時間がかかるため、
         # テキスト送信と Enter 送信の間に遅延を入れる。
@@ -487,7 +543,20 @@ class TmuxWorkspaceMixin:
             clear_input=clear_input,
             enter_delay_ms=codex_delay,
         )
-        if not sent or not effective_confirm_codex:
+        if not sent:
+            return sent
+
+        if effective_confirm_cursor_trust:
+            trust_confirmed = await self._confirm_cursor_workspace_trust(
+                session=session,
+                window=window,
+                pane=pane,
+            )
+            if not trust_confirmed:
+                logger.error("Cursor Workspace Trust prompt の自動承認に失敗しました")
+                return False
+
+        if not effective_confirm_codex:
             return sent
 
         retries = max(0, int(getattr(self.settings, "codex_enter_retry_max", 3)))

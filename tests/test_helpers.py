@@ -909,6 +909,27 @@ class TestCodexPromptDetection:
 
         assert TmuxWorkspaceMixin._is_pending_codex_prompt(output, command) is False
 
+    def test_cursor_workspace_trust_prompt_detection(self):
+        """Cursor Workspace Trust ダイアログを検知できることをテスト。"""
+        from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
+
+        output = "\n".join(
+            [
+                "Workspace Trust Required",
+                "Cursor Agent can execute code and access files in your workspace.",
+                "[a] Trust this workspace",
+            ]
+        )
+
+        assert TmuxWorkspaceMixin._is_cursor_workspace_trust_prompt(output) is True
+
+    def test_cursor_workspace_trust_prompt_detection_returns_false_for_other_output(self):
+        """Workspace Trust 文言がない場合は False を返すことをテスト。"""
+        from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
+
+        output = "processed\n›\n"
+        assert TmuxWorkspaceMixin._is_cursor_workspace_trust_prompt(output) is False
+
 
 class TestCodexPromptConfirmation:
     """Codex 送信確定処理のテスト。"""
@@ -1034,6 +1055,41 @@ class TestCodexPromptConfirmation:
         manager.get_pane_current_command.assert_awaited_once_with("main", 0, 1)
         manager.capture_pane_by_index.assert_not_awaited()
         manager._run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_and_confirm_auto_accepts_cursor_workspace_trust_prompt(self):
+        """Cursor 起動時の Workspace Trust ダイアログを自動承認する。"""
+        manager = self._DummyTmux()
+        manager.send_keys_to_pane = AsyncMock(return_value=True)
+        manager.get_pane_current_command = AsyncMock(return_value="zsh")
+        manager.capture_pane_by_index = AsyncMock(
+            side_effect=[
+                "\n".join(
+                    [
+                        "Workspace Trust Required",
+                        "Cursor Agent can execute code and access files in your workspace.",
+                        "[a] Trust this workspace",
+                    ]
+                ),
+                "processing...\n",
+            ]
+        )
+        manager._send_enter_key = AsyncMock(return_value=True)
+        manager._run = AsyncMock(return_value=(0, "", ""))
+
+        with patch("src.managers.tmux_workspace_mixin.asyncio.sleep", new=AsyncMock()):
+            success = await manager.send_and_confirm_to_pane(
+                session="main",
+                window=0,
+                pane=1,
+                command="cd /tmp && agent --force 'hello'",
+                confirm_codex_prompt=False,
+            )
+
+        assert success is True
+        manager.get_pane_current_command.assert_awaited_once_with("main", 0, 1)
+        manager.capture_pane_by_index.assert_awaited()
+        manager._run.assert_awaited_once_with("send-keys", "-t", "main:0.1", "a")
 
 
 class TestTmuxRateLimit:
