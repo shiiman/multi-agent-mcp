@@ -242,6 +242,11 @@ class DashboardTasksMixin:
                                 agent_summary.status = "busy"
                             break
             elif status in self._TERMINAL_TASK_STATUSES:
+                if task.started_at is None:
+                    # pending -> completed/failed の直遷移でも開始時刻を欠損させない。
+                    task.started_at = now
+                if dashboard.session_started_at is None:
+                    dashboard.session_started_at = task.started_at or now
                 task.completed_at = now
                 if status == TaskStatus.COMPLETED:
                     task.progress = 100

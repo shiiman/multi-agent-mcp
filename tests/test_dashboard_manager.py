@@ -129,6 +129,23 @@ class TestDashboardManager:
         summary = dashboard_manager.get_summary()
         assert summary["session_finished_at"] is not None
 
+    def test_complete_task_sets_started_at_even_without_in_progress(self, dashboard_manager):
+        """pending -> completed 直遷移でも started_at が設定されることをテスト。"""
+        task = dashboard_manager.create_task(title="Direct Complete Task")
+
+        success, _ = dashboard_manager.update_task_status(
+            task_id=task.id,
+            status=TaskStatus.COMPLETED,
+        )
+
+        assert success is True
+        updated_task = dashboard_manager.get_task(task.id)
+        assert updated_task.status == TaskStatus.COMPLETED
+        assert updated_task.started_at is not None
+        assert updated_task.completed_at is not None
+        summary = dashboard_manager.get_summary()
+        assert summary["session_started_at"] is not None
+
     def test_fail_task(self, dashboard_manager):
         """タスク失敗をテスト。"""
         task = dashboard_manager.create_task(title="Test Task")
@@ -144,6 +161,22 @@ class TestDashboardManager:
         updated_task = dashboard_manager.get_task(task.id)
         assert updated_task.status == TaskStatus.FAILED
         assert updated_task.error_message == "Something went wrong"
+
+    def test_fail_task_sets_started_at_even_without_in_progress(self, dashboard_manager):
+        """pending -> failed 直遷移でも started_at が設定されることをテスト。"""
+        task = dashboard_manager.create_task(title="Direct Fail Task")
+
+        success, _ = dashboard_manager.update_task_status(
+            task_id=task.id,
+            status=TaskStatus.FAILED,
+            error_message="Direct fail",
+        )
+
+        assert success is True
+        updated_task = dashboard_manager.get_task(task.id)
+        assert updated_task.status == TaskStatus.FAILED
+        assert updated_task.started_at is not None
+        assert updated_task.completed_at is not None
 
     def test_assign_task(self, dashboard_manager):
         """タスク割り当てをテスト。"""
@@ -503,6 +536,28 @@ class TestDashboardMarkdownSync:
         assert front_matter is not None
         assert front_matter.get("session_started_at") is not None
         assert "**開始時刻**: -" not in content
+
+    def test_save_markdown_dashboard_backfills_missing_started_at_for_terminal_tasks(
+        self, dashboard_manager, temp_dir
+    ):
+        """終端タスクで started_at 欠損があっても保存時に補完されることをテスト。"""
+        project_root = temp_dir / "project"
+        project_root.mkdir()
+
+        task = dashboard_manager.create_task(title="Backfill StartedAt Task")
+        dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED)
+
+        dashboard = dashboard_manager.get_dashboard()
+        target = dashboard.get_task(task.id)
+        assert target is not None
+        target.started_at = None
+        assert target.completed_at is not None
+        dashboard_manager._write_dashboard(dashboard)
+
+        dashboard_manager.save_markdown_dashboard(project_root, "session-backfill")
+        repaired = dashboard_manager.get_task(task.id)
+        assert repaired is not None
+        assert repaired.started_at is not None
 
     def test_read_task_file_not_exists(self, dashboard_manager, temp_dir):
         """存在しないタスクファイル読み取りをテスト。"""

@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from src.models.dashboard import AgentSummary, MessageSummary
+from src.models.dashboard import AgentSummary, MessageSummary, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,18 @@ class DashboardSyncMixin:
         def _sync(dashboard) -> None:
             if dashboard.session_started_at is None:
                 dashboard.session_started_at = datetime.now()
+
+            # 旧データ互換: pending -> completed/failed 直遷移で started_at が欠損した
+            # タスクを同期時に補完する。
+            for task in dashboard.tasks:
+                if (
+                    task.status
+                    in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+                    and task.started_at is None
+                ):
+                    task.started_at = task.completed_at or datetime.now()
+                if dashboard.session_started_at is None and task.started_at is not None:
+                    dashboard.session_started_at = task.started_at
 
             # 🔴 agents.json からエージェント情報を同期
             if agents_file.exists():
