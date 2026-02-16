@@ -44,11 +44,13 @@ def _build_image_task_policy_section(task_description: str) -> str:
     return """
 ## Image Task Policy（画像生成タスク専用）
 
-- 最終成果物は画像生成機能や画像描画ツールで直接作成する
+- 最終成果物は Cursor の画像生成機能で直接生成し、モデルは Google Nano Banana Pro を優先利用する
+- Python スクリプト（Pillow / matplotlib / OpenCV など）や SVG/HTML 描画からの PNG 変換で代替しない
 - HTML を作ってブラウザ/Playwright でスクリーンショットして PNG 化する方法は不可
 - UI テスト用キャプチャ画像を成果物として提出しない
+- 生成画像の出力先は Admin 指示（またはタスク指定）に従い、最終パスを報告する
 - 画像生成が実行不能な場合は勝手に代替せず `send_message(message_type=\"request\")` で Admin にエスカレーションする
-- 完了報告には生成手段・使用ツール/モデル・最終画像パスを明記する
+- 完了報告には生成手段・使用ツール/モデル（例: Cursor + Google Nano Banana Pro）・最終画像パス・プロンプト要点を明記する
 """.strip()
 
 

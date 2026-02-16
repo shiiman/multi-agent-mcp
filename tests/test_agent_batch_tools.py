@@ -8,6 +8,7 @@ from src.config.settings import AICli
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.agent_batch_tools import (
     MAX_IMAGE_TASK_PARALLEL,
+    _align_create_configs_with_slots,
     _pre_assign_pane_slots,
     _reuse_single_worker,
     _setup_worker_tmux_pane,
@@ -126,6 +127,64 @@ class TestPreAssignPaneSlots:
             profile_max_workers=6,
         )
         assert slots == [None]
+
+
+class TestAlignCreateConfigsWithSlots:
+    """_align_create_configs_with_slots のテスト。"""
+
+    def test_pref_cli_task_is_aligned_to_matching_default_slot(self):
+        """preferred_cli=cursor のタスクが cursor 既定 slot に寄ることをテスト。"""
+        settings = MagicMock()
+        # worker 1..4: codex, codex, gemini, cursor
+        cli_map = {
+            1: AICli.CODEX,
+            2: AICli.CODEX,
+            3: AICli.GEMINI,
+            4: AICli.CURSOR,
+        }
+        settings.get_worker_cli.side_effect = lambda worker_no: cli_map[worker_no]
+        create_configs = [
+            {"task_title": "generic-1"},
+            {"task_title": "generic-2"},
+            {"task_title": "image-task", "preferred_cli": "cursor"},
+            {"task_title": "generic-3"},
+        ]
+        pre_assigned_slots = [(0, 1), (0, 2), (0, 3), (0, 4)]
+
+        aligned = _align_create_configs_with_slots(
+            settings=settings,
+            create_configs=create_configs,
+            pre_assigned_slots=pre_assigned_slots,
+        )
+
+        assert [c["task_title"] for c in aligned] == [
+            "generic-1",
+            "generic-2",
+            "generic-3",
+            "image-task",
+        ]
+
+    def test_keeps_order_when_no_matching_slot(self):
+        """一致する既定 CLI slot がない場合は元順序を維持する。"""
+        settings = MagicMock()
+        cli_map = {
+            1: AICli.CODEX,
+            2: AICli.GEMINI,
+        }
+        settings.get_worker_cli.side_effect = lambda worker_no: cli_map[worker_no]
+        create_configs = [
+            {"task_title": "image-task", "preferred_cli": "cursor"},
+            {"task_title": "generic"},
+        ]
+        pre_assigned_slots = [(0, 1), (0, 2)]
+
+        aligned = _align_create_configs_with_slots(
+            settings=settings,
+            create_configs=create_configs,
+            pre_assigned_slots=pre_assigned_slots,
+        )
+
+        assert [c["task_title"] for c in aligned] == ["image-task", "generic"]
 
 
 class TestWorkerBranchNaming:

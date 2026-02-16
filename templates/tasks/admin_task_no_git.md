@@ -157,8 +157,11 @@ for task in subtasks:
 - 図を生成、ダイアグラム作成、ビジュアル生成
 
 **🔴 画像生成タスクの task_content 必須ルール:**
+- Cursor の画像生成機能を使い、**Google Nano Banana Pro** で生成する旨を task_content に明記する
+- Python スクリプト（Pillow / matplotlib / OpenCV など）や SVG/HTML 描画からの PNG 変換で代替しない
 - 「HTML を作ってスクリーンショットで PNG 化」は禁止
 - Playwright/ブラウザのキャプチャ画像を成果物として提出しない
+- 出力先パスを task_content に明記し、タスク要件に応じて Admin が決定する
 - 画像生成機能が使えない場合は Worker に代替実装させず、`request` で Admin が判断する
 
 **画像生成タスクの同時並列実行数: 最大 2**

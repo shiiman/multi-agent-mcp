@@ -515,6 +515,96 @@ def _collect_batch_results(results: list) -> tuple[list, int, list[str]]:
     return workers, failed_count, errors
 
 
+def _align_create_configs_with_slots(
+    settings: "Settings",
+    create_configs: list[dict],
+    pre_assigned_slots: list[tuple[int, int] | None],
+) -> list[dict]:
+    """新規作成タスクを slot の既定 CLI に寄せて並び替える。
+
+    目的:
+    - `preferred_cli` 指定タスクを、同じ CLI が既定の worker slot に優先配置する
+    - 既定 CLI が合う slot があるのに別 slot で CLI 上書きが起きるケースを減らす
+    """
+    if not create_configs or not pre_assigned_slots:
+        return create_configs
+
+    from src.config.settings import AICli
+
+    remaining = list(create_configs)
+    aligned: list[dict] = []
+
+    for slot_index, slot in enumerate(pre_assigned_slots):
+        if not remaining:
+            break
+
+        if slot is None:
+            aligned.append(remaining.pop(0))
+            continue
+
+        window_index, pane_index = slot
+        worker_no = resolve_worker_number_from_slot(settings, window_index, pane_index)
+        slot_default_cli = settings.get_worker_cli(worker_no)
+
+        match_idx: int | None = None
+        fallback_non_preferred_idx: int | None = None
+        for idx, config in enumerate(remaining):
+            preferred_cli = config.get("preferred_cli")
+            if not preferred_cli:
+                if fallback_non_preferred_idx is None:
+                    fallback_non_preferred_idx = idx
+                continue
+            try:
+                if AICli(preferred_cli) == slot_default_cli:
+                    match_idx = idx
+                    break
+            except ValueError:
+                # 不正値は既存ロジック同様、後段でデフォルト CLI にフォールバックさせる
+                if fallback_non_preferred_idx is None:
+                    fallback_non_preferred_idx = idx
+                continue
+
+        if match_idx is not None:
+            aligned.append(remaining.pop(match_idx))
+        elif fallback_non_preferred_idx is not None:
+            # 将来 slot で一致可能な preferred_cli が残っている場合だけ、
+            # 非 preferred タスクを先に消化して一致機会を温存する。
+            future_default_clis: set[AICli] = set()
+            for future_slot in pre_assigned_slots[slot_index + 1 :]:
+                if future_slot is None:
+                    continue
+                future_worker_no = resolve_worker_number_from_slot(
+                    settings,
+                    future_slot[0],
+                    future_slot[1],
+                )
+                future_default_clis.add(settings.get_worker_cli(future_worker_no))
+
+            preserve_match_opportunity = False
+            if future_default_clis:
+                for config in remaining:
+                    preferred_cli = config.get("preferred_cli")
+                    if not preferred_cli:
+                        continue
+                    try:
+                        if AICli(preferred_cli) in future_default_clis:
+                            preserve_match_opportunity = True
+                            break
+                    except ValueError:
+                        continue
+
+            if preserve_match_opportunity:
+                aligned.append(remaining.pop(fallback_non_preferred_idx))
+            else:
+                aligned.append(remaining.pop(0))
+        else:
+            aligned.append(remaining.pop(0))
+
+    if remaining:
+        aligned.extend(remaining)
+    return aligned
+
+
 def _validate_batch_capacity(
     agents: dict[str, Agent],
     worker_configs: list[dict],
@@ -681,6 +771,12 @@ def register_batch_tools(mcp: FastMCP) -> None:
             project_name,
             len(create_configs),
             profile_settings["max_workers"],
+        )
+        # preferred_cli と slot 既定 CLI を極力一致させる順に並べる
+        create_configs = _align_create_configs_with_slots(
+            settings,
+            create_configs,
+            pre_assigned_slots,
         )
         logger.info(
             "Workerバッチ: reuse=%s, create=%s",

@@ -498,7 +498,9 @@ class TestGenerate7SectionTask:
             project_name="test-project",
         )
         assert "## Image Task Policy（画像生成タスク専用）" in result
-        assert "スクリーンショットで PNG 化する方法は不可" in result
+        assert "Google Nano Banana Pro" in result
+        assert "Python スクリプト（Pillow / matplotlib / OpenCV など）" in result
+        assert "ブラウザ/Playwright でスクリーンショットして PNG 化する方法は不可" in result
 
     def test_does_not_include_image_task_policy_for_non_image_tasks(self):
         """通常実装タスクでは画像生成専用ポリシーを挿入しないことをテスト。"""
