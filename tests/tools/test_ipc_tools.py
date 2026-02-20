@@ -83,6 +83,66 @@ def ipc_mock_ctx(ipc_test_ctx):
     return mock
 
 
+@pytest.fixture
+def ipc_no_git_ctx(tmp_path, settings):
+    """enable_git=false の IPCツールテスト用 AppContext。"""
+    settings.enable_git = False
+
+    mock_tmux = MagicMock(spec=TmuxManager)
+    mock_tmux.settings = settings
+    mock_tmux.send_keys_to_pane = AsyncMock(return_value=True)
+
+    ai_cli = AiCliManager(settings)
+
+    work_dir = tmp_path / "no_git_project"
+    work_dir.mkdir()
+
+    ipc_dir = work_dir / ".ipc"
+    ipc = IPCManager(str(ipc_dir))
+    ipc.initialize()
+
+    dashboard_dir = work_dir / ".dashboard"
+    dashboard = DashboardManager(
+        workspace_id="test-workspace",
+        workspace_path=str(work_dir),
+        dashboard_dir=str(dashboard_dir),
+    )
+    dashboard.initialize()
+
+    memory_dir = work_dir / ".memory"
+    memory = MemoryManager(str(memory_dir))
+    persona = PersonaManager()
+    scheduler = SchedulerManager(dashboard, {})
+
+    ctx = AppContext(
+        settings=settings,
+        tmux=mock_tmux,
+        ai_cli=ai_cli,
+        agents={},
+        ipc_manager=ipc,
+        dashboard_manager=dashboard,
+        scheduler_manager=scheduler,
+        memory_manager=memory,
+        persona_manager=persona,
+        workspace_id="test-workspace",
+        project_root=str(work_dir),
+        session_id="test-session",
+    )
+
+    yield ctx
+
+    ipc.cleanup()
+    dashboard.cleanup()
+
+
+@pytest.fixture
+def ipc_no_git_mock_ctx(ipc_no_git_ctx):
+    """No-git モード用 MCP Context のモック。"""
+    mock = MagicMock()
+    mock.request_context.lifespan_context = ipc_no_git_ctx
+    return mock
+
+
 class TestSendMessage:
     """send_message ツールのテスト。"""
 
@@ -1066,10 +1126,10 @@ class TestSendMessage:
         assert "sender_id と caller_agent_id が一致しない" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_admin_to_owner_non_complete_does_not_use_macos_fallback(
+    async def test_admin_to_owner_non_complete_uses_macos_fallback(
         self, ipc_mock_ctx, git_repo
     ):
-        """admin→owner の task_complete 以外では macOS 通知しないことをテスト。"""
+        """admin→owner の task_complete 以外でも macOS 通知することをテスト。"""
         from mcp.server.fastmcp import FastMCP
 
         from src.tools.ipc import register_tools
@@ -1123,12 +1183,11 @@ class TestSendMessage:
                 ctx=ipc_mock_ctx,
             )
 
-        assert result["success"] is False
-        assert result["delivery_state"] == "queued_unnotified"
-        assert result["notification_sent"] is False
-        assert result["notification_method"] is None
-        assert "delivery_failed" in result["error"]
-        mock_macos.assert_not_awaited()
+        assert result["success"] is True
+        assert result["delivery_state"] == "delivered"
+        assert result["notification_sent"] is True
+        assert result["notification_method"] == "macos"
+        mock_macos.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_send_message_returns_failed_delivery_when_tmux_notify_fails(
@@ -2232,3 +2291,153 @@ class TestRegisterAgentToIpc:
 
         assert result["success"] is True
         assert result["agent_id"] == "new-agent-001"
+
+
+class TestQualityGateNoGitMode:
+    """enable_git=false 時の品質ゲートテスト。"""
+
+    @staticmethod
+    def _get_send_message_fn():
+        """send_message ツール関数を取得する。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_message":
+                return tool.fn
+        raise RuntimeError("send_message ツールが見つかりません")
+
+    @staticmethod
+    def _setup_admin_owner(app_ctx, work_dir):
+        """Admin と Owner エージェントをセットアップする。"""
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(work_dir),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            session_name=None,
+            window_index=None,
+            pane_index=None,
+            working_dir=str(work_dir),
+            created_at=now,
+            last_activity=now,
+        )
+
+    @pytest.mark.asyncio
+    async def test_quality_gate_skips_branch_check_when_git_disabled(
+        self, ipc_no_git_mock_ctx
+    ):
+        """enable_git=false + branch 付き完了タスクで品質ゲートが通過することをテスト。"""
+        send_message = self._get_send_message_fn()
+        app_ctx = ipc_no_git_mock_ctx.request_context.lifespan_context
+        self._setup_admin_owner(app_ctx, app_ctx.project_root)
+
+        # IPC に admin と owner を登録
+        app_ctx.ipc_manager.register_agent("admin-001")
+        app_ctx.ipc_manager.register_agent("owner-001")
+
+        # branch 付きタスクを完了状態にする
+        dashboard = app_ctx.dashboard_manager
+        impl_task = dashboard.create_task(
+            title="実装タスク",
+            branch="feature/no-git-task",
+        )
+        dashboard.update_task_status(impl_task.id, TaskStatus.COMPLETED)
+        quality_task = dashboard.create_task(title="test verify")
+        dashboard.update_task_status(quality_task.id, TaskStatus.COMPLETED)
+
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new=AsyncMock(return_value=True),
+        ):
+            result = await send_message(
+                sender_id="admin-001",
+                receiver_id="owner-001",
+                message_type="task_complete",
+                content="実装完了しました",
+                caller_agent_id="admin-001",
+                ctx=ipc_no_git_mock_ctx,
+            )
+
+        # enable_git=false ならブランチチェックをスキップして通過する
+        assert result["success"] is True
+        assert "branch_integration" not in result.get("gate", {})
+
+    @pytest.mark.asyncio
+    async def test_quality_gate_still_checks_pending_tasks_in_no_git_mode(
+        self, ipc_no_git_mock_ctx
+    ):
+        """enable_git=false でも未完了タスクチェックは動作することをテスト。"""
+        send_message = self._get_send_message_fn()
+        app_ctx = ipc_no_git_mock_ctx.request_context.lifespan_context
+        self._setup_admin_owner(app_ctx, app_ctx.project_root)
+
+        app_ctx.ipc_manager.register_agent("admin-001")
+        app_ctx.ipc_manager.register_agent("owner-001")
+
+        # 未完了タスクを作成（pending 状態のまま）
+        dashboard = app_ctx.dashboard_manager
+        dashboard.create_task(title="未完了タスク")
+        quality_task = dashboard.create_task(title="test verify")
+        dashboard.update_task_status(quality_task.id, TaskStatus.COMPLETED)
+
+        result = await send_message(
+            sender_id="admin-001",
+            receiver_id="owner-001",
+            message_type="task_complete",
+            content="完了報告",
+            caller_agent_id="admin-001",
+            ctx=ipc_no_git_mock_ctx,
+        )
+
+        # 未完了タスクがあるためブロックされる
+        assert result["success"] is False
+        assert "品質ゲート未達" in result["error"]
+        assert any("未完了タスク" in r for r in result["gate"]["reasons"])
+
+    @pytest.mark.asyncio
+    async def test_admin_to_owner_status_update_uses_macos_fallback(
+        self, ipc_no_git_mock_ctx
+    ):
+        """admin→owner の status_update で macOS フォールバックが動作することをテスト。"""
+        send_message = self._get_send_message_fn()
+        app_ctx = ipc_no_git_mock_ctx.request_context.lifespan_context
+        self._setup_admin_owner(app_ctx, app_ctx.project_root)
+
+        app_ctx.ipc_manager.register_agent("admin-001")
+        app_ctx.ipc_manager.register_agent("owner-001")
+
+        with patch(
+            "src.tools.helpers._send_macos_notification",
+            new=AsyncMock(return_value=True),
+        ) as mock_macos:
+            result = await send_message(
+                sender_id="admin-001",
+                receiver_id="owner-001",
+                message_type="status_update",
+                content="進捗報告です",
+                caller_agent_id="admin-001",
+                ctx=ipc_no_git_mock_ctx,
+            )
+
+        assert result["success"] is True
+        assert result["delivery_state"] == "delivered"
+        assert result["notification_sent"] is True
+        assert result["notification_method"] == "macos"
+        mock_macos.assert_awaited_once()

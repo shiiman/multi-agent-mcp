@@ -516,43 +516,53 @@ def _validate_admin_completion_gate(
         reasons.append("UI関連タスクに対する Playwright 証跡が不足しています")
         suggestions.append("Playwright 実行タスクを追加し、完了報告を取り込んでください。")
 
-    branches = [t.branch for t in completed_tasks if t.branch]
-    if app_ctx.project_root and branches:
-        integration_states = _check_branch_merge_state(str(app_ctx.project_root), branches)
-        not_integrated = [
-            s
-            for s in integration_states
-            if not (
-                s.get("merged")
-                or s.get("covered_by_diff")
-                or s.get("tree_equal_to_head")
-                or s.get("changes_already_applied")
+    # No Git モードではブランチ統合チェックをスキップ
+    # (git コマンド不可 + merge_completed_tasks も無効でデッドエンドになるため)
+    branches: list[str] = []
+    integration_states: list[dict[str, Any]] = []
+    if app_ctx.settings.enable_git:
+        branches = [t.branch for t in completed_tasks if t.branch]
+        if app_ctx.project_root and branches:
+            integration_states = _check_branch_merge_state(
+                str(app_ctx.project_root), branches
             )
-        ]
-        if not_integrated:
-            branch_names = ", ".join([s["branch"] for s in not_integrated[:5]])
-            reasons.append(f"未統合の完了タスクブランチがあります: {branch_names}")
-            detail_lines: list[str] = []
-            for state in not_integrated[:5]:
-                if state.get("branch_not_found"):
-                    detail_lines.append(f"{state['branch']}: branch_not_found")
-                    continue
-                missing_files = state.get("missing_files") or []
-                if missing_files:
-                    sample = ", ".join(missing_files[:3])
-                    if len(missing_files) > 3:
-                        sample = f"{sample}, ..."
-                    detail_lines.append(
-                        f"{state['branch']}: diff に不足 ({len(missing_files)} files: {sample})"
-                    )
-                elif state.get("error"):
-                    detail_lines.append(f"{state['branch']}: 判定エラー ({state['error']})")
-            if detail_lines:
-                reasons.extend(detail_lines)
-            suggestions.append(
-                "merge_completed_tasks で差分を展開し、"
-                "統合ブランチ上の diff を確認後に再通知してください。"
-            )
+            not_integrated = [
+                s
+                for s in integration_states
+                if not (
+                    s.get("merged")
+                    or s.get("covered_by_diff")
+                    or s.get("tree_equal_to_head")
+                    or s.get("changes_already_applied")
+                )
+            ]
+            if not_integrated:
+                branch_names = ", ".join([s["branch"] for s in not_integrated[:5]])
+                reasons.append(f"未統合の完了タスクブランチがあります: {branch_names}")
+                detail_lines: list[str] = []
+                for state in not_integrated[:5]:
+                    if state.get("branch_not_found"):
+                        detail_lines.append(f"{state['branch']}: branch_not_found")
+                        continue
+                    missing_files = state.get("missing_files") or []
+                    if missing_files:
+                        sample = ", ".join(missing_files[:3])
+                        if len(missing_files) > 3:
+                            sample = f"{sample}, ..."
+                        detail_lines.append(
+                            f"{state['branch']}: diff に不足"
+                            f" ({len(missing_files)} files: {sample})"
+                        )
+                    elif state.get("error"):
+                        detail_lines.append(
+                            f"{state['branch']}: 判定エラー ({state['error']})"
+                        )
+                if detail_lines:
+                    reasons.extend(detail_lines)
+                suggestions.append(
+                    "merge_completed_tasks で差分を展開し、"
+                    "統合ブランチ上の diff を確認後に再通知してください。"
+                )
 
     if reasons:
         gate_payload: dict[str, Any] = {
@@ -731,13 +741,13 @@ def register_tools(mcp: FastMCP) -> None:
             sync_agents_from_file(app_ctx)
             receiver_agent = app_ctx.agents.get(receiver_id)
             sender_agent = app_ctx.agents.get(sender_id)
-            # macOS 通知条件: admin→owner の task_complete のみ
-            is_admin_to_owner_task_complete = (
+            # macOS 通知条件: admin→owner の全メッセージタイプ
+            # (Owner は tmux ペインを持たないケースがあるため)
+            is_admin_to_owner = (
                 sender_agent
                 and receiver_agent
                 and str(getattr(sender_agent, "role", "")) == AgentRole.ADMIN.value
                 and str(getattr(receiver_agent, "role", "")) == AgentRole.OWNER.value
-                and msg_type == MessageType.TASK_COMPLETE
             )
             if receiver_agent:
                 has_tmux_pane = (
@@ -755,7 +765,7 @@ def register_tools(mcp: FastMCP) -> None:
                     if tmux_ok:
                         notification_sent = True
                         notification_method = "tmux"
-                    elif is_admin_to_owner_task_complete:
+                    elif is_admin_to_owner:
                         # tmux 通知失敗時のみ macOS 通知を追加試行する
                         from src.tools.helpers import _send_macos_notification
 
@@ -763,7 +773,7 @@ def register_tools(mcp: FastMCP) -> None:
                         if macos_ok:
                             notification_sent = True
                             notification_method = "macos_fallback"
-                elif is_admin_to_owner_task_complete:
+                elif is_admin_to_owner:
                     # tmux ペインがない Owner への admin 通知を macOS で補完
                     from src.tools.helpers import _send_macos_notification
 
