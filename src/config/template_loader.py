@@ -3,8 +3,12 @@
 テンプレートファイルを読み込み、変数を置換する。
 """
 
+import re
 from pathlib import Path
 from typing import Any
+
+# テンプレート名に許可される文字パターン（英数字、ハイフン、アンダースコア）
+_VALID_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class TemplateLoader:
@@ -35,6 +39,12 @@ class TemplateLoader:
         Raises:
             FileNotFoundError: テンプレートが見つからない場合
         """
+        # テンプレート名の明示的バリデーション
+        if not _VALID_NAME_PATTERN.match(name):
+            raise FileNotFoundError(
+                f"不正なテンプレート名です: '{name}'（英数字・ハイフン・アンダースコアのみ許可）"
+            )
+
         cache_key = f"{category}/{name}"
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -78,6 +88,50 @@ class TemplateLoader:
         elif category.startswith("scripts/applescript"):
             return ".scpt"
         return ".md"
+
+    def resolve_path(self, category: str, name: str) -> Path:
+        """テンプレートファイルの絶対パスを返す（パストラバーサル検証付き）。
+
+        Args:
+            category: カテゴリ（roles, tasks, reports 等）
+            name: テンプレート名（拡張子なし）
+
+        Returns:
+            テンプレートファイルの絶対パス
+
+        Raises:
+            FileNotFoundError: テンプレートが見つからない、または不正なパスの場合
+        """
+        ext = self._get_extension(category)
+        path = (self._base_dir / category / f"{name}{ext}").resolve()
+
+        # パストラバーサル防止
+        try:
+            path.relative_to(self._base_dir.resolve())
+        except ValueError as e:
+            raise FileNotFoundError(
+                f"テンプレートディレクトリ外へのアクセスは許可されていません: {category}/{name}"
+            ) from e
+
+        if not path.exists():
+            raise FileNotFoundError(f"テンプレートが見つかりません: {path}")
+
+        return path
+
+    def list_templates_in(self, category: str) -> list[str]:
+        """指定カテゴリ内のテンプレート名一覧を返す。
+
+        Args:
+            category: カテゴリ（roles, tasks, reports 等）
+
+        Returns:
+            テンプレート名のリスト（拡張子なし、ソート済み）
+        """
+        category_dir = self._base_dir / category
+        if not category_dir.exists():
+            return []
+        ext = self._get_extension(category)
+        return sorted(p.stem for p in category_dir.glob(f"*{ext}"))
 
     def clear_cache(self) -> None:
         """キャッシュをクリアする。"""

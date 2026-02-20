@@ -56,6 +56,7 @@ async def _assign_and_dispatch_task(
     enable_worktree: bool,
     profile_settings: dict,
     caller_agent_id: str | None,
+    report_template: str | None = None,
 ) -> tuple[bool, str | None, bool, str, str | None]:
     """タスク割り当て＋送信の共通処理。
 
@@ -111,6 +112,7 @@ async def _assign_and_dispatch_task(
             enable_worktree,
             profile_settings,
             caller_agent_id,
+            report_template=report_template,
         )
         task_sent = bool(send_result.get("task_sent"))
         dispatch_mode = str(send_result.get("dispatch_mode", "none"))
@@ -342,6 +344,7 @@ async def _create_single_worker(
         )
         post_result = _post_create_agent(app_ctx, agent, agents)
 
+        report_template = config.get("report_template")
         dispatch = await _assign_and_dispatch_task(
             app_ctx,
             agent,
@@ -354,6 +357,7 @@ async def _create_single_worker(
             enable_worktree,
             profile_settings,
             caller_agent_id,
+            report_template=report_template,
         )
         (task_assigned, assignment_error, task_sent, dispatch_mode, dispatch_error) = dispatch
 
@@ -458,6 +462,7 @@ async def _reuse_single_worker(
         worker.worktree_path = wt_path
         worker.working_dir = wt_path
 
+    report_template = config.get("report_template")
     (
         task_assigned,
         assignment_error,
@@ -476,6 +481,7 @@ async def _reuse_single_worker(
         enable_worktree,
         profile_settings,
         caller_agent_id,
+        report_template=report_template,
     )
 
     worker.last_activity = datetime.now()

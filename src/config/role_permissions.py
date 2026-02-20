@@ -120,6 +120,9 @@ TOOL_PERMISSIONS: dict[str, list[str]] = {
     # ========== ワークスペーステンプレート ==========
     "list_workspace_templates": ["owner", "admin"],
     "get_workspace_template": ["owner", "admin"],
+    # ========== レポートテンプレート ==========
+    "list_report_templates": ["owner", "admin", "worker"],
+    "get_report_template": ["owner", "admin", "worker"],
 }
 
 # Worker が自身の agent_id のみを対象に実行できるツール

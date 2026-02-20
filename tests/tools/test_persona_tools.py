@@ -177,11 +177,11 @@ class TestGetOptimalPersona:
         assert "persona" in result
         assert "name" in result["persona"]
         assert "description" in result["persona"]
-        assert "system_prompt_addition" in result
+        assert "file_path" in result["persona"]
 
     @pytest.mark.asyncio
-    async def test_get_optimal_persona_returns_prompt(self, persona_mock_ctx, git_repo):
-        """system_prompt_addition が空でないことをテスト。"""
+    async def test_get_optimal_persona_returns_file_path(self, persona_mock_ctx, git_repo):
+        """file_path が空でないことをテスト。"""
         mcp = _register_tools()
         get_persona = _get_tool_fn(mcp, "get_optimal_persona")
         _add_agent(persona_mock_ctx, "admin-001", AgentRole.ADMIN, str(git_repo))
@@ -193,7 +193,7 @@ class TestGetOptimalPersona:
         )
 
         assert result["success"] is True
-        assert len(result["system_prompt_addition"]) > 0
+        assert len(result["persona"]["file_path"]) > 0
 
     @pytest.mark.asyncio
     async def test_get_optimal_persona_owner_allowed(self, persona_mock_ctx, git_repo):

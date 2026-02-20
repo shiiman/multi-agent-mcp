@@ -296,7 +296,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テストタスク",
             persona_name="Backend Engineer",
-            persona_prompt="バックエンド開発者として...",
+            persona_file_path="バックエンド開発者として...",
             memory_context="",
             project_name="test-project",
         )
@@ -309,7 +309,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テストタスク",
             persona_name="Backend Engineer",
-            persona_prompt="バックエンド開発者として...",
+            persona_file_path="バックエンド開発者として...",
             memory_context="",
             project_name="test-project",
             enable_git=False,
@@ -324,7 +324,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="認証機能を実装する",
             persona_name="Backend Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -338,7 +338,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Backend Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="my-project",
         )
@@ -352,13 +352,13 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Frontend Specialist",
-            persona_prompt="フロントエンドの専門家として振る舞う",
+            persona_file_path="/path/to/personas/code.md",
             memory_context="",
             project_name="test-project",
         )
         assert "## Who（誰がやるか）" in result
         assert "**Frontend Specialist**" in result
-        assert "フロントエンドの専門家として振る舞う" in result
+        assert "/path/to/personas/code.md" in result
 
     def test_includes_constraints_section(self):
         """Constraintsセクションが含まれることをテスト。"""
@@ -367,7 +367,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -381,7 +381,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -395,7 +395,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context=memory,
             project_name="test-project",
         )
@@ -408,7 +408,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -421,7 +421,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
             worktree_path="/tmp/worktree/feature-1",
@@ -435,7 +435,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
             branch_name="feature/my-branch",
@@ -449,7 +449,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -462,7 +462,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-abc",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -477,7 +477,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -490,7 +490,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -504,7 +504,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
             mcp_tool_prefix="mcp__custom-server__",
@@ -520,7 +520,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="テスト",
             persona_name="Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -533,7 +533,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="assets/ogp.png を画像生成で作成する",
             persona_name="Designer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
             enable_cursor_image_routing=True,
@@ -550,7 +550,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="banner.png を画像生成で作成する",
             persona_name="Backend Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
         )
@@ -563,7 +563,7 @@ class TestGenerate7SectionTask:
             agent_id="worker-001",
             task_description="API エンドポイントを実装する",
             persona_name="Backend Engineer",
-            persona_prompt="...",
+            persona_file_path="...",
             memory_context="",
             project_name="test-project",
             enable_cursor_image_routing=True,

@@ -50,6 +50,8 @@ Admin ID: `{agent_id}`
 )
 {mcp_tool_prefix}create_agent(role="worker", working_dir="{working_dir}", caller_agent_id="{agent_id}")
 {mcp_tool_prefix}send_task(agent_id="xxx", task_content="内容", session_id="{session_id}", caller_agent_id="{agent_id}")
+# レポートテンプレート付き send_task
+{mcp_tool_prefix}send_task(agent_id="xxx", task_content="セキュリティ調査を実施してください", session_id="{session_id}", report_template="security", caller_agent_id="{agent_id}")
 ```
 
 ## 計画書
@@ -138,6 +140,36 @@ for task in subtasks:
 `task_kind=report` または調査・検証系タスクでは、
 成果物を必ず `output_dir` 配下の `.md` として保存します。
 
+#### 2.2. レポートテンプレートの使用
+
+`task_kind=report` または調査系タスクでは、`send_task` の `report_template` パラメータで
+出力形式を指定します。テンプレートのファイルパスが Worker のタスク指示に自動注入されます。
+Worker はそのパスからテンプレートを読み込んでレポートを作成します。
+
+**コード調査用テンプレート:**
+
+| テンプレート名 | 用途 |
+| ------------------- | ---------------------------------------- |
+| `security` | セキュリティ調査（Severity Matrix 型） |
+| `performance` | パフォーマンス調査（Table-Driven 型） |
+| `code_quality` | コード品質調査（Findings Card 型） |
+| `architecture` | アーキテクチャ調査（Admonition 型） |
+| `testing` | テスト調査（Checklist 型） |
+| `maintainability` | 保守性調査（Findings Card 型） |
+| `integrated_report` | 統合レポート（全カテゴリ集約） |
+
+**汎用テンプレート:**
+
+| テンプレート名 | 用途 |
+| --------------- | ----------------------- |
+| `tech_research` | 技術調査・Web調査 |
+| `comparison` | ツール・サービス比較 |
+| `incident` | 障害・インシデント調査 |
+| `general` | 汎用調査 |
+| `decision` | 意思決定記録（ADR） |
+
+利用可能なテンプレート一覧: `{mcp_tool_prefix}list_report_templates(caller_agent_id="{agent_id}")`
+
 {image_task_routing_section}
 
 ### 3. Worker 一括作成・タスク割り当て・タスク送信
@@ -169,13 +201,13 @@ worker_configs = [
         "task_title": subtasks[0]["title"],
         "task_id": task_ids[0],      # ← create_task で取得した ID
         "task_content": subtasks[0]["description"],
-        # 必要に応じて "preferred_cli" を指定
+        # 必要に応じて "preferred_cli", "report_template" を指定
     }},
     {{
         "task_title": subtasks[1]["title"],
         "task_id": task_ids[1],      # ← create_task で取得した ID
         "task_content": subtasks[1]["description"],
-        # 必要に応じて "preferred_cli" を指定
+        "report_template": "security",  # ← レポートテンプレート指定（調査系タスク用）
     }},
     # ... タスク数に応じて追加
 ]

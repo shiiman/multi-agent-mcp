@@ -452,7 +452,7 @@ class TestSendTaskToWorker:
         mock_persona_manager = MagicMock()
         mock_persona_manager.get_optimal_persona.return_value = MagicMock(
             name="coder",
-            system_prompt_addition="focus on fixes",
+            file_path=Path("/tmp/personas/code.md"),
         )
 
         with (
@@ -528,7 +528,7 @@ class TestSendTaskToWorker:
         mock_persona_manager = MagicMock()
         mock_persona_manager.get_optimal_persona.return_value = MagicMock(
             name="coder",
-            system_prompt_addition="focus on fixes",
+            file_path=Path("/tmp/personas/code.md"),
         )
 
         with (
@@ -611,7 +611,7 @@ class TestSendTaskToWorker:
         mock_persona_manager = MagicMock()
         mock_persona_manager.get_optimal_persona.return_value = MagicMock(
             name="coder",
-            system_prompt_addition="focus on fixes",
+            file_path=Path("/tmp/personas/code.md"),
         )
 
         with (
@@ -687,7 +687,7 @@ class TestSendTaskToWorker:
         mock_persona_manager = MagicMock()
         mock_persona_manager.get_optimal_persona.return_value = MagicMock(
             name="designer",
-            system_prompt_addition="focus on image task",
+            file_path=Path("/tmp/personas/design.md"),
         )
 
         with (
@@ -727,3 +727,240 @@ class TestSendTaskToWorker:
         assert app_ctx.ai_cli.build_stdin_command.call_args.kwargs["cli"] == "cursor"
         assert app_ctx.ai_cli.build_stdin_command.call_args.kwargs["model"] == "composer-1.5"
         assert mock_dashboard.record_api_call.call_args.kwargs["model"] == "composer-1.5"
+
+
+class TestReportTemplateInjection:
+    """report_template パラメータの注入ロジックのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_report_template_none_does_not_modify_content(self, app_ctx, temp_dir):
+        """report_template=None の場合、タスク内容が変更されないこと。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            worktree_path=str(temp_dir),
+            created_at=now,
+            last_activity=now,
+            ai_bootstrapped=False,
+        )
+        app_ctx.agents[agent.id] = agent
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.session_id = "session-001"
+
+        app_ctx.tmux.send_keys_to_pane = AsyncMock(return_value=True)
+        app_ctx.ai_cli.build_stdin_command = MagicMock(return_value="bootstrap-cmd")
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.write_task_file.return_value = Path(temp_dir) / "task.md"
+        mock_dashboard.save_markdown_dashboard.return_value = None
+        mock_dashboard.record_api_call.return_value = None
+
+        mock_persona_manager = MagicMock()
+        mock_persona_manager.get_optimal_persona.return_value = MagicMock(
+            name="coder",
+            file_path=Path("/tmp/personas/code.md"),
+        )
+
+        with (
+            patch("src.tools.agent_helpers.search_memory_context", return_value=[]),
+            patch(
+                "src.tools.agent_helpers.ensure_persona_manager",
+                return_value=mock_persona_manager,
+            ),
+            patch(
+                "src.tools.agent_helpers.get_mcp_tool_prefix_from_config",
+                return_value="mcp__x__",
+            ),
+            patch(
+                "src.tools.agent_helpers.generate_7section_task",
+                return_value="task body without template",
+            ),
+            patch("src.tools.agent_helpers.ensure_dashboard_manager", return_value=mock_dashboard),
+            patch("src.tools.agent_helpers.resolve_main_repo_root", return_value=str(temp_dir)),
+            patch("src.tools.agent_helpers.save_agent_to_file", return_value=True),
+        ):
+            result = await _send_task_to_worker(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content="do task",
+                task_id="task-001",
+                branch="feature/task-001",
+                worktree_path=str(temp_dir),
+                session_id="session-001",
+                worker_index=0,
+                enable_worktree=False,
+                profile_settings={
+                    "worker_model": "opus",
+                    "worker_thinking_tokens": 4000,
+                    "worker_reasoning_effort": "none",
+                },
+                caller_agent_id="admin-001",
+                report_template=None,
+            )
+
+        assert result["task_sent"] is True
+        # write_task_file に渡されたコンテンツにレポートテンプレートが含まれないことを確認
+        written_content = mock_dashboard.write_task_file.call_args[0][4]
+        assert "レポート出力形式" not in written_content
+
+    @pytest.mark.asyncio
+    async def test_report_template_valid_injects_path(self, app_ctx, temp_dir):
+        """存在する report_template 指定時にファイルパスがタスク内容に注入されること。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            worktree_path=str(temp_dir),
+            created_at=now,
+            last_activity=now,
+            ai_bootstrapped=False,
+        )
+        app_ctx.agents[agent.id] = agent
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.session_id = "session-001"
+
+        app_ctx.tmux.send_keys_to_pane = AsyncMock(return_value=True)
+        app_ctx.ai_cli.build_stdin_command = MagicMock(return_value="bootstrap-cmd")
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.write_task_file.return_value = Path(temp_dir) / "task.md"
+        mock_dashboard.save_markdown_dashboard.return_value = None
+        mock_dashboard.record_api_call.return_value = None
+
+        mock_persona_manager = MagicMock()
+        mock_persona_manager.get_optimal_persona.return_value = MagicMock(
+            name="coder",
+            file_path=Path("/tmp/personas/code.md"),
+        )
+
+        with (
+            patch("src.tools.agent_helpers.search_memory_context", return_value=[]),
+            patch(
+                "src.tools.agent_helpers.ensure_persona_manager",
+                return_value=mock_persona_manager,
+            ),
+            patch(
+                "src.tools.agent_helpers.get_mcp_tool_prefix_from_config",
+                return_value="mcp__x__",
+            ),
+            patch(
+                "src.tools.agent_helpers.generate_7section_task",
+                return_value="task body",
+            ),
+            patch("src.tools.agent_helpers.ensure_dashboard_manager", return_value=mock_dashboard),
+            patch("src.tools.agent_helpers.resolve_main_repo_root", return_value=str(temp_dir)),
+            patch("src.tools.agent_helpers.save_agent_to_file", return_value=True),
+        ):
+            result = await _send_task_to_worker(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content="セキュリティ調査",
+                task_id="task-001",
+                branch="feature/task-001",
+                worktree_path=str(temp_dir),
+                session_id="session-001",
+                worker_index=0,
+                enable_worktree=False,
+                profile_settings={
+                    "worker_model": "opus",
+                    "worker_thinking_tokens": 4000,
+                    "worker_reasoning_effort": "none",
+                },
+                caller_agent_id="admin-001",
+                report_template="security",
+            )
+
+        assert result["task_sent"] is True
+        written_content = mock_dashboard.write_task_file.call_args[0][4]
+        assert "レポート出力形式" in written_content
+        assert "security" in written_content
+
+    @pytest.mark.asyncio
+    async def test_report_template_invalid_does_not_inject(self, app_ctx, temp_dir):
+        """存在しない report_template 指定時にコンテンツが追加されないこと。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            worktree_path=str(temp_dir),
+            created_at=now,
+            last_activity=now,
+            ai_bootstrapped=False,
+        )
+        app_ctx.agents[agent.id] = agent
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.session_id = "session-001"
+
+        app_ctx.tmux.send_keys_to_pane = AsyncMock(return_value=True)
+        app_ctx.ai_cli.build_stdin_command = MagicMock(return_value="bootstrap-cmd")
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.write_task_file.return_value = Path(temp_dir) / "task.md"
+        mock_dashboard.save_markdown_dashboard.return_value = None
+        mock_dashboard.record_api_call.return_value = None
+
+        mock_persona_manager = MagicMock()
+        mock_persona_manager.get_optimal_persona.return_value = MagicMock(
+            name="coder",
+            file_path=Path("/tmp/personas/code.md"),
+        )
+
+        with (
+            patch("src.tools.agent_helpers.search_memory_context", return_value=[]),
+            patch(
+                "src.tools.agent_helpers.ensure_persona_manager",
+                return_value=mock_persona_manager,
+            ),
+            patch(
+                "src.tools.agent_helpers.get_mcp_tool_prefix_from_config",
+                return_value="mcp__x__",
+            ),
+            patch(
+                "src.tools.agent_helpers.generate_7section_task",
+                return_value="task body",
+            ),
+            patch("src.tools.agent_helpers.ensure_dashboard_manager", return_value=mock_dashboard),
+            patch("src.tools.agent_helpers.resolve_main_repo_root", return_value=str(temp_dir)),
+            patch("src.tools.agent_helpers.save_agent_to_file", return_value=True),
+        ):
+            result = await _send_task_to_worker(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content="調査タスク",
+                task_id="task-001",
+                branch="feature/task-001",
+                worktree_path=str(temp_dir),
+                session_id="session-001",
+                worker_index=0,
+                enable_worktree=False,
+                profile_settings={
+                    "worker_model": "opus",
+                    "worker_thinking_tokens": 4000,
+                    "worker_reasoning_effort": "none",
+                },
+                caller_agent_id="admin-001",
+                report_template="nonexistent_template_xyz",
+            )
+
+        assert result["task_sent"] is True
+        written_content = mock_dashboard.write_task_file.call_args[0][4]
+        assert "レポート出力形式" not in written_content

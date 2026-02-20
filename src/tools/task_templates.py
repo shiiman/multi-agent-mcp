@@ -250,7 +250,7 @@ def generate_7section_task(
     agent_id: str,
     task_description: str,
     persona_name: str,
-    persona_prompt: str,
+    persona_file_path: str,
     memory_context: str,
     project_name: str,
     worktree_path: str | None = None,
@@ -267,7 +267,7 @@ def generate_7section_task(
         agent_id: エージェントID
         task_description: タスク内容
         persona_name: ペルソナ名
-        persona_prompt: ペルソナのシステムプロンプト
+        persona_file_path: ペルソナテンプレートファイルのパス
         memory_context: メモリから取得した関連情報
         project_name: プロジェクト名
         worktree_path: 作業ディレクトリパス（省略可）
@@ -306,7 +306,7 @@ def generate_7section_task(
         agent_id=agent_id,
         task_description=task_description,
         persona_name=persona_name,
-        persona_prompt=persona_prompt,
+        persona_file_path=persona_file_path,
         memory_context=memory_context_display,
         project_name=project_name,
         work_env_section=work_env_section,
