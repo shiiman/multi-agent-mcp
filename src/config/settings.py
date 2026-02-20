@@ -300,15 +300,15 @@ class Settings(BaseSettings):
 
     # standard プロファイル設定
     model_profile_standard_cli: AICli = Field(
-        default=AICli.CLAUDE,
+        default=AICli.CODEX,
         description="standard プロファイルで使用する AI CLI",
     )
     model_profile_standard_admin_model: str = Field(
-        default=ModelDefaults.OPUS,
+        default=ModelDefaults.CODEX_DEFAULT,
         description="standard プロファイルで Admin が使用するモデル",
     )
     model_profile_standard_worker_model: str = Field(
-        default=ModelDefaults.SONNET,
+        default=ModelDefaults.CODEX_DEFAULT,
         description="standard プロファイルで Worker が使用するモデル",
     )
     model_profile_standard_max_workers: int = Field(
@@ -334,15 +334,15 @@ class Settings(BaseSettings):
 
     # performance プロファイル設定
     model_profile_performance_cli: AICli = Field(
-        default=AICli.CLAUDE,
+        default=AICli.CODEX,
         description="performance プロファイルで使用する AI CLI",
     )
     model_profile_performance_admin_model: str = Field(
-        default=ModelDefaults.OPUS,
+        default=ModelDefaults.CODEX_DEFAULT,
         description="performance プロファイルで Admin が使用するモデル",
     )
     model_profile_performance_worker_model: str = Field(
-        default=ModelDefaults.OPUS,
+        default=ModelDefaults.CODEX_DEFAULT,
         description="performance プロファイルで Worker が使用するモデル",
     )
     model_profile_performance_max_workers: int = Field(

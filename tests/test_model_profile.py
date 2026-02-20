@@ -49,8 +49,8 @@ class TestSettingsModelProfile:
 
     def test_performance_profile_settings_defaults(self, settings):
         """performance プロファイルのデフォルト値をテスト。"""
-        assert settings.model_profile_performance_admin_model == ModelDefaults.OPUS
-        assert settings.model_profile_performance_worker_model == ModelDefaults.OPUS
+        assert settings.model_profile_performance_admin_model == ModelDefaults.CODEX_DEFAULT
+        assert settings.model_profile_performance_worker_model == ModelDefaults.CODEX_DEFAULT
         assert settings.model_profile_performance_max_workers == 16
         assert settings.model_profile_performance_admin_thinking_tokens == 30000
         assert settings.model_profile_performance_worker_thinking_tokens == 4000

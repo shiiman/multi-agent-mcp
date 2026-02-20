@@ -244,6 +244,7 @@ class TestSendCommand:
             pane_index=1,
             working_dir=str(git_repo),
             ai_cli=AICli.CURSOR,
+            ai_cli_pinned=True,
             created_at=now,
             last_activity=now,
         )

@@ -268,17 +268,17 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_SEND_COOLDOWN_SECONDS` | Minimum cooldown between pane sends | 2.0 |
 | `MCP_DEFAULT_TERMINAL` | Default terminal app | auto |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
-| `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | claude |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | opus |
-| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | sonnet |
+| `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | codex |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | gpt-5.3-codex |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | gpt-5.3-codex |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | Standard Admin thinking tokens | 4000 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | Standard Worker thinking tokens | 4000 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT` | Standard Admin reasoning effort | medium |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT` | Standard Worker reasoning effort | medium |
-| `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | claude |
-| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | opus |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | opus |
+| `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | codex |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | gpt-5.3-codex |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | gpt-5.3-codex |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | Performance Admin thinking tokens | 30000 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | Performance Worker thinking tokens | 4000 |

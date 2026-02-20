@@ -240,8 +240,8 @@ class TestLoadSettingsForProject:
 
         settings = load_settings_for_project(str(temp_dir))
 
-        assert settings.model_profile_standard_cli == AICli.CLAUDE
-        assert settings.model_profile_standard_admin_model == ModelDefaults.OPUS
+        assert settings.model_profile_standard_cli == AICli.CODEX
+        assert settings.model_profile_standard_admin_model == ModelDefaults.CODEX_DEFAULT
 
 
 class TestWorkerCliAndModelResolution:
