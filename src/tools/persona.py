@@ -42,6 +42,7 @@ def register_tools(mcp: FastMCP) -> None:
             "persona": {
                 "name": persona_info.name,
                 "description": persona_info.description,
+                "file_path": str(persona_info.file_path),
             },
         }
 
@@ -60,7 +61,7 @@ def register_tools(mcp: FastMCP) -> None:
             caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:
-            ペルソナ情報（success, persona, system_prompt_addition）
+            ペルソナ情報（success, persona）
         """
         app_ctx, role_error = require_permission(ctx, "get_optimal_persona", caller_agent_id)
         if role_error:
@@ -75,8 +76,8 @@ def register_tools(mcp: FastMCP) -> None:
             "persona": {
                 "name": persona.name,
                 "description": persona.description,
+                "file_path": str(persona.file_path),
             },
-            "system_prompt_addition": persona.system_prompt_addition,
         }
 
     @mcp.tool()

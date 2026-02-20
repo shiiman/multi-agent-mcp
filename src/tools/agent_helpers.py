@@ -543,8 +543,12 @@ def _prepare_worker_task_content(
     session_id: str,
     enable_worktree: bool,
     caller_agent_id: str | None,
+    report_template: str | None = None,
 ) -> tuple[Path, Path]:
     """Worker 用の7セクション構造タスクを生成し、ファイルに書き出す。
+
+    Args:
+        report_template: レポートテンプレート名。指定時にテンプレートのファイルパスを注入する。
 
     Returns:
         (project_root, task_file)
@@ -569,7 +573,7 @@ def _prepare_worker_task_content(
         agent_id=agent.id,
         task_description=task_content,
         persona_name=persona.name,
-        persona_prompt=persona.system_prompt_addition,
+        persona_file_path=str(persona.file_path),
         memory_context=memory_context,
         project_name=project_root.name,
         worktree_path=worktree_path if enable_worktree else None,
@@ -579,6 +583,26 @@ def _prepare_worker_task_content(
         enable_git=agent_enable_git,
         enable_cursor_image_routing=app_ctx.settings.enable_cursor_image_routing,
     )
+
+    # レポートテンプレートのファイルパス注入
+    if report_template:
+        # 循環インポート回避のため遅延インポート
+        from src.config.template_loader import get_template_loader
+
+        loader = get_template_loader()
+        try:
+            template_path = loader.resolve_path("reports", report_template)
+            final_task_content += (
+                "\n\n---\n\n## レポート出力形式\n\n"
+                f"テンプレートファイル: `{template_path}`\n\n"
+                "このテンプレートファイルを読み込み、プレースホルダー（[...]）を"
+                "実際の調査結果に置き換えてレポートを作成してください。\n"
+            )
+        except FileNotFoundError:
+            logger.warning(
+                "レポートテンプレート '%s' が見つかりません",
+                report_template,
+            )
 
     # タスクファイル作成
     dashboard = ensure_dashboard_manager(app_ctx)
@@ -810,6 +834,7 @@ async def _send_task_to_worker(
     enable_worktree: bool,
     profile_settings: dict,
     caller_agent_id: str | None,
+    report_template: str | None = None,
 ) -> dict[str, Any]:
     """Worker にタスクを送信する。"""
     try:
@@ -827,6 +852,7 @@ async def _send_task_to_worker(
             session_id,
             enable_worktree,
             caller_agent_id,
+            report_template=report_template,
         )
 
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:

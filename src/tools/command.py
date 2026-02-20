@@ -380,6 +380,7 @@ def register_tools(mcp: FastMCP) -> None:
         project_root: Path,
         profile_settings: dict[str, Any],
         caller_agent_id: str | None,
+        report_template: str | None = None,
     ) -> dict[str, Any]:
         """Worker へのタスク送信処理。"""
         dashboard = ensure_dashboard_manager(app_ctx)
@@ -461,6 +462,7 @@ def register_tools(mcp: FastMCP) -> None:
             enable_worktree=enable_wt,
             profile_settings=profile_settings,
             caller_agent_id=caller_agent_id,
+            report_template=report_template,
         )
         ok = bool(send_result.get("task_sent"))
         return {
@@ -613,6 +615,7 @@ def register_tools(mcp: FastMCP) -> None:
         session_id: str,
         auto_enhance: bool = True,
         branch_name: str | None = None,
+        report_template: str | None = None,
         caller_agent_id: str | None = None,
         ctx: Context = None,
     ) -> dict[str, Any]:
@@ -624,6 +627,8 @@ def register_tools(mcp: FastMCP) -> None:
             session_id: Issue番号または一意なタスクID
             auto_enhance: 自動拡張を行うか（デフォルト: True）
             branch_name: 作業ブランチ名（Admin 用、省略時は feature/{session_id}）
+            report_template: レポートテンプレート名（例: "security", "general"）。
+                指定するとテンプレートのファイルパスが Worker のタスク指示に注入される。
             caller_agent_id: 呼び出し元エージェントID（必須）
         """
         pre_permission_session_id: str | None = None
@@ -707,6 +712,7 @@ def register_tools(mcp: FastMCP) -> None:
                 project_root,
                 profile_settings,
                 caller_agent_id,
+                report_template=report_template,
             )
 
         final_task_content = task_content

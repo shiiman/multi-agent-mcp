@@ -1,12 +1,16 @@
 """ペルソナ管理モジュール。
 
 タスクの種類に応じて最適なペルソナを自動設定する機能を提供する。
+ペルソナ定義は templates/personas/*.md からロードする。
 """
 
 import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -49,100 +53,11 @@ class Persona:
     description: str
     """ペルソナの説明"""
 
-    system_prompt_addition: str
-    """システムプロンプトに追加するテキスト"""
+    task_type: str
+    """タスクタイプ"""
 
-
-# タスクタイプとペルソナのマッピング
-TASK_PERSONAS: dict[TaskType, Persona] = {
-    TaskType.CODE: Persona(
-        name="シニアソフトウェアエンジニア",
-        description="効率的で保守性の高いコードを書くエキスパート",
-        system_prompt_addition=(
-            "あなたはシニアソフトウェアエンジニアとして作業しています。\n"
-            "- クリーンで読みやすいコードを心がける\n"
-            "- 適切なエラーハンドリングを実装する\n"
-            "- パフォーマンスとセキュリティを考慮する\n"
-            "- 必要に応じてコメントを追加する"
-        ),
-    ),
-    TaskType.TEST: Persona(
-        name="QAエンジニア",
-        description="品質保証とテスト設計のエキスパート",
-        system_prompt_addition=(
-            "あなたはQAエンジニアとして作業しています。\n"
-            "- 網羅的なテストケースを設計する\n"
-            "- エッジケースを考慮する\n"
-            "- テストの可読性と保守性を重視する\n"
-            "- カバレッジを意識したテストを書く"
-        ),
-    ),
-    TaskType.DOCS: Persona(
-        name="テクニカルライター",
-        description="明確で分かりやすいドキュメントを書くエキスパート",
-        system_prompt_addition=(
-            "あなたはテクニカルライターとして作業しています。\n"
-            "- 読者の視点で分かりやすく説明する\n"
-            "- 適切な構成と見出しを使用する\n"
-            "- コード例を含める場合は動作確認済みのものを使う\n"
-            "- 専門用語には説明を添える"
-        ),
-    ),
-    TaskType.REVIEW: Persona(
-        name="コードレビュワー",
-        description="コード品質とベストプラクティスを確認するエキスパート",
-        system_prompt_addition=(
-            "あなたはコードレビュワーとして作業しています。\n"
-            "- コードの可読性と保守性を確認する\n"
-            "- バグやセキュリティの問題を見つける\n"
-            "- ベストプラクティスからの逸脱を指摘する\n"
-            "- 建設的なフィードバックを提供する"
-        ),
-    ),
-    TaskType.DEBUG: Persona(
-        name="デバッグスペシャリスト",
-        description="問題の根本原因を特定し解決するエキスパート",
-        system_prompt_addition=(
-            "あなたはデバッグスペシャリストとして作業しています。\n"
-            "- 問題を再現可能な形で特定する\n"
-            "- 根本原因を分析する\n"
-            "- 影響範囲を確認する\n"
-            "- 修正による副作用を考慮する"
-        ),
-    ),
-    TaskType.DESIGN: Persona(
-        name="ソフトウェアアーキテクト",
-        description="システム設計とアーキテクチャのエキスパート",
-        system_prompt_addition=(
-            "あなたはソフトウェアアーキテクトとして作業しています。\n"
-            "- スケーラビリティと保守性を考慮する\n"
-            "- 適切なデザインパターンを選択する\n"
-            "- 依存関係を最小限に抑える\n"
-            "- 将来の拡張性を考慮する"
-        ),
-    ),
-    TaskType.REFACTOR: Persona(
-        name="リファクタリングエキスパート",
-        description="コード改善と技術的負債解消のエキスパート",
-        system_prompt_addition=(
-            "あなたはリファクタリングエキスパートとして作業しています。\n"
-            "- 動作を変えずにコードを改善する\n"
-            "- 段階的に変更を加える\n"
-            "- テストで動作を保証する\n"
-            "- 読みやすさと保守性を向上させる"
-        ),
-    ),
-    TaskType.UNKNOWN: Persona(
-        name="汎用エンジニア",
-        description="様々なタスクに対応可能なエンジニア",
-        system_prompt_addition=(
-            "あなたは経験豊富なソフトウェアエンジニアとして作業しています。\n"
-            "- タスクの要件を正確に理解する\n"
-            "- 適切な品質でアウトプットを出す\n"
-            "- 不明点があれば確認する"
-        ),
-    ),
-}
+    file_path: Path
+    """ペルソナテンプレートファイルのパス"""
 
 
 # タスクタイプ検出用のキーワードパターン
@@ -232,12 +147,107 @@ class PersonaManager:
     """ペルソナ管理クラス。
 
     タスクの内容に基づいて最適なペルソナを自動的に選択する。
+    ペルソナ定義は templates/personas/*.md からロードする。
     """
 
-    def __init__(self) -> None:
-        """PersonaManagerを初期化する。"""
-        self.personas = TASK_PERSONAS
+    def __init__(self, personas_dir: Path | None = None) -> None:
+        """PersonaManagerを初期化する。
+
+        Args:
+            personas_dir: ペルソナテンプレートディレクトリ。
+                省略時は templates/personas/ を使用。
+        """
+        if personas_dir is None:
+            personas_dir = Path(__file__).parent.parent.parent / "templates" / "personas"
+        self._personas_dir = personas_dir
         self.patterns = TASK_TYPE_PATTERNS
+        self._personas_cache: dict[str, Persona] | None = None
+
+    def _load_personas(self) -> dict[str, Persona]:
+        """ペルソナテンプレートファイルをロードしてキャッシュする。
+
+        Returns:
+            タスクタイプ → Persona のマッピング
+        """
+        if self._personas_cache is not None:
+            return self._personas_cache
+
+        personas: dict[str, Persona] = {}
+        if not self._personas_dir.exists():
+            logger.warning(
+                "ペルソナテンプレートディレクトリが見つかりません: %s",
+                self._personas_dir,
+            )
+            return personas
+
+        for md_file in sorted(self._personas_dir.glob("*.md")):
+            persona = self._parse_persona_file(md_file)
+            if persona:
+                personas[persona.task_type] = persona
+
+        self._personas_cache = personas
+        return personas
+
+    def _parse_persona_file(self, file_path: Path) -> Persona | None:
+        """ペルソナテンプレートファイルをパースする。
+
+        Args:
+            file_path: ペルソナテンプレートファイルのパス
+
+        Returns:
+            Persona オブジェクト。パース失敗時は None
+        """
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except OSError as e:
+            logger.warning("ペルソナファイルの読み込みに失敗: %s - %s", file_path, e)
+            return None
+
+        metadata = self._parse_front_matter(content)
+        if not metadata:
+            logger.warning(
+                "ペルソナファイルの Front Matter が見つかりません: %s", file_path
+            )
+            return None
+
+        # task_type のバリデーション: TaskType Enum に存在する値のみ許可
+        raw_task_type = metadata.get("task_type", file_path.stem)
+        valid_values = {t.value for t in TaskType}
+        if raw_task_type not in valid_values:
+            logger.warning(
+                "不正な task_type '%s' です（%s）。有効な値: %s",
+                raw_task_type,
+                file_path,
+                valid_values,
+            )
+            return None
+
+        return Persona(
+            name=metadata.get("name", file_path.stem),
+            description=metadata.get("description", ""),
+            task_type=raw_task_type,
+            file_path=file_path.resolve(),
+        )
+
+    @staticmethod
+    def _parse_front_matter(content: str) -> dict | None:
+        """YAML Front Matter をパースする。
+
+        Args:
+            content: Markdown コンテンツ（YAML Front Matter 付き）
+
+        Returns:
+            パースされた辞書。失敗時は None
+        """
+        if not content.startswith("---"):
+            return None
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return None
+        try:
+            return yaml.safe_load(parts[1])
+        except yaml.YAMLError:
+            return None
 
     def detect_task_type(self, task_description: str) -> TaskType:
         """タスクの説明からタスクタイプを検出する。
@@ -279,7 +289,15 @@ class PersonaManager:
         Returns:
             ペルソナ情報
         """
-        return self.personas.get(task_type, self.personas[TaskType.UNKNOWN])
+        personas = self._load_personas()
+        persona = personas.get(task_type.value)
+        if persona is None:
+            persona = personas.get(TaskType.UNKNOWN.value)
+        if persona is None:
+            raise ValueError(
+                f"ペルソナが見つかりません（ディレクトリ: {self._personas_dir}）"
+            )
+        return persona
 
     def get_optimal_persona(self, task_description: str) -> Persona:
         """タスクの説明から最適なペルソナを取得する。
@@ -293,29 +311,19 @@ class PersonaManager:
         task_type = self.detect_task_type(task_description)
         return self.get_persona(task_type)
 
-    def get_persona_prompt(self, task_description: str) -> str:
-        """タスクの説明から最適なペルソナのプロンプトを取得する。
-
-        Args:
-            task_description: タスクの説明文
-
-        Returns:
-            ペルソナのシステムプロンプト追加文
-        """
-        persona = self.get_optimal_persona(task_description)
-        return persona.system_prompt_addition
-
     def list_personas(self) -> list[dict]:
         """利用可能なペルソナの一覧を取得する。
 
         Returns:
             ペルソナ情報のリスト
         """
+        personas = self._load_personas()
         return [
             {
-                "task_type": task_type.value,
+                "task_type": persona.task_type,
                 "name": persona.name,
                 "description": persona.description,
+                "file_path": str(persona.file_path),
             }
-            for task_type, persona in self.personas.items()
+            for persona in personas.values()
         ]

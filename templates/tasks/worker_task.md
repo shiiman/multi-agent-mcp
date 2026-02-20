@@ -12,7 +12,8 @@
 
 あなたは **{persona_name}** として作業します。
 
-{persona_prompt}
+ペルソナ詳細: `{persona_file_path}`
+上記ファイルを読み込み、記載された行動指針に従って作業してください。
 
 ## Constraints（制約）
 
