@@ -144,7 +144,7 @@ class DashboardManager(
                 except BlockingIOError:
                     time.sleep(0.01)
             # タイムアウト — ブロッキングフォールバックは使わず例外を送出
-            raise TimeoutError(
+            raise asyncio.TimeoutError(
                 f"Dashboard ファイルロックの取得がタイムアウトしました ({timeout}秒)"
             )
 

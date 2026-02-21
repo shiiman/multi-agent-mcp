@@ -101,6 +101,10 @@ class TemplateLoader:
         {variable} 形式のテンプレートを string.Template の ${variable} 形式に
         内部変換してから safe_substitute を適用する。
 
+        制限事項:
+            - {variable:02d} や {variable!r} 等のフォーマット指定には非対応。
+              単純な {variable} 形式のみ置換される。
+
         Args:
             template_content: テンプレート文字列（{variable} 形式）
             **kwargs: 置換する変数
@@ -108,11 +112,15 @@ class TemplateLoader:
         Returns:
             置換後の文字列
         """
+        import uuid
+
         # 既存の $ をエスケープ（シェルスクリプト等の $VAR を保護）
         text = template_content.replace("$", "$$")
         # {{ / }} をプレースホルダーに退避（format() でのリテラル {} 表現）
-        _LBRACE = "__LBRACE_SENTINEL__"
-        _RBRACE = "__RBRACE_SENTINEL__"
+        # UUID ベースのセンチネルでテンプレート内容との衝突を防止
+        sentinel = uuid.uuid4().hex
+        _LBRACE = f"__LBRACE_{sentinel}__"
+        _RBRACE = f"__RBRACE_{sentinel}__"
         text = text.replace("{{", _LBRACE).replace("}}", _RBRACE)
         # {variable} → ${variable} に変換
         text = re.sub(r"\{(\w+)\}", r"${\1}", text)

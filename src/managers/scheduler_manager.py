@@ -138,7 +138,11 @@ class SchedulerManager:
 
     def _maybe_compact_heap(self) -> None:
         """削除済みエントリがアクティブエントリを超えた場合にヒープを再構築する。"""
-        if self._removed_task_ids and len(self._removed_task_ids) > len(self._task_map):
+        if (
+            self._removed_task_ids
+            and len(self._removed_task_ids) > len(self._task_map)
+            and len(self._removed_task_ids) > len(self._task_queue) * 0.5
+        ):
             self._task_queue = [
                 t for t in self._task_queue if t.task_id not in self._removed_task_ids
             ]

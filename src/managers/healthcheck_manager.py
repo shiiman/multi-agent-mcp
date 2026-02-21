@@ -835,6 +835,8 @@ class HealthcheckManager:
         Returns:
             (worker_no, worker_index, profile_settings, enable_worktree, caller_agent_id)
         """
+        from src.models.agent import AgentRole
+
         profile_settings = get_current_profile_settings(app_ctx)
         enable_worktree = bool(app_ctx.settings.is_worktree_enabled())
 
@@ -851,7 +853,7 @@ class HealthcheckManager:
         admin_ids = [
             aid
             for aid, a in app_ctx.agents.items()
-            if str(a.role) == "admin"
+            if a.role == AgentRole.ADMIN.value
         ]
         caller_agent_id = admin_ids[0] if admin_ids else None
 
