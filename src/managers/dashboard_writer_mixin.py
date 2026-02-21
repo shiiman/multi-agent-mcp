@@ -41,6 +41,23 @@ class DashboardWriterMixin:
                 self._write_dashboard_unlocked(dashboard)
             return result
 
+    async def run_dashboard_transaction_async(
+        self,
+        mutate: Callable[[Dashboard], _TransactionResult],
+        *,
+        write_back: bool = True,
+    ) -> _TransactionResult:
+        """Dashboard を非同期ロック下で更新するトランザクションを実行する。
+
+        _dashboard_file_lock_async() を使用し、イベントループをブロックしない。
+        """
+        async with self._dashboard_file_lock_async():
+            dashboard = self._read_dashboard_unlocked()
+            result = mutate(dashboard)
+            if write_back:
+                self._write_dashboard_unlocked(dashboard)
+            return result
+
     def _write_dashboard(self, dashboard: Dashboard) -> None:
         """ダッシュボードをファイルに保存する（YAML Front Matter + Markdown）。"""
         with self._dashboard_file_lock():

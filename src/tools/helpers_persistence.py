@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.config.settings import get_mcp_dir
 from src.context import AppContext
+from src.models.agent import AgentRole
 from src.tools.helpers_git import resolve_main_repo_root
 from src.tools.helpers_registry import (
     ensure_session_id,
@@ -26,6 +27,9 @@ if TYPE_CHECKING:
     from src.models.agent import Agent
 
 logger = logging.getLogger(__name__)
+
+# ロール整合性チェック用の有効値セット
+_VALID_ROLES = {role.value for role in AgentRole}
 
 # sync_agents_from_file のキャッシュ TTL（秒）
 _SYNC_CACHE_TTL_SECONDS = 5.0
@@ -200,6 +204,13 @@ def load_agents_from_file(app_ctx: AppContext, agents_file: Path | None = None) 
         agents: dict[str, Agent] = {}
         for agent_id, data in agents_data.items():
             try:
+                # ロール整合性チェック: 不正な値はスキップ
+                role_value = data.get("role")
+                if role_value not in _VALID_ROLES:
+                    logger.warning(
+                        f"エージェント {agent_id} の不正なロール値をスキップ: {role_value!r}"
+                    )
+                    continue
                 # datetime 文字列を datetime オブジェクトに変換
                 if isinstance(data.get("created_at"), str):
                     data["created_at"] = datetime.fromisoformat(data["created_at"])

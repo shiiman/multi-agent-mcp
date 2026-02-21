@@ -1,7 +1,6 @@
 """IPC/メッセージング管理ツール。"""
 
 import logging
-import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,6 +15,8 @@ from src.models.agent import AgentRole, AgentStatus
 from src.models.dashboard import TaskStatus, normalize_task_id
 from src.models.message import Message, MessagePriority, MessageType
 from src.tools.helpers import (
+    ADMIN_DASHBOARD_GRANT_SECONDS,
+    _owner_polling_blocked_response,
     clear_owner_wait_state,
     ensure_ipc_manager,
     find_agents_by_role,
@@ -23,30 +24,21 @@ from src.tools.helpers import (
     get_owner_wait_state,
     notify_agent_via_tmux,
     require_permission,
+    reset_agent_to_idle,
     save_agent_to_file,
     sync_agents_from_file,
     validate_sender_caller_match,
 )
 from src.tools.helpers_managers import ensure_dashboard_manager
+from src.tools.quality_gate import _validate_admin_completion_gate
 from src.tools.session_state import cleanup_session_resources
 
 logger = logging.getLogger(__name__)
-_ADMIN_DASHBOARD_GRANT_SECONDS = 90
 # polling_blocked 後にブロックを解除するまでの猶予時間（秒）
 _POLLING_BLOCKED_GRACE_SECONDS = 30
-
-
-def _owner_polling_blocked_response(waiting_admin_id: str | None) -> dict[str, Any]:
-    """Owner の待機ロック中に発生するポーリング抑止レスポンスを生成する。"""
-    return {
-        "success": False,
-        "error": (
-            "polling_blocked: Owner は Admin からの通知待機中のため、"
-            "unread=0 の監視呼び出しはできません"
-        ),
-        "next_action": "wait_for_user_input_or_unlock_owner_wait",
-        "waiting_for_admin_id": waiting_admin_id,
-    }
+# メッセージ長さ制限
+_MAX_CONTENT_LENGTH = 10000
+_MAX_SUBJECT_LENGTH = 200
 
 
 def _mark_admin_waiting_for_ipc(app_ctx: "AppContext", admin_id: str) -> None:
@@ -58,7 +50,7 @@ def _mark_admin_ipc_consumed(app_ctx: "AppContext", admin_id: str) -> None:
     state = get_admin_poll_state(app_ctx, admin_id)
     state["waiting_for_ipc"] = False
     state["allow_dashboard_until"] = datetime.now() + timedelta(
-        seconds=_ADMIN_DASHBOARD_GRANT_SECONDS
+        seconds=ADMIN_DASHBOARD_GRANT_SECONDS
     )
 
 
@@ -105,7 +97,13 @@ def _apply_admin_empty_polling_guard(
 def _auto_update_dashboard_from_messages(
     app_ctx: "AppContext", messages: list[Message]
 ) -> tuple[bool, int, list[str]]:
-    """Admin の read_messages 時に、タスク関連メッセージから Dashboard を自動更新する。"""
+    """Admin の read_messages 時に、タスク関連メッセージから Dashboard を自動更新する。
+
+    # TODO(QUAL-007): この関数は ipc.py 内で Dashboard を直接更新しており、
+    # 責務分離の観点から DashboardManager.apply_task_messages() に移動を検討する。
+    # Dashboard 更新ロジック（ステータス変更・チェックリスト更新・エージェント状態同期）を
+    # DashboardManager 側に集約することで、ipc.py はメッセージの送受信のみに専念できる。
+    """
     task_messages = [
         m
         for m in messages
@@ -121,8 +119,8 @@ def _auto_update_dashboard_from_messages(
 
     try:
         dashboard = ensure_dashboard_manager(app_ctx)
-    except Exception as e:
-        logger.debug(f"Dashboard 自動更新をスキップ: {e}")
+    except (RuntimeError, AttributeError, OSError) as e:
+        logger.debug("Dashboard 自動更新をスキップ: %s", e)
         return False, 0, ["dashboard_manager_unavailable"]
 
     task_map: dict[str, str] = {}
@@ -216,371 +214,260 @@ def _auto_update_dashboard_from_messages(
                         agent.status = AgentStatus.IDLE
                     save_agent_to_file(app_ctx, agent)
                 applied += 1
-        except Exception as e:
-            logger.debug(f"タスク {task_id} の Dashboard 更新をスキップ: {e}")
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            logger.debug("タスク %s の Dashboard 更新をスキップ: %s", task_id, e)
             skipped_reasons.append(f"update_error:{task_id}")
 
     # Markdown ダッシュボードも更新
     try:
         if app_ctx.session_id and app_ctx.project_root:
             dashboard.save_markdown_dashboard(Path(app_ctx.project_root), app_ctx.session_id)
-    except Exception as e:
-        logger.debug(f"Markdown ダッシュボード更新をスキップ: {e}")
+    except OSError as e:
+        logger.debug("Markdown ダッシュボード更新をスキップ: %s", e)
 
     return True, applied, skipped_reasons
 
 
-def _task_context_text(title: str, description: str, metadata: dict | None = None) -> str:
-    requested = ""
-    if isinstance(metadata, dict):
-        requested = str(metadata.get("requested_description", "") or "")
-    return f"{title} {requested} {description}".lower()
+def _validate_send_message_params(
+    sender_id: str,
+    caller_agent_id: str | None,
+    content: str,
+    message_type: str,
+    subject: str,
+    priority: str,
+) -> dict[str, Any] | tuple[MessageType, MessagePriority]:
+    """send_message のパラメータを検証する。
 
+    Args:
+        sender_id: 送信元エージェントID
+        caller_agent_id: 呼び出し元エージェントID
+        content: メッセージ内容
+        message_type: メッセージタイプ文字列
+        subject: 件名
+        priority: 優先度文字列
 
-def _get_requires_playwright(metadata: dict | None) -> bool | None:
-    """metadata.requires_playwright を bool として解釈する。"""
-    if not isinstance(metadata, dict):
-        return None
+    Returns:
+        エラーの場合は error dict、成功の場合は (msg_type, msg_priority) タプル
+    """
+    sender_validation_error = validate_sender_caller_match(sender_id, caller_agent_id)
+    if sender_validation_error:
+        return sender_validation_error
 
-    raw_value = metadata.get("requires_playwright")
-    if isinstance(raw_value, bool):
-        return raw_value
-    if isinstance(raw_value, str):
-        normalized = raw_value.strip().lower()
-        if normalized in {"true", "1", "yes", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "off"}:
-            return False
-    return None
+    if len(content) > _MAX_CONTENT_LENGTH:
+        return {
+            "success": False,
+            "error": (
+                f"content が長すぎます（{len(content)} 文字）。"
+                f"上限は {_MAX_CONTENT_LENGTH} 文字です。"
+            ),
+        }
+    if subject and len(subject) > _MAX_SUBJECT_LENGTH:
+        return {
+            "success": False,
+            "error": (
+                f"subject が長すぎます（{len(subject)} 文字）。"
+                f"上限は {_MAX_SUBJECT_LENGTH} 文字です。"
+            ),
+        }
 
-
-def _is_quality_task(title: str, description: str, metadata: dict | None = None) -> bool:
-    text = _task_context_text(title, description, metadata)
-    keywords = ("qa", "quality", "test", "e2e", "検証", "テスト", "品質", "playwright")
-    return any(keyword in text for keyword in keywords)
-
-
-def _is_playwright_task(title: str, description: str, metadata: dict | None = None) -> bool:
-    metadata_flag = _get_requires_playwright(metadata)
-    if metadata_flag is not None:
-        return metadata_flag
-
-    text = _task_context_text(title, description, metadata)
-    return "playwright" in text
-
-
-def _is_ui_related_task(title: str, description: str, metadata: dict | None = None) -> bool:
-    metadata_flag = _get_requires_playwright(metadata)
-    if metadata_flag is not None:
-        return metadata_flag
-
-    text = _task_context_text(title, description, metadata)
-    keywords = ("ui", "frontend", "画面", "表示", "フロント", "browser")
-    return any(keyword in text for keyword in keywords)
-
-
-def _run_git_capture(project_root: str, args: list[str]) -> tuple[bool, str]:
-    """git コマンドを実行し、成否と出力を返す。"""
     try:
-        proc = subprocess.run(
-            ["git", "-C", project_root, *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception as e:
-        return False, str(e)
-    if proc.returncode != 0:
-        return False, (proc.stderr or proc.stdout).strip()
-    return True, (proc.stdout or "").strip()
+        msg_type = MessageType(message_type)
+    except ValueError:
+        valid_types = [t.value for t in MessageType]
+        return {
+            "success": False,
+            "error": f"無効なメッセージタイプです: {message_type}（有効: {valid_types}）",
+        }
 
-
-def _branch_exists(project_root: str, branch: str) -> bool:
-    """ブランチが存在するか判定する。"""
-    ok, _ = _run_git_capture(project_root, ["rev-parse", "--verify", branch])
-    return ok
-
-
-def _is_branch_merged_into_head(project_root: str, branch: str) -> bool:
-    """ブランチが HEAD に取り込まれているか判定する。"""
-    ok, _ = _run_git_capture(
-        project_root,
-        ["merge-base", "--is-ancestor", branch, "HEAD"],
-    )
-    return ok
-
-
-def _split_lines(output: str) -> set[str]:
-    """改行区切り出力を重複なしの集合へ変換する。"""
-    return {line.strip() for line in output.splitlines() if line.strip()}
-
-
-def _get_working_tree_diff_files(project_root: str) -> tuple[set[str], str | None]:
-    """作業ツリー差分（staged + unstaged）のファイル集合を返す。"""
-    unstaged_ok, unstaged_out = _run_git_capture(project_root, ["diff", "--name-only"])
-    if not unstaged_ok:
-        return set(), unstaged_out
-    staged_ok, staged_out = _run_git_capture(
-        project_root,
-        ["diff", "--cached", "--name-only"],
-    )
-    if not staged_ok:
-        return set(), staged_out
-    return _split_lines(unstaged_out) | _split_lines(staged_out), None
-
-
-def _get_branch_changed_files(project_root: str, branch: str) -> tuple[set[str], str | None]:
-    """branch が HEAD から変更したファイル集合を返す。"""
-    ok, out = _run_git_capture(
-        project_root,
-        ["diff", "--name-only", f"HEAD...{branch}"],
-    )
-    if not ok:
-        return set(), out
-    return _split_lines(out), None
-
-
-def _is_branch_tree_equal_to_head(project_root: str, branch: str) -> tuple[bool, str | None]:
-    """HEAD と branch のツリー内容が同一か判定する。"""
     try:
-        proc = subprocess.run(
-            ["git", "-C", project_root, "diff", "--quiet", "HEAD", branch],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception as e:
-        return False, str(e)
+        msg_priority = MessagePriority(priority)
+    except ValueError:
+        valid_priorities = [p.value for p in MessagePriority]
+        return {
+            "success": False,
+            "error": f"無効な優先度です: {priority}（有効: {valid_priorities}）",
+        }
 
-    if proc.returncode == 0:
-        return True, None
-    if proc.returncode == 1:
-        return False, None
-    return False, (proc.stderr or proc.stdout).strip()
+    return (msg_type, msg_priority)
 
 
-def _is_branch_changes_already_applied(project_root: str, branch: str) -> tuple[bool, str | None]:
-    """branch の変更が patch-id ベースで HEAD に適用済みか判定する。"""
-    ok, out = _run_git_capture(project_root, ["cherry", "HEAD", branch])
-    if not ok:
-        return False, out
-    lines = [line.strip() for line in out.splitlines() if line.strip()]
-    if not lines:
-        return False, None
-    return all(line.startswith("-") for line in lines), None
+def _resolve_send_message_receiver(
+    app_ctx: "AppContext",
+    sender_id: str,
+    receiver_id: str | None,
+    msg_type: MessageType,
+    ipc: Any,
+) -> dict[str, Any] | tuple[str | None, str | None]:
+    """send_message の受信者を解決する。
 
+    Worker のブロードキャスト禁止、不正な receiver_id の補正、
+    Worker→Admin 制約の検証、IPC 登録を行う。
 
-def _check_branch_integration_state(project_root: str, branches: list[str]) -> list[dict[str, Any]]:
-    """完了ブランチが統合済みか（merge/cherry/tree-equal/diff包含）を判定する。"""
-    diff_files, diff_error = _get_working_tree_diff_files(project_root)
-    if diff_error:
-        logger.debug("作業ツリー差分の取得に失敗: %s", diff_error)
-    branch_states: list[dict[str, Any]] = []
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        sender_id: 送信元エージェントID
+        receiver_id: 宛先エージェントID（None でブロードキャスト）
+        msg_type: 検証済みメッセージタイプ
+        ipc: IPCManager インスタンス
 
-    for branch in sorted(set(branches)):
-        if not branch:
-            continue
-        if not _branch_exists(project_root, branch):
-            branch_states.append(
-                {
-                    "branch": branch,
-                    "merged": False,
-                    "tree_equal_to_head": False,
-                    "changes_already_applied": False,
-                    "covered_by_diff": False,
-                    "branch_not_found": True,
-                    "missing_files": [],
-                }
-            )
-            continue
+    Returns:
+        エラーの場合は error dict、成功の場合は (resolved_receiver_id, rerouted_receiver_id) タプル
+    """
+    sender_agent = app_ctx.agents.get(sender_id)
+    sender_role = str(getattr(sender_agent, "role", ""))
+    rerouted_receiver_id: str | None = None
 
-        merged = _is_branch_merged_into_head(project_root, branch)
-        changed_files, branch_error = _get_branch_changed_files(project_root, branch)
-        tree_equal_to_head, tree_equal_error = _is_branch_tree_equal_to_head(project_root, branch)
-        changes_already_applied, cherry_error = _is_branch_changes_already_applied(
-            project_root, branch
-        )
-        integration_error = branch_error or tree_equal_error or cherry_error
-        if tree_equal_error:
-            logger.debug("branch tree 比較に失敗: %s (%s)", branch, tree_equal_error)
-        if cherry_error:
-            logger.debug("branch cherry 判定に失敗: %s (%s)", branch, cherry_error)
-        if branch_error:
-            logger.debug("ブランチ変更ファイルの取得に失敗: %s (%s)", branch, branch_error)
-        if integration_error:
-            branch_states.append(
-                {
-                    "branch": branch,
-                    "merged": merged,
-                    "tree_equal_to_head": tree_equal_to_head,
-                    "changes_already_applied": changes_already_applied,
-                    "covered_by_diff": False,
-                    "branch_not_found": False,
-                    "missing_files": [],
-                    "error": integration_error,
-                }
-            )
-            continue
-
-        missing_files = sorted(changed_files - diff_files)
-        branch_states.append(
-            {
-                "branch": branch,
-                "merged": merged,
-                "tree_equal_to_head": tree_equal_to_head,
-                "changes_already_applied": changes_already_applied,
-                "covered_by_diff": len(missing_files) == 0,
-                "branch_not_found": False,
-                "missing_files": missing_files,
-            }
-        )
-
-    return branch_states
-
-
-def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[dict[str, Any]]:
-    """現在ブランチへの統合状態を返す。"""
-    try:
-        current_branch = subprocess.check_output(
-            ["git", "-C", project_root, "rev-parse", "--abbrev-ref", "HEAD"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except Exception as e:
-        logger.debug("ブランチマージ状態の確認に失敗: %s", e)
-        return []
-
-    filtered = [branch for branch in branches if branch and branch != current_branch]
-    return _check_branch_integration_state(project_root, filtered)
-
-
-def _validate_admin_completion_gate(
-    app_ctx: "AppContext", sender_id: str, receiver_id: str | None, msg_type: MessageType
-) -> tuple[bool, dict[str, Any]]:
-    """Admin -> Owner の task_complete を品質ゲートで検証する。"""
-    if msg_type != MessageType.TASK_COMPLETE or not receiver_id:
-        return True, {}
-
-    sender = app_ctx.agents.get(sender_id)
-    receiver = app_ctx.agents.get(receiver_id)
-    if not sender or not receiver:
-        return True, {}
-    if sender.role != AgentRole.ADMIN.value or receiver.role != AgentRole.OWNER.value:
-        return True, {}
-
-    # 品質ゲート緩和モード: MCP_QUALITY_GATE_STRICT=false で品質チェックをスキップ
-    if not getattr(app_ctx.settings, "quality_gate_strict", True):
-        logger.info("品質ゲート緩和モード: 品質チェックをスキップします")
-        return True, {}
-
-    dashboard = ensure_dashboard_manager(app_ctx)
-    tasks = dashboard.list_tasks()
-    summary = dashboard.get_summary()
-    settings = app_ctx.settings
-
-    reasons: list[str] = []
-    suggestions: list[str] = []
-
+    # Worker ブロードキャスト禁止
     if (
-        summary["pending_tasks"] > 0
-        or summary["in_progress_tasks"] > 0
-        or summary["failed_tasks"] > 0
+        sender_role == AgentRole.WORKER.value
+        and requires_worker_admin_receiver("send_message")
+        and receiver_id is None
     ):
-        reasons.append(
-            "未完了タスクがあります"
-            " "
-            f"(pending={summary['pending_tasks']}, "
-            f"in_progress={summary['in_progress_tasks']}, "
-            f"failed={summary['failed_tasks']})"
-        )
-        suggestions.append("未完了/失敗タスクを再計画し、Worker に再割り当てしてください。")
+        return {
+            "success": False,
+            "error": (
+                "Worker は send_message をブロードキャストできません。"
+                "Admin の agent_id を receiver_id に指定してください。"
+            ),
+        }
 
-    completed_tasks = [t for t in tasks if t.status == TaskStatus.COMPLETED]
-    quality_tasks = [
-        t
-        for t in completed_tasks
-        if _is_quality_task(t.title, t.description, getattr(t, "metadata", None))
-    ]
-    if not quality_tasks:
-        reasons.append("品質証跡タスク（test/QA/検証）が完了していません")
-        suggestions.append("品質チェック専用タスクを作成し、証跡を揃えてください。")
-
-    ui_required = any(
-        _is_ui_related_task(t.title, t.description, getattr(t, "metadata", None)) for t in tasks
-    )
-    playwright_done = any(
-        _is_playwright_task(t.title, t.description, getattr(t, "metadata", None))
-        for t in quality_tasks
-    )
-    if ui_required and not playwright_done:
-        reasons.append("UI関連タスクに対する Playwright 証跡が不足しています")
-        suggestions.append("Playwright 実行タスクを追加し、完了報告を取り込んでください。")
-
-    # No Git モードではブランチ統合チェックをスキップ
-    # (git コマンド不可 + merge_completed_tasks も無効でデッドエンドになるため)
-    branches: list[str] = []
-    integration_states: list[dict[str, Any]] = []
-    if app_ctx.settings.enable_git:
-        branches = [t.branch for t in completed_tasks if t.branch]
-        if app_ctx.project_root and branches:
-            integration_states = _check_branch_merge_state(
-                str(app_ctx.project_root), branches
+    if receiver_id:
+        sync_agents_from_file(app_ctx)
+        receiver_agent = app_ctx.agents.get(receiver_id)
+        if not receiver_agent:
+            is_worker_request = (
+                msg_type == MessageType.REQUEST and sender_role == AgentRole.WORKER.value
             )
-            not_integrated = [
-                s
-                for s in integration_states
-                if not (
-                    s.get("merged")
-                    or s.get("covered_by_diff")
-                    or s.get("tree_equal_to_head")
-                    or s.get("changes_already_applied")
-                )
-            ]
-            if not_integrated:
-                branch_names = ", ".join([s["branch"] for s in not_integrated[:5]])
-                reasons.append(f"未統合の完了タスクブランチがあります: {branch_names}")
-                detail_lines: list[str] = []
-                for state in not_integrated[:5]:
-                    if state.get("branch_not_found"):
-                        detail_lines.append(f"{state['branch']}: branch_not_found")
-                        continue
-                    missing_files = state.get("missing_files") or []
-                    if missing_files:
-                        sample = ", ".join(missing_files[:3])
-                        if len(missing_files) > 3:
-                            sample = f"{sample}, ..."
-                        detail_lines.append(
-                            f"{state['branch']}: diff に不足"
-                            f" ({len(missing_files)} files: {sample})"
-                        )
-                    elif state.get("error"):
-                        detail_lines.append(
-                            f"{state['branch']}: 判定エラー ({state['error']})"
-                        )
-                if detail_lines:
-                    reasons.extend(detail_lines)
-                suggestions.append(
-                    "merge_completed_tasks で差分を展開し、"
-                    "統合ブランチ上の diff を確認後に再通知してください。"
-                )
+            if is_worker_request:
+                admin_ids = find_agents_by_role(app_ctx, "admin")
+                if len(admin_ids) == 1 and admin_ids[0] in app_ctx.agents:
+                    original = receiver_id
+                    receiver_id = admin_ids[0]
+                    rerouted_receiver_id = receiver_id
+                    logger.warning(
+                        "Worker request の受信者IDを Admin に補正: sender=%s receiver=%s -> %s",
+                        sender_id,
+                        original,
+                        receiver_id,
+                    )
+                else:
+                    return {
+                        "success": False,
+                        "error": (
+                            "不正な receiver_id です（有効な Admin が一意に解決できません）"
+                        ),
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": f"受信者 {receiver_id} が見つかりません",
+                }
 
-    if reasons:
-        gate_payload: dict[str, Any] = {
-            "status": "needs_replan",
-            "reasons": reasons,
-            "suggestions": suggestions,
-            "quality_limits": {
-                "max_iterations": settings.quality_check_max_iterations,
-                "same_issue_limit": settings.quality_check_same_issue_limit,
-            },
-        }
-        if app_ctx.project_root and branches:
-            gate_payload["branch_integration"] = integration_states
-        return False, {
-            **gate_payload,
-        }
+        if sender_role == AgentRole.WORKER.value:
+            receiver_agent = app_ctx.agents.get(receiver_id)
+            if str(getattr(receiver_agent, "role", "")) != AgentRole.ADMIN.value:
+                return {
+                    "success": False,
+                    "error": (
+                        "Worker は Admin にのみ send_message を送信できます。"
+                        f" receiver_id={receiver_id}"
+                    ),
+                }
 
-    return True, {"status": "passed"}
+        if receiver_id not in ipc.get_all_agent_ids():
+            ipc.register_agent(receiver_id)
+
+    return (receiver_id, rerouted_receiver_id)
+
+
+async def _deliver_notification(
+    app_ctx: "AppContext",
+    sender_id: str,
+    receiver_id: str | None,
+    msg_type: MessageType,
+) -> tuple[bool, str | None]:
+    """tmux/macOS 通知を配信し、結果を返す。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        sender_id: 送信元エージェントID
+        receiver_id: 宛先エージェントID（None でブロードキャスト）
+        msg_type: メッセージタイプ
+
+    Returns:
+        (notification_sent, notification_method) タプル
+    """
+    if not receiver_id:
+        return False, None
+
+    sync_agents_from_file(app_ctx)
+    receiver_agent = app_ctx.agents.get(receiver_id)
+    sender_agent = app_ctx.agents.get(sender_id)
+
+    is_admin_to_owner = (
+        sender_agent
+        and receiver_agent
+        and str(getattr(sender_agent, "role", "")) == AgentRole.ADMIN.value
+        and str(getattr(receiver_agent, "role", "")) == AgentRole.OWNER.value
+    )
+
+    if not receiver_agent:
+        return False, None
+
+    has_tmux_pane = receiver_agent.session_name and receiver_agent.pane_index is not None
+    if has_tmux_pane:
+        tmux_ok = await notify_agent_via_tmux(
+            app_ctx,
+            receiver_agent,
+            msg_type.value,
+            sender_id,
+            allow_macos_fallback=False,
+        )
+        if tmux_ok:
+            return True, "tmux"
+        if is_admin_to_owner:
+            from src.tools.helpers import _send_macos_notification
+
+            macos_ok = await _send_macos_notification(msg_type.value, sender_id)
+            if macos_ok:
+                return True, "macos_fallback"
+    elif is_admin_to_owner:
+        from src.tools.helpers import _send_macos_notification
+
+        macos_ok = await _send_macos_notification(msg_type.value, sender_id)
+        if macos_ok:
+            logger.info("IPC通知を送信(macOS): %s", receiver_id)
+            return True, "macos"
+
+    return False, None
+
+
+async def _handle_post_send_actions(
+    app_ctx: "AppContext",
+    msg_type: MessageType,
+) -> tuple[bool, dict[str, Any] | None, str | None]:
+    """送信後の後処理（TASK_APPROVED 時の自動クリーンアップ等）を実行する。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        msg_type: メッセージタイプ
+
+    Returns:
+        (auto_cleanup_executed, auto_cleanup_result, auto_cleanup_error) タプル
+    """
+    if msg_type != MessageType.TASK_APPROVED:
+        return False, None, None
+
+    try:
+        result = await cleanup_session_resources(
+            app_ctx,
+            remove_worktrees=True,
+            repo_path=app_ctx.project_root,
+        )
+        return True, result, None
+    except (OSError, RuntimeError) as e:
+        logger.warning("task_approved 後の自動クリーンアップに失敗: %s", e)
+        return True, None, str(e)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -615,100 +502,29 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
-        sender_validation_error = validate_sender_caller_match(sender_id, caller_agent_id)
-        if sender_validation_error:
-            return sender_validation_error
+        # パラメータ検証
+        params_result = _validate_send_message_params(
+            sender_id, caller_agent_id, content, message_type, subject, priority,
+        )
+        if isinstance(params_result, dict):
+            return params_result
+        msg_type, msg_priority = params_result
 
         ipc = ensure_ipc_manager(app_ctx)
         sync_agents_from_file(app_ctx)
-
-        # メッセージタイプの検証
-        try:
-            msg_type = MessageType(message_type)
-        except ValueError:
-            valid_types = [t.value for t in MessageType]
-            return {
-                "success": False,
-                "error": f"無効なメッセージタイプです: {message_type}（有効: {valid_types}）",
-            }
-
-        # 優先度の検証
-        try:
-            msg_priority = MessagePriority(priority)
-        except ValueError:
-            valid_priorities = [p.value for p in MessagePriority]
-            return {
-                "success": False,
-                "error": f"無効な優先度です: {priority}（有効: {valid_priorities}）",
-            }
 
         # 送信者がIPCに登録されているか確認
         if sender_id not in ipc.get_all_agent_ids():
             ipc.register_agent(sender_id)
 
-        sender_agent = app_ctx.agents.get(sender_id)
-        sender_role = str(getattr(sender_agent, "role", ""))
+        # 受信者解決
         original_receiver_id = receiver_id
-        rerouted_receiver_id: str | None = None
-        receiver_agent = None
-
-        if (
-            sender_role == AgentRole.WORKER.value
-            and requires_worker_admin_receiver("send_message")
-            and receiver_id is None
-        ):
-            return {
-                "success": False,
-                "error": (
-                    "Worker は send_message をブロードキャストできません。"
-                    "Admin の agent_id を receiver_id に指定してください。"
-                ),
-            }
-
-        if receiver_id:
-            sync_agents_from_file(app_ctx)
-            receiver_agent = app_ctx.agents.get(receiver_id)
-            if not receiver_agent:
-                is_worker_request = (
-                    msg_type == MessageType.REQUEST and sender_role == AgentRole.WORKER.value
-                )
-                if is_worker_request:
-                    admin_ids = find_agents_by_role(app_ctx, "admin")
-                    if len(admin_ids) == 1 and admin_ids[0] in app_ctx.agents:
-                        receiver_id = admin_ids[0]
-                        rerouted_receiver_id = receiver_id
-                        logger.warning(
-                            "Worker request の受信者IDを Admin に補正: sender=%s receiver=%s -> %s",
-                            sender_id,
-                            original_receiver_id,
-                            receiver_id,
-                        )
-                    else:
-                        return {
-                            "success": False,
-                            "error": (
-                                "不正な receiver_id です（有効な Admin が一意に解決できません）"
-                            ),
-                        }
-                else:
-                    return {
-                        "success": False,
-                        "error": f"受信者 {receiver_id} が見つかりません",
-                    }
-
-            if sender_role == AgentRole.WORKER.value:
-                receiver_agent = app_ctx.agents.get(receiver_id)
-                if str(getattr(receiver_agent, "role", "")) != AgentRole.ADMIN.value:
-                    return {
-                        "success": False,
-                        "error": (
-                            "Worker は Admin にのみ send_message を送信できます。"
-                            f" receiver_id={receiver_id}"
-                        ),
-                    }
-
-            if receiver_id not in ipc.get_all_agent_ids():
-                ipc.register_agent(receiver_id)
+        receiver_result = _resolve_send_message_receiver(
+            app_ctx, sender_id, receiver_id, msg_type, ipc,
+        )
+        if isinstance(receiver_result, dict):
+            return receiver_result
+        receiver_id, rerouted_receiver_id = receiver_result
 
         gate_ok, gate_detail = _validate_admin_completion_gate(
             app_ctx, sender_id, receiver_id, msg_type
@@ -731,69 +547,14 @@ def register_tools(mcp: FastMCP) -> None:
         )
 
         # イベント駆動通知: 受信者の状態に応じて通知方法を選択
-        # tmux ペイン未配置の Owner 向けに、admin→owner は macOS へフォールバック
-        notification_sent = False
-        notification_method = None
-        auto_cleanup_executed = False
-        auto_cleanup_result: dict[str, Any] | None = None
-        auto_cleanup_error: str | None = None
-        if receiver_id:
-            sync_agents_from_file(app_ctx)
-            receiver_agent = app_ctx.agents.get(receiver_id)
-            sender_agent = app_ctx.agents.get(sender_id)
-            # macOS 通知条件: admin→owner の全メッセージタイプ
-            # (Owner は tmux ペインを持たないケースがあるため)
-            is_admin_to_owner = (
-                sender_agent
-                and receiver_agent
-                and str(getattr(sender_agent, "role", "")) == AgentRole.ADMIN.value
-                and str(getattr(receiver_agent, "role", "")) == AgentRole.OWNER.value
-            )
-            if receiver_agent:
-                has_tmux_pane = (
-                    receiver_agent.session_name and receiver_agent.pane_index is not None
-                )
-                if has_tmux_pane:
-                    # tmux ペインがある場合: リトライ付き tmux 通知
-                    tmux_ok = await notify_agent_via_tmux(
-                        app_ctx,
-                        receiver_agent,
-                        msg_type.value,
-                        sender_id,
-                        allow_macos_fallback=False,
-                    )
-                    if tmux_ok:
-                        notification_sent = True
-                        notification_method = "tmux"
-                    elif is_admin_to_owner:
-                        # tmux 通知失敗時のみ macOS 通知を追加試行する
-                        from src.tools.helpers import _send_macos_notification
+        notification_sent, notification_method = await _deliver_notification(
+            app_ctx, sender_id, receiver_id, msg_type,
+        )
 
-                        macos_ok = await _send_macos_notification(msg_type.value, sender_id)
-                        if macos_ok:
-                            notification_sent = True
-                            notification_method = "macos_fallback"
-                elif is_admin_to_owner:
-                    # tmux ペインがない Owner への admin 通知を macOS で補完
-                    from src.tools.helpers import _send_macos_notification
-
-                    macos_ok = await _send_macos_notification(msg_type.value, sender_id)
-                    if macos_ok:
-                        notification_sent = True
-                        notification_method = "macos"
-                        logger.info("IPC通知を送信(macOS): %s", receiver_id)
-
-        if msg_type == MessageType.TASK_APPROVED:
-            auto_cleanup_executed = True
-            try:
-                auto_cleanup_result = await cleanup_session_resources(
-                    app_ctx,
-                    remove_worktrees=True,
-                    repo_path=app_ctx.project_root,
-                )
-            except Exception as e:
-                auto_cleanup_error = str(e)
-                logger.warning("task_approved 後の自動クリーンアップに失敗: %s", e)
+        # 送信後の後処理（TASK_APPROVED 時の自動クリーンアップ等）
+        auto_cleanup_executed, auto_cleanup_result, auto_cleanup_error = (
+            await _handle_post_send_actions(app_ctx, msg_type)
+        )
 
         delivery_state = (
             "broadcast"

@@ -46,6 +46,9 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
     Raises:
         ValueError: project_root が設定されていない場合
     """
+    # TODO(ARCH-004): resolve_project_root を helpers_git.py に移動して直接 import したいが、
+    # helpers_registry.py / helpers_persistence.py が helpers_git.py を import しており、
+    # resolve_project_root がそれらに依存するため循環参照になる。遅延 import を維持する。
     from src.tools.helpers import resolve_project_root
 
     try:
@@ -100,6 +103,7 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
     Raises:
         ValueError: project_root または session_id が設定されていない場合
     """
+    # TODO(ARCH-004): 遅延 import — ensure_ipc_manager のコメント参照
     from src.tools.helpers import resolve_project_root
 
     base_dir = resolve_project_root(app_ctx)
@@ -194,6 +198,7 @@ def ensure_memory_manager(app_ctx: AppContext) -> MemoryManager:
     worktree 内で実行されている場合でも、メインリポジトリの
     `{mcp_dir}/memory`（セッション非依存）を使用する。
     """
+    # TODO(ARCH-004): 遅延 import — ensure_ipc_manager のコメント参照
     from src.tools.helpers import resolve_project_root
 
     project_root = resolve_project_root(

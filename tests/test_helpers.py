@@ -736,7 +736,7 @@ class TestRequirePermission:
         result = get_app_ctx(ctx)
         assert result is app_ctx
 
-    @patch("src.tools.helpers.sync_agents_from_file")
+    @patch("src.tools.helpers_permissions.sync_agents_from_file")
     def test_require_permission_allowed(self, mock_sync, app_ctx):
         """権限OK時に (app_ctx, None) を返す。"""
         from src.tools.helpers import require_permission
@@ -758,7 +758,7 @@ class TestRequirePermission:
         assert result_ctx is app_ctx
         assert error is None
 
-    @patch("src.tools.helpers.sync_agents_from_file")
+    @patch("src.tools.helpers_permissions.sync_agents_from_file")
     def test_require_permission_denied(self, mock_sync, app_ctx):
         """権限エラー時に (app_ctx, error_dict) を返す。"""
         from src.tools.helpers import require_permission
@@ -775,8 +775,8 @@ class TestEnsureProjectRootFromCaller:
     """ensure_project_root_from_caller の再同期挙動テスト。"""
 
     @patch("src.tools.helpers.refresh_app_settings")
-    @patch("src.tools.helpers.get_session_id_from_registry")
-    @patch("src.tools.helpers.get_project_root_from_registry")
+    @patch("src.tools.helpers_permissions.get_session_id_from_registry")
+    @patch("src.tools.helpers_permissions.get_project_root_from_registry")
     def test_syncs_session_id_even_when_already_set(
         self, mock_project_root, mock_session_id, _mock_refresh, app_ctx
     ):
@@ -792,8 +792,8 @@ class TestEnsureProjectRootFromCaller:
         assert app_ctx.session_id == "new-session"
 
     @patch("src.tools.helpers.refresh_app_settings")
-    @patch("src.tools.helpers.get_session_id_from_registry")
-    @patch("src.tools.helpers.get_project_root_from_registry")
+    @patch("src.tools.helpers_permissions.get_session_id_from_registry")
+    @patch("src.tools.helpers_permissions.get_project_root_from_registry")
     def test_syncs_project_root_even_when_already_set(
         self, mock_project_root, mock_session_id, mock_refresh, app_ctx, temp_dir
     ):

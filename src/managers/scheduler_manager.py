@@ -77,6 +77,7 @@ class SchedulerManager:
         self._task_queue: list[ScheduledTask] = []
         self._assigned_tasks: dict[str, str] = {}  # task_id -> agent_id
         self._task_map: dict[str, ScheduledTask] = {}  # task_id -> ScheduledTask
+        self._removed_task_ids: set[str] = set()  # Lazy deletion 用
 
     def enqueue_task(
         self,
@@ -98,6 +99,9 @@ class SchedulerManager:
             logger.warning(f"タスク {task_id} は既にキューに存在します")
             return False
 
+        # 再登録時に Lazy deletion の残骸を除去
+        self._removed_task_ids.discard(task_id)
+
         scheduled = ScheduledTask(
             priority=priority.value,
             created_at=datetime.now(),
@@ -111,7 +115,10 @@ class SchedulerManager:
         return True
 
     def dequeue_task(self, task_id: str) -> bool:
-        """タスクをキューから削除する。
+        """タスクをキューから削除する（Lazy deletion）。
+
+        ヒープからの物理削除は行わず、削除済みセットに記録する。
+        ヒープが肥大化した場合は自動的にコンパクションを実行する。
 
         Args:
             task_id: タスクID
@@ -123,11 +130,20 @@ class SchedulerManager:
             return False
 
         del self._task_map[task_id]
-        self._task_queue = [t for t in self._task_queue if t.task_id != task_id]
-        heapq.heapify(self._task_queue)
+        self._removed_task_ids.add(task_id)
+        self._maybe_compact_heap()
 
         logger.info(f"タスク {task_id} をキューから削除しました")
         return True
+
+    def _maybe_compact_heap(self) -> None:
+        """削除済みエントリがアクティブエントリを超えた場合にヒープを再構築する。"""
+        if self._removed_task_ids and len(self._removed_task_ids) > len(self._task_map):
+            self._task_queue = [
+                t for t in self._task_queue if t.task_id not in self._removed_task_ids
+            ]
+            heapq.heapify(self._task_queue)
+            self._removed_task_ids.clear()
 
     def update_priority(self, task_id: str, priority: TaskPriority) -> bool:
         """タスクの優先度を更新する。
@@ -188,14 +204,20 @@ class SchedulerManager:
             return True
         return all(status_snapshot.get(dep_id) == "completed" for dep_id in dependencies)
 
-    def get_next_task(self) -> str | None:
+    def get_next_task(self, status_snapshot: dict[str, str] | None = None) -> str | None:
         """次に実行すべきタスクを取得する（依存関係考慮）。
+
+        Args:
+            status_snapshot: タスク状態スナップショット（省略時は内部で取得）
 
         Returns:
             タスクID、なければNone
         """
-        status_snapshot = self._build_task_status_snapshot()
+        if status_snapshot is None:
+            status_snapshot = self._build_task_status_snapshot()
         for scheduled in sorted(self._task_queue):
+            if scheduled.task_id in self._removed_task_ids:
+                continue
             if scheduled.task_id in self._assigned_tasks:
                 continue
             if self._dependencies_satisfied_with_snapshot(scheduled.dependencies, status_snapshot):
@@ -274,13 +296,16 @@ class SchedulerManager:
         logger.info(f"タスク {task_id} を Worker {worker_id} に割り当てました")
         return True, f"タスク {task_id} を Worker {worker_id} に割り当てました"
 
-    def auto_assign(self) -> tuple[str, str] | None:
+    def auto_assign(self, status_snapshot: dict[str, str] | None = None) -> tuple[str, str] | None:
         """タスクを自動で1つ割り当てる。
+
+        Args:
+            status_snapshot: タスク状態スナップショット（省略時は内部で取得）
 
         Returns:
             (task_id, worker_id) のタプル、割り当てできなければNone
         """
-        task_id = self.get_next_task()
+        task_id = self.get_next_task(status_snapshot)
         if not task_id:
             return None
 
@@ -296,12 +321,15 @@ class SchedulerManager:
     def run_auto_assign_loop(self) -> list[tuple[str, str]]:
         """空いているWorker全てにタスクを割り当てる。
 
+        ループ冒頭でスナップショットを1回取得し、ループ内で再利用する。
+
         Returns:
             割り当てた (task_id, worker_id) のリスト
         """
+        status_snapshot = self._build_task_status_snapshot()
         assignments = []
         while True:
-            result = self.auto_assign()
+            result = self.auto_assign(status_snapshot)
             if not result:
                 break
             assignments.append(result)
@@ -330,6 +358,8 @@ class SchedulerManager:
         status_snapshot = self._build_task_status_snapshot()
         pending = []
         for scheduled in sorted(self._task_queue):
+            if scheduled.task_id in self._removed_task_ids:
+                continue
             if scheduled.task_id not in self._assigned_tasks:
                 pending.append(
                     {

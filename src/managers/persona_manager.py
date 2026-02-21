@@ -161,6 +161,10 @@ class PersonaManager:
             personas_dir = Path(__file__).parent.parent.parent / "templates" / "personas"
         self._personas_dir = personas_dir
         self.patterns = TASK_TYPE_PATTERNS
+        self._compiled_patterns: dict[TaskType, list[re.Pattern[str]]] = {
+            task_type: [re.compile(p, re.IGNORECASE) for p in patterns]
+            for task_type, patterns in TASK_TYPE_PATTERNS.items()
+        }
         self._personas_cache: dict[str, Persona] | None = None
 
     def _load_personas(self) -> dict[str, Persona]:
@@ -264,10 +268,10 @@ class PersonaManager:
         description_lower = task_description.lower()
         scores: dict[TaskType, int] = {}
 
-        for task_type, patterns in self.patterns.items():
+        for task_type, compiled in self._compiled_patterns.items():
             score = 0
-            for pattern in patterns:
-                if re.search(pattern, description_lower, re.IGNORECASE):
+            for pattern in compiled:
+                if pattern.search(description_lower):
                     score += 1
             if score > 0:
                 scores[task_type] = score

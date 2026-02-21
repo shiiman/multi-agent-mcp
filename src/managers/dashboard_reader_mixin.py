@@ -27,7 +27,11 @@ class DashboardReaderMixin:
             current_mtime_ns = dashboard_path.stat().st_mtime_ns
         except OSError:
             current_mtime_ns = 0
-        if self._read_cache is not None and current_mtime_ns == self._read_cache_mtime:
+        if (
+            self._read_cache is not None
+            and current_mtime_ns == self._read_cache_mtime
+            and current_mtime_ns != 0  # ファイルなし時はキャッシュを使わず再読み込み
+        ):
             return self._read_cache
         with self._dashboard_file_lock():
             dashboard = self._read_dashboard_unlocked()

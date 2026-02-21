@@ -96,6 +96,20 @@ class HealthcheckManager:
         self._recovery_failures: dict[str, int] = {}
 
     @staticmethod
+    def _persist_agent(app_ctx: "AppContext | None", agent: "Agent") -> bool:
+        """エージェント状態をファイルに永続化する。
+
+        循環参照回避のため遅延 import を1箇所に集約している。
+        （src.tools.__init__ が src.context を再帰 import するため
+        トップレベル import は不可）
+        """
+        if app_ctx is None:
+            return False
+        from src.tools.helpers_persistence import save_agent_to_file
+
+        return save_agent_to_file(app_ctx, agent)
+
+    @staticmethod
     def _recovery_key(agent_id: str, task_id: str | None) -> str:
         normalized_task = task_id or "-"
         return f"{agent_id}:{normalized_task}"
@@ -136,23 +150,27 @@ class HealthcheckManager:
         compact = "\n".join(output.strip().splitlines()[-40:])
         return hashlib.sha1(compact.encode("utf-8")).hexdigest()
 
-    async def _is_worker_stalled(
+    async def _is_pane_unchanged_for(
         self,
         agent_id: str,
         agent: "Agent",
+        timeout_seconds: int,
         now: datetime,
     ) -> bool:
-        """Worker が無応答状態かを二段階判定で判定する。"""
-        if not agent.current_task or not agent.last_activity:
-            return False
+        """ペインの出力が指定時間以上変化していないかを判定する。
 
-        inactive_for = now - agent.last_activity
-        if inactive_for < timedelta(seconds=self.stall_timeout_seconds):
-            return False
+        Args:
+            agent_id: エージェントID
+            agent: エージェントオブジェクト
+            timeout_seconds: 判定に使うタイムアウト秒数
+            now: 現在時刻
 
+        Returns:
+            ペインが timeout_seconds 以上変化していなければ True
+        """
         pane_hash = await self._capture_pane_hash(agent)
         if pane_hash is None:
-            # pane 情報が取得できない場合は inactive 判定のみで扱う
+            # pane 情報が取得できない場合は異常扱い
             return True
 
         previous_hash = self._pane_hash.get(agent_id)
@@ -167,7 +185,25 @@ class HealthcheckManager:
             return False
 
         unchanged_for = now - self._pane_last_changed_at[agent_id]
-        return unchanged_for >= timedelta(seconds=self.stall_timeout_seconds)
+        return unchanged_for >= timedelta(seconds=timeout_seconds)
+
+    async def _is_worker_stalled(
+        self,
+        agent_id: str,
+        agent: "Agent",
+        now: datetime,
+    ) -> bool:
+        """Worker が無応答状態かを二段階判定で判定する。"""
+        if not agent.current_task or not agent.last_activity:
+            return False
+
+        inactive_for = now - agent.last_activity
+        if inactive_for < timedelta(seconds=self.stall_timeout_seconds):
+            return False
+
+        return await self._is_pane_unchanged_for(
+            agent_id, agent, self.stall_timeout_seconds, now
+        )
 
     @staticmethod
     def _task_activity_at(active_task: "TaskInfo") -> datetime | None:
@@ -211,24 +247,9 @@ class HealthcheckManager:
         if now - activity_at < timedelta(seconds=timeout_seconds):
             return False
 
-        pane_hash = await self._capture_pane_hash(agent)
-        if pane_hash is None:
-            # pane 情報が取れない場合はタイムアウトのみで異常扱い
-            return True
-
-        previous_hash = self._pane_hash.get(agent_id)
-        self._pane_hash[agent_id] = pane_hash
-
-        if previous_hash != pane_hash:
-            self._pane_last_changed_at[agent_id] = now
-            return False
-
-        if agent_id not in self._pane_last_changed_at:
-            self._pane_last_changed_at[agent_id] = now
-            return False
-
-        unchanged_for = now - self._pane_last_changed_at[agent_id]
-        return unchanged_for >= timedelta(seconds=timeout_seconds)
+        return await self._is_pane_unchanged_for(
+            agent_id, agent, timeout_seconds, now
+        )
 
     async def check_agent(self, agent_id: str) -> HealthStatus:
         """単一エージェントのヘルスチェックを行う。"""
@@ -342,7 +363,7 @@ class HealthcheckManager:
             except (OSError, subprocess.SubprocessError) as e:
                 return False, f"強制復旧に失敗しました: {e}"
 
-        logger.info(f"エージェント {agent_id} の tmux セッションを再作成します")
+        logger.info("エージェント %s の tmux セッションを再作成します", agent_id)
         working_dir = agent.worktree_path or agent.working_dir or "."
         success = await self.tmux_manager.create_session(session_name, working_dir)
         if success:
@@ -363,6 +384,7 @@ class HealthcheckManager:
     ) -> dict[str, Any]:
         """段階復旧の 2 段目として full_recovery を実行する。"""
         try:
+            # 循環参照回避のため遅延 import（tools レイヤーの関数）
             from src.tools.healthcheck import execute_full_recovery
 
             result = await execute_full_recovery(app_ctx, agent_id)
@@ -401,31 +423,38 @@ class HealthcheckManager:
             f"full_recovery_error={full_recovery_error or 'none'}"
         )
 
-    def _notify_admins_task_failed(
+    async def _notify_admins_task_failed(
         self,
         app_ctx: "AppContext",
+        dashboard: "DashboardManager | None",
         agent_id: str,
         task_id: str,
         reason: str,
     ) -> str | None:
         """タスク失敗を dashboard 更新 + Admin IPC 通知する。エラー時は文字列を返す。"""
-        try:
-            from pathlib import Path
+        import asyncio
 
+        try:
             from src.models.dashboard import TaskStatus
             from src.models.message import MessagePriority, MessageType
-            from src.tools.helpers_managers import ensure_dashboard_manager, ensure_ipc_manager
 
-            dashboard = app_ctx.dashboard_manager or ensure_dashboard_manager(app_ctx)
-            dashboard.update_task_status(
-                task_id=task_id,
-                status=TaskStatus.FAILED,
-                error_message=f"healthcheck_recovery_failed: {reason}",
-            )
-            if app_ctx.project_root and app_ctx.session_id:
-                dashboard.save_markdown_dashboard(Path(app_ctx.project_root), app_ctx.session_id)
+            if dashboard is not None:
+                await asyncio.to_thread(
+                    dashboard.update_task_status,
+                    task_id=task_id,
+                    status=TaskStatus.FAILED,
+                    error_message=f"healthcheck_recovery_failed: {reason}",
+                )
+                if app_ctx.project_root and app_ctx.session_id:
+                    await asyncio.to_thread(
+                        dashboard.save_markdown_dashboard,
+                        Path(app_ctx.project_root),
+                        app_ctx.session_id,
+                    )
 
-            ipc = ensure_ipc_manager(app_ctx)
+            ipc = app_ctx.ipc_manager
+            if ipc is None:
+                return None
             admin_ids = [wid for wid, w in self.agents.items() if w.role == "admin"]
             for aid in admin_ids:
                 if aid not in ipc.get_all_agent_ids():
@@ -449,6 +478,7 @@ class HealthcheckManager:
     async def _finalize_failed_task(
         self,
         app_ctx: "AppContext | None",
+        dashboard: "DashboardManager | None",
         agent_id: str,
         agent: "Agent",
         reason: str,
@@ -460,16 +490,17 @@ class HealthcheckManager:
         detail = {"agent_id": agent_id, "task_id": task_id or "", "reason": reason}
 
         if app_ctx is not None and task_id:
-            err = self._notify_admins_task_failed(app_ctx, agent_id, task_id, reason)
+            err = await self._notify_admins_task_failed(
+                app_ctx, dashboard, agent_id, task_id, reason
+            )
             if err:
                 detail["notify_error"] = err
-            agent.current_task = None
-            agent.status = AgentStatus.IDLE
-            agent.last_activity = datetime.now()
             try:
-                from src.tools.helpers import save_agent_to_file
-
-                save_agent_to_file(app_ctx, agent)
+                # reset_agent_to_idle をインライン化（helpers.py への逆依存を回避）
+                agent.current_task = None
+                agent.status = AgentStatus.IDLE
+                agent.last_activity = datetime.now()
+                self._persist_agent(app_ctx, agent)
             except (OSError, json.JSONDecodeError, ValueError) as e:
                 logger.debug("復旧後のエージェント保存に失敗: %s", e)
         elif task_id:
@@ -528,9 +559,7 @@ class HealthcheckManager:
                     if agent.status != AgentStatus.BUSY.value:
                         agent.status = AgentStatus.BUSY
                     try:
-                        from src.tools.helpers import save_agent_to_file
-
-                        save_agent_to_file(app_ctx, agent)
+                        self._persist_agent(app_ctx, agent)
                     except (OSError, json.JSONDecodeError, ValueError) as e:
                         logger.debug("BUSY ステータス保存に失敗: %s", e)
             elif agent.current_task:
@@ -544,9 +573,7 @@ class HealthcheckManager:
                     if agent.status == AgentStatus.BUSY.value:
                         agent.status = AgentStatus.IDLE
                     try:
-                        from src.tools.helpers import save_agent_to_file
-
-                        save_agent_to_file(app_ctx, agent)
+                        self._persist_agent(app_ctx, agent)
                     except (OSError, json.JSONDecodeError, ValueError) as e:
                         logger.debug("IDLE ステータス保存に失敗: %s", e)
                     active_task_id = None
@@ -630,16 +657,14 @@ class HealthcheckManager:
         if app_ctx is None:
             return
         try:
-            from src.tools.helpers import save_agent_to_file
-
             agent.ai_bootstrapped = False
-            save_agent_to_file(app_ctx, agent)
+            self._persist_agent(app_ctx, agent)
         except (OSError, json.JSONDecodeError, ValueError) as e:
             logger.debug("%s 後のエージェント保存に失敗: %s", label, e)
 
     def _increment_recovery_counter(
         self,
-        app_ctx: "AppContext | None",
+        dashboard: "DashboardManager | None",
         agent_id: str,
         task_id: str | None,
         recovery_reason: str,
@@ -649,16 +674,10 @@ class HealthcheckManager:
         Dashboard の拡張フィールドが存在する場合はそれも更新し、
         未拡張環境では task.metadata のみ更新する。
         """
-        if app_ctx is None or not task_id:
+        if dashboard is None or not task_id:
             return
 
         try:
-            from src.tools.helpers_managers import ensure_dashboard_manager
-
-            dashboard = app_ctx.dashboard_manager or ensure_dashboard_manager(app_ctx)
-            if dashboard is None:
-                return
-
             run_transaction = getattr(dashboard, "run_dashboard_transaction", None)
             if not callable(run_transaction):
                 return
@@ -746,9 +765,102 @@ class HealthcheckManager:
             return title, None
         return None, "task content is empty"
 
+    async def _resume_single_task(
+        self,
+        app_ctx: "AppContext",
+        dashboard: "DashboardManager",
+        agent: "Agent",
+        task_id: str,
+        session_id: str,
+        worker_no: int,
+        worker_index: int,
+        enable_worktree: bool,
+        profile_settings: Any,
+        caller_agent_id: str | None,
+        send_task_fn: Any,
+    ) -> dict[str, str] | None:
+        """個別タスクの再送を試みる。失敗時は dict を返し、成功時は None を返す。"""
+        task = dashboard.get_task(task_id)
+        if task is None:
+            return {"task_id": task_id, "error": "task not found"}
+
+        task_content, content_error = self._resolve_resume_task_content(app_ctx, task)
+        if task_content is None:
+            return {"task_id": task_id, "error": content_error or "task content unavailable"}
+
+        branch = (
+            str(task.branch)
+            if getattr(task, "branch", None)
+            else str(getattr(agent, "branch", "") or "")
+        )
+        if not branch:
+            branch = f"worker-{worker_no}"
+
+        task_worktree = (
+            str(task.worktree_path)
+            if getattr(task, "worktree_path", None)
+            else str(agent.worktree_path or agent.working_dir or app_ctx.project_root or ".")
+        )
+
+        send_result = await send_task_fn(
+            app_ctx,
+            agent,
+            task_content,
+            task_id,
+            branch,
+            task_worktree,
+            session_id,
+            worker_index,
+            enable_worktree,
+            profile_settings,
+            caller_agent_id,
+        )
+        if bool(send_result.get("task_sent")):
+            return None
+
+        return {
+            "task_id": task_id,
+            "error": str(send_result.get("dispatch_error") or "dispatch failed"),
+        }
+
+    @staticmethod
+    def _resolve_worker_dispatch_params(
+        app_ctx: "AppContext",
+        agent: "Agent",
+        resolve_worker_number_from_slot: Any,
+        get_current_profile_settings: Any,
+    ) -> tuple[int, int, Any, bool, str | None]:
+        """Worker番号・プロファイル設定・Admin IDを解決する。
+
+        Returns:
+            (worker_no, worker_index, profile_settings, enable_worktree, caller_agent_id)
+        """
+        profile_settings = get_current_profile_settings(app_ctx)
+        enable_worktree = bool(app_ctx.settings.is_worktree_enabled())
+
+        worker_no = 1
+        if agent.window_index is not None and agent.pane_index is not None:
+            try:
+                worker_no = resolve_worker_number_from_slot(
+                    app_ctx.settings, agent.window_index, agent.pane_index
+                )
+            except (ValueError, TypeError):
+                worker_no = 1
+        worker_index = max(worker_no - 1, 0)
+
+        admin_ids = [
+            aid
+            for aid, a in app_ctx.agents.items()
+            if str(getattr(getattr(a, "role", ""), "value", getattr(a, "role", ""))) == "admin"
+        ]
+        caller_agent_id = admin_ids[0] if admin_ids else None
+
+        return worker_no, worker_index, profile_settings, enable_worktree, caller_agent_id
+
     async def _auto_resume_tasks_after_recovery(
         self,
         app_ctx: "AppContext | None",
+        dashboard: "DashboardManager | None",
         agent_id: str,
         resume_task_ids: list[str],
     ) -> dict[str, Any]:
@@ -760,226 +872,111 @@ class HealthcheckManager:
 
         session_id = str(app_ctx.session_id or "")
         if not session_id:
-            return {
-                "success": False,
-                "error": "session_id is missing",
-                "resumed": [],
-                "failed": [],
-            }
+            return {"success": False, "error": "session_id is missing", "resumed": [], "failed": []}
 
         agent = app_ctx.agents.get(agent_id)
         if agent is None:
-            return {
-                "success": False,
-                "error": f"agent not found: {agent_id}",
-                "resumed": [],
-                "failed": [],
-            }
+            return {"success": False, "error": f"agent not found: {agent_id}", "resumed": [], "failed": []}
+
+        if dashboard is None:
+            return {"success": False, "error": "dashboard is None", "resumed": [], "failed": []}
 
         try:
+            # 循環参照回避のため遅延 import（tools レイヤーの関数）
             from src.tools.agent_helpers import (
                 _send_task_to_worker,
                 resolve_worker_number_from_slot,
             )
-            from src.tools.helpers_managers import ensure_dashboard_manager
             from src.tools.model_profile import get_current_profile_settings
         except ImportError as e:
             return {"success": False, "error": str(e), "resumed": [], "failed": []}
 
-        dashboard = app_ctx.dashboard_manager or ensure_dashboard_manager(app_ctx)
-        profile_settings = get_current_profile_settings(app_ctx)
-        enable_worktree = bool(app_ctx.settings.is_worktree_enabled())
-
-        worker_no = 1
-        if agent.window_index is not None and agent.pane_index is not None:
-            try:
-                worker_no = resolve_worker_number_from_slot(
-                    app_ctx.settings,
-                    agent.window_index,
-                    agent.pane_index,
-                )
-            except (ValueError, TypeError):
-                worker_no = 1
-        worker_index = max(worker_no - 1, 0)
-
-        admin_ids = [
-            aid
-            for aid, a in app_ctx.agents.items()
-            if str(getattr(getattr(a, "role", ""), "value", getattr(a, "role", "")))
-            == "admin"
-        ]
-        caller_agent_id = admin_ids[0] if admin_ids else None
+        worker_no, worker_index, profile_settings, enable_worktree, caller_agent_id = (
+            self._resolve_worker_dispatch_params(
+                app_ctx, agent, resolve_worker_number_from_slot, get_current_profile_settings
+            )
+        )
 
         resumed: list[str] = []
         failed: list[dict[str, str]] = []
         for task_id in resume_task_ids:
-            task = dashboard.get_task(task_id)
-            if task is None:
-                failed.append({"task_id": task_id, "error": "task not found"})
-                continue
-
-            task_content, content_error = self._resolve_resume_task_content(app_ctx, task)
-            if task_content is None:
-                failed.append(
-                    {
-                        "task_id": task_id,
-                        "error": content_error or "task content unavailable",
-                    }
-                )
-                continue
-
-            branch = (
-                str(task.branch)
-                if getattr(task, "branch", None)
-                else str(getattr(agent, "branch", "") or "")
+            error = await self._resume_single_task(
+                app_ctx, dashboard, agent, task_id, session_id,
+                worker_no, worker_index, enable_worktree,
+                profile_settings, caller_agent_id, _send_task_to_worker,
             )
-            if not branch:
-                branch = f"worker-{worker_no}"
-
-            task_worktree = (
-                str(task.worktree_path)
-                if getattr(task, "worktree_path", None)
-                else str(agent.worktree_path or agent.working_dir or app_ctx.project_root or ".")
-            )
-
-            send_result = await _send_task_to_worker(
-                app_ctx,
-                agent,
-                task_content,
-                task_id,
-                branch,
-                task_worktree,
-                session_id,
-                worker_index,
-                enable_worktree,
-                profile_settings,
-                caller_agent_id,
-            )
-            if bool(send_result.get("task_sent")):
+            if error is None:
                 resumed.append(task_id)
-                continue
+            else:
+                failed.append(error)
 
-            failed.append(
-                {
-                    "task_id": task_id,
-                    "error": str(send_result.get("dispatch_error") or "dispatch failed"),
-                }
-            )
+        return {"success": len(failed) == 0, "resumed": resumed, "failed": failed}
 
-        return {
-            "success": len(failed) == 0,
-            "resumed": resumed,
-            "failed": failed,
-        }
-
-    async def _attempt_staged_recovery(
+    async def _handle_resume_pending(
         self,
         app_ctx: "AppContext | None",
+        dashboard: "DashboardManager | None",
+        agent_id: str,
+        recovery_reason: str,
+        full_result: dict[str, Any],
+        full_message: str,
+    ) -> dict[str, Any]:
+        """full_recovery の resume_pending 状態を処理する。"""
+        resume_ids = [
+            str(task_id)
+            for task_id in full_result.get("resume_required_task_ids", [])
+            if task_id
+        ]
+        auto_resume = await self._auto_resume_tasks_after_recovery(
+            app_ctx, dashboard, agent_id, resume_ids,
+        )
+        if auto_resume.get("success"):
+            return {
+                "status": "recovered",
+                "detail": {
+                    "agent_id": agent_id,
+                    "reason": recovery_reason,
+                    "method": "full_recovery_auto_resume",
+                    "resumed_tasks": ",".join(auto_resume.get("resumed", [])),
+                    "message": full_message,
+                },
+            }
+
+        failed = auto_resume.get("failed", [])
+        failed_ids = ",".join(
+            [
+                str(item.get("task_id"))
+                for item in failed
+                if isinstance(item, dict) and item.get("task_id")
+            ]
+        )
+        return {
+            "status": "escalated",
+            "detail": {
+                "agent_id": agent_id,
+                "reason": recovery_reason,
+                "method": "full_recovery",
+                "status": "resume_pending",
+                "resume_required_tasks": ",".join(resume_ids),
+                "auto_resume_failed_tasks": failed_ids,
+                "auto_resume_error": str(auto_resume.get("error", "")),
+                "message": full_message,
+            },
+        }
+
+    async def _handle_recovery_escalation(
+        self,
+        app_ctx: "AppContext | None",
+        dashboard: "DashboardManager | None",
         agent_id: str,
         agent: "Agent",
         recovery_reason: str,
-        force_recovery: bool,
+        message: str,
+        full_status: str,
+        full_message: str,
         task_key: str,
     ) -> dict[str, Any]:
-        """段階復旧（attempt_recovery → full_recovery → escalate）を実行する。"""
-        recovery_task_id = agent.current_task
-        success, message = await self.attempt_recovery(agent_id, force=force_recovery)
-        if success:
-            self._save_agent_after_recovery(app_ctx, agent, "attempt_recovery")
-            self._increment_recovery_counter(
-                app_ctx,
-                agent_id,
-                recovery_task_id,
-                recovery_reason,
-            )
-            self._recovery_failures.pop(task_key, None)
-            return {
-                "status": "recovered",
-                "detail": {
-                    "agent_id": agent_id,
-                    "reason": recovery_reason,
-                    "method": "attempt_recovery",
-                    "message": message,
-                },
-            }
-
-        full_result = {
-            "status": "not_executed",
-            "message": "not_executed",
-            "resume_required_task_ids": [],
-        }
-        if app_ctx is not None:
-            full_result = await self._run_full_recovery(app_ctx, agent_id)
-
-        full_status = str(full_result.get("status", "failed"))
-        full_message = str(full_result.get("message", "full_recovery failed"))
-        if full_status == "recovered":
-            target = (app_ctx.agents.get(agent_id) if app_ctx else None) or agent
-            self._save_agent_after_recovery(app_ctx, target, "full_recovery")
-            self._increment_recovery_counter(
-                app_ctx,
-                agent_id,
-                recovery_task_id,
-                recovery_reason,
-            )
-            self._recovery_failures.pop(task_key, None)
-            return {
-                "status": "recovered",
-                "detail": {
-                    "agent_id": agent_id,
-                    "reason": recovery_reason,
-                    "method": "full_recovery",
-                    "message": full_message,
-                },
-            }
-
-        if full_status == "resume_pending":
-            # Worker 復旧自体は成功。再開対象タスクは healthcheck 側で自動再送を試みる。
-            self._recovery_failures.pop(task_key, None)
-            resume_ids = [
-                str(task_id)
-                for task_id in full_result.get("resume_required_task_ids", [])
-                if task_id
-            ]
-            auto_resume = await self._auto_resume_tasks_after_recovery(
-                app_ctx,
-                agent_id,
-                resume_ids,
-            )
-            if auto_resume.get("success"):
-                return {
-                    "status": "recovered",
-                    "detail": {
-                        "agent_id": agent_id,
-                        "reason": recovery_reason,
-                        "method": "full_recovery_auto_resume",
-                        "resumed_tasks": ",".join(auto_resume.get("resumed", [])),
-                        "message": full_message,
-                    },
-                }
-
-            failed = auto_resume.get("failed", [])
-            failed_ids = ",".join(
-                [
-                    str(item.get("task_id"))
-                    for item in failed
-                    if isinstance(item, dict) and item.get("task_id")
-                ]
-            )
-            return {
-                "status": "escalated",
-                "detail": {
-                    "agent_id": agent_id,
-                    "reason": recovery_reason,
-                    "method": "full_recovery",
-                    "status": "resume_pending",
-                    "resume_required_tasks": ",".join(resume_ids),
-                    "auto_resume_failed_tasks": failed_ids,
-                    "auto_resume_error": str(auto_resume.get("error", "")),
-                    "message": full_message,
-                },
-            }
-
+        """復旧失敗時のエスカレーション / failed 化を処理する。"""
         attempts = self._recovery_failures.get(task_key, 0) + 1
         self._recovery_failures[task_key] = attempts
         failure_reason = self._compose_recovery_failure_reason(
@@ -998,38 +995,96 @@ class HealthcheckManager:
             "message": failure_reason,
         }
         if attempts >= self.max_recovery_attempts:
-            failed = await self._finalize_failed_task(app_ctx, agent_id, agent, failure_reason)
+            failed = await self._finalize_failed_task(
+                app_ctx, dashboard, agent_id, agent, failure_reason,
+            )
             self._recovery_failures.pop(task_key, None)
             return {"status": "failed", "detail": escalation, "failed_task": failed}
         return {"status": "escalated", "detail": escalation}
 
-    async def monitor_and_recover_workers(
-        self, app_ctx: "AppContext | None" = None
+    async def _attempt_staged_recovery(
+        self,
+        app_ctx: "AppContext | None",
+        dashboard: "DashboardManager | None",
+        agent_id: str,
+        agent: "Agent",
+        recovery_reason: str,
+        force_recovery: bool,
+        task_key: str,
     ) -> dict[str, Any]:
-        """Worker の健全性を監視し、必要なら段階復旧する。"""
+        """段階復旧（attempt_recovery → full_recovery → escalate）を実行する。"""
+        recovery_task_id = agent.current_task
+        success, message = await self.attempt_recovery(agent_id, force=force_recovery)
+        if success:
+            self._save_agent_after_recovery(app_ctx, agent, "attempt_recovery")
+            self._increment_recovery_counter(
+                dashboard, agent_id, recovery_task_id, recovery_reason,
+            )
+            self._recovery_failures.pop(task_key, None)
+            return {
+                "status": "recovered",
+                "detail": {
+                    "agent_id": agent_id,
+                    "reason": recovery_reason,
+                    "method": "attempt_recovery",
+                    "message": message,
+                },
+            }
+
+        full_result: dict[str, Any] = {
+            "status": "not_executed",
+            "message": "not_executed",
+            "resume_required_task_ids": [],
+        }
+        if app_ctx is not None:
+            full_result = await self._run_full_recovery(app_ctx, agent_id)
+
+        full_status = str(full_result.get("status", "failed"))
+        full_message = str(full_result.get("message", "full_recovery failed"))
+        if full_status == "recovered":
+            target = (app_ctx.agents.get(agent_id) if app_ctx else None) or agent
+            self._save_agent_after_recovery(app_ctx, target, "full_recovery")
+            self._increment_recovery_counter(
+                dashboard, agent_id, recovery_task_id, recovery_reason,
+            )
+            self._recovery_failures.pop(task_key, None)
+            return {
+                "status": "recovered",
+                "detail": {
+                    "agent_id": agent_id,
+                    "reason": recovery_reason,
+                    "method": "full_recovery",
+                    "message": full_message,
+                },
+            }
+
+        if full_status == "resume_pending":
+            self._recovery_failures.pop(task_key, None)
+            return await self._handle_resume_pending(
+                app_ctx, dashboard, agent_id, recovery_reason, full_result, full_message,
+            )
+
+        return await self._handle_recovery_escalation(
+            app_ctx, dashboard, agent_id, agent,
+            recovery_reason, message, full_status, full_message, task_key,
+        )
+
+    def _collect_workers_to_diagnose(
+        self,
+        app_ctx: "AppContext | None",
+        dashboard: "DashboardManager | None",
+    ) -> tuple[list[tuple[str, "Agent", "TaskInfo | None", str | None, str]], list[str]]:
+        """フェーズ1: 診断対象の Worker を収集する。
+
+        Returns:
+            (workers_to_diagnose, skipped)
+        """
         from src.models.agent import AgentRole, AgentStatus
 
-        now = datetime.now()
-        self.last_monitor_at = now
-        self._prune_state()
-
-        recovered: list[dict[str, str]] = []
-        escalated: list[dict[str, str]] = []
-        failed_tasks: list[dict[str, str]] = []
+        workers_to_diagnose: list[
+            tuple[str, "Agent", "TaskInfo | None", str | None, str]
+        ] = []
         skipped: list[str] = []
-        dashboard = None
-
-        if app_ctx is not None:
-            if app_ctx.dashboard_manager is not None:
-                dashboard = app_ctx.dashboard_manager
-            else:
-                try:
-                    from src.tools.helpers_managers import ensure_dashboard_manager
-
-                    dashboard = ensure_dashboard_manager(app_ctx)
-                except (ImportError, OSError, AttributeError, ValueError) as e:
-                    logger.debug("Dashboard マネージャー取得に失敗: %s", e)
-                    dashboard = None
 
         for agent_id, agent in list(self.agents.items()):
             if agent.role != AgentRole.WORKER.value:
@@ -1044,12 +1099,8 @@ class HealthcheckManager:
                 continue
 
             active_task, active_task_id = self._sync_worker_active_task(
-                agent_id,
-                agent,
-                dashboard,
-                app_ctx,
+                agent_id, agent, dashboard, app_ctx
             )
-
             current_key = self._recovery_key(agent_id, active_task_id)
             stale_keys = [
                 key
@@ -1066,13 +1117,36 @@ class HealthcheckManager:
             if active_task_id is not None:
                 agent.current_task = active_task_id
 
-            recovery_reason, force_recovery = await self._diagnose_worker_issue(
-                agent_id,
-                agent,
-                active_task,
-                now,
+            workers_to_diagnose.append(
+                (agent_id, agent, active_task, active_task_id, current_key)
             )
 
+        return workers_to_diagnose, skipped
+
+    async def _process_recovery_results(
+        self,
+        app_ctx: "AppContext | None",
+        dashboard: "DashboardManager | None",
+        workers_to_diagnose: list[tuple[str, "Agent", "TaskInfo | None", str | None, str]],
+        diagnose_results: list[Any],
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
+        """フェーズ3: 診断結果に基づき復旧を逐次実行する。
+
+        Returns:
+            (recovered, escalated, failed_tasks)
+        """
+        recovered: list[dict[str, str]] = []
+        escalated: list[dict[str, str]] = []
+        failed_tasks: list[dict[str, str]] = []
+
+        for (
+            agent_id, agent, _active_task, _active_task_id, current_key
+        ), diag_result in zip(workers_to_diagnose, diagnose_results):
+            if isinstance(diag_result, Exception):
+                logger.debug("Worker 診断に失敗: agent=%s error=%s", agent_id, diag_result)
+                continue
+
+            recovery_reason, force_recovery = diag_result
             if recovery_reason is None:
                 continue
 
@@ -1083,12 +1157,7 @@ class HealthcheckManager:
                     logger.debug("process_crash_count 更新に失敗: %s", e)
 
             result = await self._attempt_staged_recovery(
-                app_ctx,
-                agent_id,
-                agent,
-                recovery_reason,
-                force_recovery,
-                current_key,
+                app_ctx, dashboard, agent_id, agent, recovery_reason, force_recovery, current_key
             )
 
             if result["status"] == "recovered":
@@ -1098,11 +1167,44 @@ class HealthcheckManager:
                     except (AttributeError, ValueError) as e:
                         logger.debug("process_recovery_count 更新に失敗: %s", e)
                 recovered.append(result["detail"])
-            elif result["status"] == "escalated":
+            elif result["status"] in ("escalated", "failed"):
                 escalated.append(result["detail"])
-            elif result["status"] == "failed":
-                escalated.append(result["detail"])
-                failed_tasks.append(result["failed_task"])
+                if result["status"] == "failed":
+                    failed_tasks.append(result["failed_task"])
+
+        return recovered, escalated, failed_tasks
+
+    async def monitor_and_recover_workers(
+        self, app_ctx: "AppContext | None" = None
+    ) -> dict[str, Any]:
+        """Worker の健全性を監視し、必要なら段階復旧する。"""
+        import asyncio
+
+        now = datetime.now()
+        self.last_monitor_at = now
+        self._prune_state()
+
+        dashboard: DashboardManager | None = (
+            app_ctx.dashboard_manager if app_ctx is not None else None
+        )
+
+        # フェーズ1: 診断対象の Worker を収集（同期処理）
+        workers_to_diagnose, skipped = self._collect_workers_to_diagnose(app_ctx, dashboard)
+
+        # フェーズ2: 診断を並列実行
+        diagnose_results = await asyncio.gather(
+            *[
+                self._diagnose_worker_issue(agent_id, agent, active_task, now)
+                for agent_id, agent, active_task, _active_task_id, _current_key
+                in workers_to_diagnose
+            ],
+            return_exceptions=True,
+        )
+
+        # フェーズ3: 復旧は副作用があるため逐次実行
+        recovered, escalated, failed_tasks = await self._process_recovery_results(
+            app_ctx, dashboard, workers_to_diagnose, diagnose_results
+        )
 
         return {
             "recovered": recovered,

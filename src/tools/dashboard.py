@@ -11,6 +11,8 @@ from src.models.dashboard import TaskStatus, normalize_task_id
 from src.models.message import MessagePriority, MessageType
 from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 from src.tools.helpers import (
+    ADMIN_DASHBOARD_GRANT_SECONDS,
+    _owner_polling_blocked_response,
     ensure_dashboard_manager,
     ensure_ipc_manager,
     ensure_memory_manager,
@@ -19,12 +21,12 @@ from src.tools.helpers import (
     get_owner_wait_state,
     notify_agent_via_tmux,
     require_permission,
+    reset_agent_to_idle,
     save_agent_to_file,
     sync_agents_from_file,
 )
 
 logger = logging.getLogger(__name__)
-_ADMIN_DASHBOARD_GRANT_SECONDS = 90
 _TASK_STATUS_LABELS_JA = {
     "pending": "未着手",
     "in_progress": "進行中",
@@ -45,7 +47,7 @@ def _has_recent_healthcheck_event(app_ctx: Any, admin_id: str) -> bool:
     if not isinstance(at, datetime):
         return False
     window = max(
-        _ADMIN_DASHBOARD_GRANT_SECONDS,
+        ADMIN_DASHBOARD_GRANT_SECONDS,
         int(getattr(app_ctx.settings, "healthcheck_interval_seconds", 60)),
     )
     return datetime.now() - at <= timedelta(seconds=window)
@@ -64,12 +66,12 @@ def _should_block_admin_dashboard_polling(app_ctx: Any, admin_id: str) -> bool:
         ipc = ensure_ipc_manager(app_ctx)
         if ipc.get_unread_count(admin_id) > 0:
             return False
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("IPC 未読数チェックをスキップ: %s", e)
 
     if _has_recent_healthcheck_event(app_ctx, admin_id):
         state["allow_dashboard_until"] = datetime.now() + timedelta(
-            seconds=_ADMIN_DASHBOARD_GRANT_SECONDS
+            seconds=ADMIN_DASHBOARD_GRANT_SECONDS
         )
         return False
 
@@ -81,18 +83,6 @@ def _polling_blocked_response() -> dict[str, Any]:
         "success": False,
         "error": ("polling_blocked: IPC 通知待機中のため連続ダッシュボード参照はできません"),
         "next_action": "wait_for_ipc_notification",
-    }
-
-
-def _owner_polling_blocked_response(waiting_admin_id: str | None) -> dict[str, Any]:
-    return {
-        "success": False,
-        "error": (
-            "polling_blocked: Owner は Admin からの通知待機中のため、"
-            "unread=0 の監視呼び出しはできません"
-        ),
-        "next_action": "wait_for_user_input_or_unlock_owner_wait",
-        "waiting_for_admin_id": waiting_admin_id,
     }
 
 
@@ -144,14 +134,14 @@ async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
                 agent=target_agent,
                 task_id=target_agent.current_task,
             )
-        except Exception as e:
-            logger.debug(f"Dashboard 同期時の Claude 実測コスト更新をスキップ: {e}")
+        except (OSError, ValueError, TypeError) as e:
+            logger.debug("Dashboard 同期時の Claude 実測コスト更新をスキップ: %s", e)
     # Markdown ダッシュボードを保存
     if app_ctx.session_id and app_ctx.project_root:
         try:
             dashboard.save_markdown_dashboard(app_ctx.project_root, app_ctx.session_id)
-        except Exception as e:
-            logger.warning(f"Dashboard ファイル更新に失敗: {e}")
+        except OSError as e:
+            logger.warning("Dashboard ファイル更新に失敗: %s", e)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -520,8 +510,8 @@ def register_tools(mcp: FastMCP) -> None:
                     agent=worker_agent,
                     task_id=task_id,
                 )
-            except Exception as e:
-                logger.debug(f"進捗報告時のコスト取得をスキップ: {e}")
+            except (OSError, ValueError, TypeError) as e:
+                logger.debug("進捗報告時のコスト取得をスキップ: %s", e)
 
         # Admin にも進捗を通知（IPC メッセージ）
         admin_notified = False
@@ -553,8 +543,8 @@ def register_tools(mcp: FastMCP) -> None:
                 },
             )
             admin_notified = True
-        except Exception as e:
-            logger.warning(f"Admin への進捗通知に失敗: {e}")
+        except (RuntimeError, ValueError, OSError) as e:
+            logger.warning("Admin への進捗通知に失敗: %s", e)
             return {
                 "success": False,
                 "error": f"Admin への進捗通知に失敗しました: {e}",
@@ -675,8 +665,8 @@ def register_tools(mcp: FastMCP) -> None:
                     agent=worker_agent,
                     task_id=task_id,
                 )
-            except Exception as e:
-                logger.debug(f"完了報告時のコスト取得をスキップ: {e}")
+            except (OSError, ValueError, TypeError) as e:
+                logger.debug("完了報告時のコスト取得をスキップ: %s", e)
 
         # IPC マネージャーを取得（自動初期化）
         ipc = ensure_ipc_manager(app_ctx)
@@ -723,13 +713,10 @@ def register_tools(mcp: FastMCP) -> None:
             try:
                 worker_agent = app_ctx.agents.get(caller_agent_id)
                 if worker_agent and worker_agent.role == AgentRole.WORKER.value:
-                    worker_agent.status = AgentStatus.IDLE
-                    worker_agent.current_task = None
-                    worker_agent.last_activity = datetime.now()
-                    save_agent_to_file(app_ctx, worker_agent)
-                    logger.info(f"Worker {caller_agent_id} を IDLE にリセットしました")
-            except Exception as e:
-                logger.warning(f"Worker ステータス更新に失敗: {e}")
+                    reset_agent_to_idle(app_ctx, worker_agent)
+                    logger.info("Worker %s を IDLE にリセットしました", caller_agent_id)
+            except (OSError, KeyError, ValueError) as e:
+                logger.warning("Worker ステータス更新に失敗: %s", e)
 
         # 自動メモリ保存（タスク結果を記録）
         memory_saved = False
@@ -742,8 +729,8 @@ def register_tools(mcp: FastMCP) -> None:
                 tags=["task", status, task_id],
             )
             memory_saved = True
-        except Exception as e:
-            logger.debug(f"メモリ保存をスキップ: {e}")
+        except (OSError, ValueError, TypeError) as e:
+            logger.debug("メモリ保存をスキップ: %s", e)
 
         return {
             "success": True,
