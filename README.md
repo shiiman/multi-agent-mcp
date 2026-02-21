@@ -139,7 +139,7 @@ claude mcp list
 codex mcp list
 ```
 
-## 提供するTools（88個）
+## 提供するTools（90個）
 
 ### セッション管理（4個）
 
@@ -262,7 +262,7 @@ create_worktree(
 | `analyze_project_for_gtrconfig` | プロジェクト構造を解析して推奨設定を提案 |
 | `generate_gtrconfig` | .gtrconfigを自動生成 |
 
-### テンプレート（4個）
+### テンプレート（6個）
 
 | Tool | 説明 |
 |------|------|
@@ -270,6 +270,8 @@ create_worktree(
 | `get_workspace_template` | 特定テンプレートの詳細を取得 |
 | `get_role_guide` | 特定ロールのワークフローガイドを取得 |
 | `list_role_guides` | 利用可能なロールガイド一覧を取得 |
+| `list_report_templates` | 利用可能なレポートテンプレート一覧を取得 |
+| `get_report_template` | 特定レポートテンプレートの内容を取得 |
 
 ### スケジューラー（3個）
 
@@ -451,17 +453,17 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE` | 3 | 実作業なし検知が連続したとき daemon を自動停止する閾値 |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
-| `MCP_MODEL_PROFILE_STANDARD_CLI` | claude | standardプロファイルのAI CLI |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | opus | standardプロファイルのAdminモデル |
-| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | sonnet | standardプロファイルのWorkerモデル |
+| `MCP_MODEL_PROFILE_STANDARD_CLI` | codex | standardプロファイルのAI CLI |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | gpt-5.3-codex | standardプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | gpt-5.3-codex | standardプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | 6 | standardプロファイルのWorker上限 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | 4000 | standardプロファイルのAdmin思考トークン数 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | 4000 | standardプロファイルのWorker思考トークン数 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT` | medium | standardプロファイルのAdmin推論強度 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT` | medium | standardプロファイルのWorker推論強度 |
-| `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | claude | performanceプロファイルのAI CLI |
-| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | opus | performanceプロファイルのAdminモデル |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | opus | performanceプロファイルのWorkerモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | codex | performanceプロファイルのAI CLI |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | gpt-5.3-codex | performanceプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | gpt-5.3-codex | performanceプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | 16 | performanceプロファイルのWorker上限 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | 30000 | performanceプロファイルのAdmin思考トークン数 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | 4000 | performanceプロファイルのWorker思考トークン数 |
@@ -548,6 +550,12 @@ uv sync --all-extras
 
 # テストを実行
 uv run pytest
+
+# 高速反復（キーワードで対象テストのみ）
+uv run pytest -k healthcheck
+
+# 高速反復（ファイル単位）
+uv run pytest tests/test_healthcheck_manager.py
 
 # リンターを実行
 uv run ruff check src/

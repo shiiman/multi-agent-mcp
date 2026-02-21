@@ -11,7 +11,10 @@ import logging
 import os
 import re
 import subprocess
+from typing import Any
 
+from src.config.constants import SUBPROCESS_TIMEOUT_SECONDS
+from src.managers.subprocess_utils import build_subprocess_error, cleanup_timed_out_process
 from src.models.workspace import WorktreeInfo
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,7 @@ class WorktreeManager:
         self.repo_path = repo_path
         self._gtr_available: bool | None = None
         self._force_gtr = use_gtr
+        self.last_subprocess_error: dict[str, Any] | None = None
 
     async def _check_gtr_available(self) -> bool:
         """gtr がインストールされているか確認する。"""
@@ -44,19 +48,8 @@ class WorktreeManager:
             return self._gtr_available
 
         # git gtr --version を実行して確認
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git",
-                "gtr",
-                "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.communicate()
-            self._gtr_available = proc.returncode == 0
-        except (OSError, subprocess.SubprocessError) as e:
-            logger.debug(f"gtr 検出をスキップ: {e}")
-            self._gtr_available = False
+        code, _, _ = await self._run_command("git", "gtr", "--version")
+        self._gtr_available = code == 0
 
         if self._gtr_available:
             logger.info("gtr (git-worktree-runner) を使用します")
@@ -75,7 +68,9 @@ class WorktreeManager:
         Returns:
             (リターンコード, stdout, stderr) のタプル
         """
+        self.last_subprocess_error = None
         work_dir = cwd or self.repo_path
+        command = " ".join(args)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -83,13 +78,35 @@ class WorktreeManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            )
             return proc.returncode or 0, stdout.decode(), stderr.decode()
+        except asyncio.TimeoutError:
+            await cleanup_timed_out_process(proc)
+            return 124, "", self._set_subprocess_error(
+                kind="timeout",
+                command=command,
+                message="コマンド実行がタイムアウトしました",
+                timeout_seconds=SUBPROCESS_TIMEOUT_SECONDS,
+                cwd=work_dir,
+            )
         except FileNotFoundError:
-            return 1, "", f"コマンドが見つかりません: {args[0]}"
+            return 1, "", self._set_subprocess_error(
+                kind="not_found",
+                command=command,
+                message=f"コマンドが見つかりません: {args[0]}",
+                cwd=work_dir,
+            )
         except (OSError, subprocess.SubprocessError) as e:
             logger.error(f"コマンド実行エラー: {e}")
-            return 1, "", str(e)
+            return 1, "", self._set_subprocess_error(
+                kind="spawn_error",
+                command=command,
+                message=str(e),
+                cwd=work_dir,
+            )
 
     async def _run_git(self, *args: str, cwd: str | None = None) -> tuple[int, str, str]:
         """gitコマンドを実行する。
@@ -553,3 +570,23 @@ class WorktreeManager:
             if wt.branch == branch:
                 return wt.path
         return None
+
+    def _set_subprocess_error(
+        self,
+        *,
+        kind: str,
+        command: str,
+        message: str,
+        timeout_seconds: float | None = None,
+        cwd: str | None = None,
+    ) -> str:
+        """共通ユーティリティを使い、エラー情報を構築して self に保存する。"""
+        json_str, error_info = build_subprocess_error(
+            kind=kind,
+            command=command,
+            message=message,
+            timeout_seconds=timeout_seconds,
+            cwd=cwd,
+        )
+        self.last_subprocess_error = error_info
+        return json_str

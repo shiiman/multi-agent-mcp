@@ -24,6 +24,26 @@ from src.tools.helpers_registry import ensure_session_id
 logger = logging.getLogger(__name__)
 
 
+def _resolve_session_scoped_dir(
+    base_dir: str,
+    mcp_dir_name: str,
+    session_id: str,
+    leaf_dir_name: str,
+) -> Path:
+    """セッションスコープ配下のディレクトリを解決し、境界外アクセスを拒否する。"""
+    root = Path(base_dir).expanduser().resolve()
+    mcp_root = (root / mcp_dir_name).resolve()
+    target = (mcp_root / session_id / leaf_dir_name).resolve()
+    try:
+        target.relative_to(mcp_root)
+    except ValueError as e:
+        logger.warning("セッションスコープ外のパスを拒否: session_id=%s", session_id)
+        raise ValueError(
+            "session_id によるパス逸脱を検出したため拒否しました。"
+        ) from e
+    return target
+
+
 def get_worktree_manager(app_ctx: AppContext, repo_path: str) -> WorktreeManager:
     """指定リポジトリのWorktreeManagerを取得または作成する。"""
     if repo_path not in app_ctx.worktree_managers:
@@ -68,12 +88,17 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
             "init_tmux_workspace で session_id を指定してください。"
         )
 
-    ipc_dir = os.path.join(base_dir, app_ctx.settings.mcp_dir, session_id, "ipc")
-    ipc_dir_abs = os.path.realpath(os.path.abspath(ipc_dir))
+    ipc_dir = _resolve_session_scoped_dir(
+        base_dir=base_dir,
+        mcp_dir_name=app_ctx.settings.mcp_dir,
+        session_id=session_id,
+        leaf_dir_name="ipc",
+    )
+    ipc_dir_abs = str(ipc_dir.resolve())
 
     reuse_current = False
     if app_ctx.ipc_manager is not None:
-        current_dir_abs = os.path.realpath(os.path.abspath(str(app_ctx.ipc_manager.ipc_dir)))
+        current_dir_abs = str(Path(app_ctx.ipc_manager.ipc_dir).resolve())
         is_session_scoped_ipc = (
             f"{os.sep}{app_ctx.settings.mcp_dir}{os.sep}" in current_dir_abs
             and current_dir_abs.endswith(f"{os.sep}ipc")
@@ -87,7 +112,7 @@ def ensure_ipc_manager(app_ctx: AppContext) -> IPCManager:
             )
 
     if not reuse_current:
-        app_ctx.ipc_manager = IPCManager(ipc_dir)
+        app_ctx.ipc_manager = IPCManager(str(ipc_dir))
         app_ctx.ipc_manager.initialize()
     return app_ctx.ipc_manager
 
@@ -115,17 +140,22 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
             "init_tmux_workspace で session_id を指定してください。"
         )
 
-    dashboard_dir = os.path.join(base_dir, app_ctx.settings.mcp_dir, session_id, "dashboard")
-    dashboard_dir_abs = os.path.realpath(os.path.abspath(dashboard_dir))
+    dashboard_dir = _resolve_session_scoped_dir(
+        base_dir=base_dir,
+        mcp_dir_name=app_ctx.settings.mcp_dir,
+        session_id=session_id,
+        leaf_dir_name="dashboard",
+    )
+    dashboard_dir_abs = str(dashboard_dir.resolve())
 
     # セッション切替後に古い DashboardManager を使い回さない
     reuse_current = False
     if app_ctx.dashboard_manager is not None:
         current = app_ctx.dashboard_manager
-        current_dir_abs = os.path.realpath(os.path.abspath(str(current.dashboard_dir)))
+        current_dir_abs = str(Path(current.dashboard_dir).resolve())
         same_dashboard_dir = current_dir_abs == dashboard_dir_abs
-        same_workspace = os.path.realpath(os.path.abspath(str(current.workspace_path))) == (
-            os.path.realpath(os.path.abspath(base_dir))
+        same_workspace = str(Path(current.workspace_path).resolve()) == str(
+            Path(base_dir).resolve()
         )
         is_session_scoped_dashboard = (
             f"{os.sep}{app_ctx.settings.mcp_dir}{os.sep}" in current_dir_abs
@@ -147,7 +177,7 @@ def ensure_dashboard_manager(app_ctx: AppContext) -> DashboardManager:
         app_ctx.dashboard_manager = DashboardManager(
             workspace_id=session_id,
             workspace_path=base_dir,
-            dashboard_dir=dashboard_dir,
+            dashboard_dir=str(dashboard_dir),
             settings=app_ctx.settings,
         )
     else:

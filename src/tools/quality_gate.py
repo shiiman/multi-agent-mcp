@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.context import AppContext
+    from src.models.message import MessageType
 
 from src.models.agent import AgentRole
 from src.models.dashboard import TaskStatus
@@ -80,7 +81,7 @@ def _is_ui_related_task(title: str, description: str, metadata: dict | None = No
 
 
 def _validate_admin_completion_gate(
-    app_ctx: "AppContext", sender_id: str, receiver_id: str | None, msg_type: "MessageType"
+    app_ctx: AppContext, sender_id: str, receiver_id: str | None, msg_type: MessageType
 ) -> tuple[bool, dict[str, Any]]:
     """Admin -> Owner の task_complete を品質ゲートで検証する。"""
     from src.models.message import MessageType

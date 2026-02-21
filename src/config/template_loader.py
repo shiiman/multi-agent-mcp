@@ -12,7 +12,13 @@ from typing import Any
 _VALID_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # 許可されたカテゴリの一覧
-_ALLOWED_CATEGORIES = frozenset({"roles", "tasks", "scripts/bash", "scripts/applescript", "reports"})
+_ALLOWED_CATEGORIES = frozenset({
+    "roles",
+    "tasks",
+    "scripts/bash",
+    "scripts/applescript",
+    "reports",
+})
 
 
 class TemplateLoader:
@@ -119,13 +125,13 @@ class TemplateLoader:
         # {{ / }} をプレースホルダーに退避（format() でのリテラル {} 表現）
         # UUID ベースのセンチネルでテンプレート内容との衝突を防止
         sentinel = uuid.uuid4().hex
-        _LBRACE = f"__LBRACE_{sentinel}__"
-        _RBRACE = f"__RBRACE_{sentinel}__"
-        text = text.replace("{{", _LBRACE).replace("}}", _RBRACE)
+        lbrace_sentinel = f"__LBRACE_{sentinel}__"
+        rbrace_sentinel = f"__RBRACE_{sentinel}__"
+        text = text.replace("{{", lbrace_sentinel).replace("}}", rbrace_sentinel)
         # {variable} → ${variable} に変換
         text = re.sub(r"\{(\w+)\}", r"${\1}", text)
         # プレースホルダーをリテラル { / } に復元
-        text = text.replace(_LBRACE, "{").replace(_RBRACE, "}")
+        text = text.replace(lbrace_sentinel, "{").replace(rbrace_sentinel, "}")
         return string.Template(text).safe_substitute(**kwargs)
 
     def _get_extension(self, category: str) -> str:

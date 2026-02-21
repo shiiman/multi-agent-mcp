@@ -10,6 +10,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_ROLES = ("owner", "admin", "worker")
+
 
 @dataclass
 class RoleGuide:
@@ -49,6 +51,9 @@ def _load_template(role: str) -> str | None:
     Returns:
         テンプレート内容、ファイルが存在しない場合 None
     """
+    if role not in ALLOWED_ROLES and role not in {f"{r}_no_git" for r in ALLOWED_ROLES}:
+        logger.warning("無効な role テンプレート要求を拒否: %s", role)
+        return None
     template_path = _get_templates_dir() / "roles" / f"{role}.md"
     if template_path.exists():
         return template_path.read_text(encoding="utf-8")
@@ -57,6 +62,10 @@ def _load_template(role: str) -> str | None:
 
 def get_role_template_name(role: str, enable_git: bool = True) -> str:
     """ロールテンプレート名を取得する。"""
+    if role not in ALLOWED_ROLES:
+        raise ValueError(
+            f"無効なロールです: {role}。有効なロール: {list(ALLOWED_ROLES)}"
+        )
     if not enable_git:
         candidate = f"{role}_no_git"
         template_path = _get_templates_dir() / "roles" / f"{candidate}.md"
@@ -138,6 +147,8 @@ def get_role_guide(role: str, enable_git: bool = True) -> RoleGuide | None:
     Returns:
         ロールガイド、見つからない場合 None
     """
+    if role not in ALLOWED_ROLES:
+        return None
     template_name = get_role_template_name(role, enable_git=enable_git)
     content = _load_template(template_name)
     if content is None:

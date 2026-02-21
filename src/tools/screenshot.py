@@ -159,7 +159,15 @@ def register_tools(mcp: FastMCP) -> None:
         screenshot_dir = (
             Path(app_ctx.project_root) / app_ctx.settings.mcp_dir / "screenshot"
         ).resolve()
-        file_path = (screenshot_dir / filename).resolve()
+        requested_path = screenshot_dir / filename
+
+        if requested_path.is_symlink():
+            return {
+                "success": False,
+                "error": f"symlink 経由の参照は許可されていません: {filename}",
+            }
+
+        file_path = requested_path.resolve()
 
         try:
             file_path.relative_to(screenshot_dir)
@@ -167,12 +175,6 @@ def register_tools(mcp: FastMCP) -> None:
             return {
                 "success": False,
                 "error": f"path traversal は許可されていません: {filename}",
-            }
-
-        if file_path.is_symlink():
-            return {
-                "success": False,
-                "error": f"symlink 経由の参照は許可されていません: {filename}",
             }
 
         if not file_path.exists():

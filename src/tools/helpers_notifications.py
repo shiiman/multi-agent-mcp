@@ -71,8 +71,10 @@ async def notify_agent_via_tmux(
     """
     if not agent or not agent.session_name or agent.pane_index is None:
         logger.warning(
-            "エージェントの tmux 情報が見つかりません: %s",
+            "エージェントの tmux 情報が見つかりません: agent=%s sender=%s type=%s",
             getattr(agent, "id", "unknown"),
+            sender_id,
+            msg_type_value,
         )
         return False
 
@@ -102,16 +104,28 @@ async def notify_agent_via_tmux(
                 )
                 return True
         except (OSError, RuntimeError) as e:
-            logger.warning("tmux 通知の送信に失敗 (attempt=%d): %s", attempt + 1, e)
+            logger.warning(
+                "tmux 通知の送信に失敗 (attempt=%d): agent=%s sender=%s type=%s error=%s",
+                attempt + 1,
+                getattr(agent, "id", "unknown"),
+                sender_id,
+                msg_type_value,
+                e,
+            )
 
         if attempt < _TMUX_NOTIFY_MAX_RETRIES - 1:
             await asyncio.sleep(_TMUX_NOTIFY_RETRY_INTERVAL)
 
     # 全リトライ失敗
     logger.warning(
-        "tmux 通知が %d 回失敗: %s",
+        "tmux 通知が %d 回失敗: agent=%s sender=%s type=%s target=%s:%s.%s",
         _TMUX_NOTIFY_MAX_RETRIES,
         getattr(agent, "id", "unknown"),
+        sender_id,
+        msg_type_value,
+        agent.session_name,
+        agent.window_index or 0,
+        agent.pane_index,
     )
     if allow_macos_fallback:
         fallback_ok = await _send_macos_notification(msg_type_value, sender_id)

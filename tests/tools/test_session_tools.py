@@ -221,6 +221,68 @@ class TestInitTmuxWorkspace:
     """init_tmux_workspace のテスト。"""
 
     @pytest.mark.asyncio
+    async def test_init_tmux_workspace_rejects_unsafe_session_id(
+        self, session_mock_ctx, git_repo
+    ):
+        """危険な session_id を拒否することをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        result = await init_tmux_workspace(
+            working_dir=str(git_repo),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="../escape",
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "英数字・ハイフン・アンダースコア" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_init_tmux_workspace_returns_error_when_prefixed_session_id_exceeds_limit(
+        self, session_mock_ctx, git_repo
+    ):
+        """prefix 付与後に不正長となる session_id は構造化エラーで返ることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.session import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+        init_tmux_workspace = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "init_tmux_workspace":
+                init_tmux_workspace = tool.fn
+                break
+        assert init_tmux_workspace is not None
+
+        app_ctx = session_mock_ctx.request_context.lifespan_context
+        app_ctx.tmux.session_exists = AsyncMock(return_value=False)
+        app_ctx.tmux.create_main_session = AsyncMock(return_value=True)
+
+        result = await init_tmux_workspace(
+            working_dir=str(git_repo),
+            open_terminal=False,
+            auto_setup_gtr=False,
+            session_id="a" * 128,
+            ctx=session_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "session_id には英数字・ハイフン・アンダースコアのみ使用できます" in result["error"]
+
+    @pytest.mark.asyncio
     async def test_init_tmux_workspace_cleans_orphan_provisional_dirs(
         self, session_mock_ctx, git_repo
     ):

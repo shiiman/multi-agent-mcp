@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from src.config.workflow_guides import (
     get_role_guide,
     get_role_template_path,
@@ -71,3 +73,16 @@ class TestWorkflowGuides:
             resolved = get_role_template_path_for_workspace("admin", workspace_dir, enable_git=True)
 
         assert resolved == template_path
+
+    def test_get_role_guide_rejects_invalid_role(self):
+        """許可値以外の role は取得不可であることをテスト。"""
+        guide = get_role_guide("../owner", enable_git=True)
+        assert guide is None
+
+    def test_get_role_template_path_rejects_invalid_role(self):
+        """許可値以外の role でパス解決すると例外になることをテスト。"""
+        with (
+            patch("src.config.workflow_guides._get_templates_dir", return_value=Path(".")),
+            pytest.raises(ValueError, match="無効なロール"),
+        ):
+            get_role_template_path("../owner", enable_git=True)

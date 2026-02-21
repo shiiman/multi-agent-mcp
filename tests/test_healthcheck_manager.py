@@ -3,7 +3,7 @@
 import hashlib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -121,6 +121,105 @@ class TestHealthcheckMonitoring:
         assert result["recovered"] == []
         assert result["escalated"] == []
         assert "worker-terminated" in result["skipped"]
+
+    @pytest.mark.asyncio
+    async def test_monitor_resolves_dashboard_manager_when_missing(self, temp_dir, settings):
+        """dashboard_manager 未設定時に安全に解決して監視を継続できることをテスト。"""
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=True)
+        tmux.capture_pane_by_index = AsyncMock(return_value="")
+
+        ai_cli = AiCliManager(settings)
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            agents={worker.id: worker},
+            project_root=str(temp_dir),
+            session_id="test-session",
+        )
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=app_ctx.agents,
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=10,
+            max_recovery_attempts=1,
+        )
+        fake_dashboard = MagicMock()
+
+        with patch(
+            "src.tools.helpers_managers.ensure_dashboard_manager",
+            return_value=fake_dashboard,
+        ) as mock_ensure, patch.object(
+            healthcheck,
+            "_collect_workers_to_diagnose",
+            return_value=([], []),
+        ) as mock_collect:
+            result = await healthcheck.monitor_and_recover_workers(app_ctx)
+
+        mock_ensure.assert_called_once_with(app_ctx)
+        mock_collect.assert_called_once_with(app_ctx, fake_dashboard)
+        assert result["recovered"] == []
+        assert result["escalated"] == []
+
+    @pytest.mark.asyncio
+    async def test_execute_full_recovery_resolves_dashboard_manager_when_missing(
+        self, temp_dir, settings
+    ):
+        """full_recovery 実行時に dashboard_manager 未設定でも継続できることをテスト。"""
+        settings.enable_git = False
+        tmux = MagicMock()
+        ai_cli = AiCliManager(settings)
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.ERROR,
+            tmux_session=None,
+            session_name=None,
+            window_index=None,
+            pane_index=None,
+            working_dir=str(temp_dir),
+            worktree_path=None,
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            agents={worker.id: worker},
+            project_root=str(temp_dir),
+            session_id="test-session",
+        )
+        healthcheck = HealthcheckManager(tmux_manager=tmux, agents=app_ctx.agents)
+        fake_dashboard = MagicMock()
+        fake_dashboard.list_tasks.return_value = []
+
+        with patch(
+            "src.tools.helpers_managers.ensure_dashboard_manager",
+            return_value=fake_dashboard,
+        ) as mock_ensure:
+            result = await healthcheck.execute_full_recovery(app_ctx, worker.id)
+
+        mock_ensure.assert_called_once_with(app_ctx)
+        fake_dashboard.list_tasks.assert_called_once_with()
+        assert result["success"] is True
+        assert result["recovery_status"] == "recovered"
 
     @pytest.mark.asyncio
     async def test_monitor_stall_is_ignored_when_pane_output_changes(self):

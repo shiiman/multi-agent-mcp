@@ -144,7 +144,18 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
-        from src.config.workflow_guides import get_role_guide as _get_role_guide
+        from src.config.workflow_guides import (
+            ALLOWED_ROLES as _ALLOWED_ROLES,
+        )
+        from src.config.workflow_guides import (
+            get_role_guide as _get_role_guide,
+        )
+
+        if role not in _ALLOWED_ROLES:
+            return {
+                "success": False,
+                "error": f"無効なロールです: {role}。有効なロール: {list(_ALLOWED_ROLES)}",
+            }
 
         guide = _get_role_guide(role, enable_git=app_ctx.settings.enable_git)
 

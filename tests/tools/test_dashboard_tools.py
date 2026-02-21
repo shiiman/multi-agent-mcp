@@ -1371,10 +1371,10 @@ class TestReportTaskProgress:
         assert len(messages) == 0
 
     @pytest.mark.asyncio
-    async def test_returns_error_when_progress_notification_fails(
+    async def test_returns_partial_success_when_progress_notification_fails(
         self, dashboard_mock_ctx, git_repo
     ):
-        """tmux 通知失敗時に success=False で返すことをテスト。"""
+        """tmux 通知失敗時に主処理成功+部分失敗情報を返すことをテスト。"""
         from mcp.server.fastmcp import FastMCP
 
         from src.tools.dashboard import register_tools
@@ -1438,10 +1438,18 @@ class TestReportTaskProgress:
                 ctx=dashboard_mock_ctx,
             )
 
-        assert result["success"] is False
-        assert "tmux 通知に失敗しました" in result["error"]
+        assert result["success"] is True
         assert result["admin_notified"] is True
         assert result["notification_sent"] is False
+        assert result["delivery_state"] == "queued_unnotified"
+        assert "保存済み" in result["warning"]
+        assert result["notification_error"] == "tmux_notification_failed"
+        messages = app_ctx.ipc_manager.read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            mark_as_read=False,
+        )
+        assert len(messages) == 1
 
 
 class TestReportTaskCompletion:
@@ -1711,10 +1719,10 @@ class TestReportTaskCompletion:
         assert len(messages) == 0
 
     @pytest.mark.asyncio
-    async def test_returns_error_when_completion_notification_fails(
+    async def test_returns_partial_success_when_completion_notification_fails(
         self, dashboard_mock_ctx, git_repo
     ):
-        """完了報告の tmux 通知失敗時に success=False で返すことをテスト。"""
+        """完了報告の tmux 通知失敗時に主処理成功+後続処理継続をテスト。"""
         from mcp.server.fastmcp import FastMCP
 
         from src.tools.dashboard import register_tools
@@ -1781,9 +1789,20 @@ class TestReportTaskCompletion:
                 ctx=dashboard_mock_ctx,
             )
 
-        assert result["success"] is False
-        assert "tmux 通知に失敗しました" in result["error"]
+        assert result["success"] is True
         assert result["notification_sent"] is False
+        assert result["delivery_state"] == "queued_unnotified"
+        assert "保存済み" in result["warning"]
+        assert result["notification_error"] == "tmux_notification_failed"
+        assert result["memory_saved"] is True
+        assert app_ctx.agents["worker-001"].status == AgentStatus.IDLE
+        assert app_ctx.agents["worker-001"].current_task is None
+        messages = app_ctx.ipc_manager.read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            mark_as_read=False,
+        )
+        assert len(messages) == 1
 
 
 class TestCostTools:

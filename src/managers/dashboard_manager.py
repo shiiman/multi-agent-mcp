@@ -6,21 +6,25 @@ YAML Front Matter 付き Markdown で統一管理。
 """
 
 import asyncio
+import fcntl
 import logging
 import time
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.managers.dashboard_cost import DashboardCostMixin
 from src.managers.dashboard_reader_mixin import DashboardReaderMixin
 from src.managers.dashboard_rendering_mixin import DashboardRenderingMixin
 from src.managers.dashboard_writer_mixin import DashboardWriterMixin
-from src.models.dashboard import Dashboard
+from src.models.agent import AgentRole, AgentStatus
+from src.models.dashboard import Dashboard, TaskStatus, normalize_task_id
+from src.models.message import Message, MessageType
 
 if TYPE_CHECKING:
     from src.config.settings import Settings
+    from src.context import AppContext
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,10 @@ class DashboardManager(
         # 読み取り専用操作用の mtime_ns ベースキャッシュ
         self._read_cache: Dashboard | None = None
         self._read_cache_mtime: int = 0
+        # DashboardSyncMixin の IPC 同期キャッシュ属性を初期化
+        self._ipc_sync_cache_ipc_dir: str | None = None
+        self._ipc_sync_cache_messages: list | None = None
+        self._ipc_sync_cache_cursors: dict[str, str] | None = None
 
     @staticmethod
     def _is_event_loop_running() -> bool:
@@ -92,8 +100,6 @@ class DashboardManager(
     @contextmanager
     def _dashboard_file_lock(self) -> None:
         """Dashboard 読み書き用の排他ロックを取得する。"""
-        import fcntl
-
         lock_path = self._get_dashboard_lock_path()
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         started_at = time.monotonic()
@@ -128,8 +134,6 @@ class DashboardManager(
         fcntl.flock のビジーウェイトを asyncio.to_thread() でスレッドに委譲し、
         イベントループをブロックしない。
         """
-        import fcntl
-
         lock_path = self._get_dashboard_lock_path()
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         timeout = self._dashboard_lock_timeout_seconds
@@ -160,3 +164,183 @@ class DashboardManager(
                 except OSError:
                     pass
                 lock_file.close()
+
+    @staticmethod
+    def _persist_agent_state(app_ctx: "AppContext", agent: Any) -> bool:
+        """タスク反映に伴う agent 状態変更を永続化する。
+
+        helpers_persistence.save_agent_to_file() に委譲する。
+        """
+        from src.tools.helpers_persistence import save_agent_to_file
+
+        return save_agent_to_file(app_ctx, agent)
+
+    def _update_reporter_agent(
+        self,
+        app_ctx: "AppContext",
+        reporter: str | None,
+        task_id: str,
+        *,
+        assign_task: bool,
+    ) -> None:
+        """タスクメッセージの reporter エージェント状態を更新・永続化する。
+
+        Args:
+            app_ctx: アプリケーションコンテキスト
+            reporter: reporter エージェント ID
+            task_id: 対象タスク ID
+            assign_task: True=タスクをアサイン（BUSY）、False=タスクを解除（IDLE）
+        """
+        if not reporter or reporter not in app_ctx.agents:
+            return
+        agent = app_ctx.agents[reporter]
+        if assign_task:
+            agent.current_task = task_id
+            if str(agent.role) == AgentRole.WORKER.value:
+                agent.status = AgentStatus.BUSY
+        else:
+            if agent.current_task == task_id:
+                agent.current_task = None
+            if str(agent.role) == AgentRole.WORKER.value:
+                agent.status = AgentStatus.IDLE
+        self._persist_agent_state(app_ctx, agent)
+
+    def apply_task_messages(
+        self,
+        app_ctx: "AppContext",
+        messages: list[Message],
+    ) -> tuple[bool, int, list[str], list[str], list[str]]:
+        """タスク関連 IPC メッセージを Dashboard へ反映する。
+
+        Args:
+            app_ctx: アプリケーションコンテキスト
+            messages: read_messages で取得したメッセージ
+
+        Returns:
+            (
+                dashboard_updated,
+                applied_count,
+                skipped_reasons,
+                ack_message_ids,
+                deferred_message_ids,
+            )
+        """
+        task_message_types = {
+            MessageType.TASK_PROGRESS,
+            MessageType.TASK_COMPLETE,
+            MessageType.TASK_FAILED,
+        }
+        task_messages = [m for m in messages if m.message_type in task_message_types]
+        if not task_messages:
+            return False, 0, [], [], []
+
+        task_map: dict[str, str] = {}
+        for task in self.list_tasks():
+            normalized = normalize_task_id(task.id)
+            if normalized:
+                task_map[normalized] = task.id
+
+        applied = 0
+        skipped_reasons: list[str] = []
+        ack_message_ids: list[str] = []
+        deferred_message_ids: list[str] = []
+
+        for msg in task_messages:
+            raw_task_id = msg.metadata.get("task_id")
+            normalized_task_id = msg.metadata.get("normalized_task_id") or normalize_task_id(
+                raw_task_id
+            )
+            if not normalized_task_id:
+                skipped_reasons.append("missing_task_id")
+                deferred_message_ids.append(msg.id)
+                continue
+
+            task_id = task_map.get(normalized_task_id)
+            if not task_id:
+                skipped_reasons.append(f"task_not_found:{normalized_task_id}")
+                deferred_message_ids.append(msg.id)
+                continue
+
+            try:
+                if msg.message_type == MessageType.TASK_PROGRESS:
+                    progress = msg.metadata.get("progress", 0)
+                    checklist = msg.metadata.get("checklist")
+                    message_text = msg.metadata.get("message")
+                    reporter = msg.metadata.get("reporter")
+
+                    status_ok, status_msg = self.update_task_status(
+                        task_id, TaskStatus.IN_PROGRESS, progress
+                    )
+                    if not status_ok:
+                        skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
+                        deferred_message_ids.append(msg.id)
+                        continue
+
+                    # QUAL-005: checklist 更新失敗はステータス更新済みなので
+                    # warning を記録するが applied として扱う
+                    if checklist:
+                        checklist_ok, checklist_msg = self.update_task_checklist(
+                            task_id, checklist, log_message=message_text
+                        )
+                        if not checklist_ok:
+                            skipped_reasons.append(
+                                f"checklist_update_error:{task_id}:{checklist_msg}"
+                            )
+
+                    self._update_reporter_agent(
+                        app_ctx, reporter, task_id, assign_task=True
+                    )
+
+                elif msg.message_type == MessageType.TASK_COMPLETE:
+                    reporter = msg.metadata.get("reporter")
+                    task = self.get_task(task_id)
+                    if task and task.status == TaskStatus.COMPLETED:
+                        skipped_reasons.append(f"already_completed:{task_id}")
+                        ack_message_ids.append(msg.id)
+                        continue
+
+                    status_ok, status_msg = self.update_task_status(
+                        task_id, TaskStatus.COMPLETED, progress=100
+                    )
+                    if not status_ok:
+                        skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
+                        deferred_message_ids.append(msg.id)
+                        continue
+
+                    self._update_reporter_agent(
+                        app_ctx, reporter, task_id, assign_task=False
+                    )
+
+                elif msg.message_type == MessageType.TASK_FAILED:
+                    reporter = msg.metadata.get("reporter")
+                    task = self.get_task(task_id)
+                    if task and task.status == TaskStatus.FAILED:
+                        skipped_reasons.append(f"already_failed:{task_id}")
+                        ack_message_ids.append(msg.id)
+                        continue
+
+                    status_ok, status_msg = self.update_task_status(task_id, TaskStatus.FAILED)
+                    if not status_ok:
+                        skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
+                        deferred_message_ids.append(msg.id)
+                        continue
+
+                    self._update_reporter_agent(
+                        app_ctx, reporter, task_id, assign_task=False
+                    )
+
+                applied += 1
+                ack_message_ids.append(msg.id)
+
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                logger.debug("タスク %s の Dashboard 更新をスキップ: %s", task_id, e)
+                skipped_reasons.append(f"update_error:{task_id}")
+                deferred_message_ids.append(msg.id)
+
+        try:
+            if app_ctx.session_id and app_ctx.project_root:
+                self.save_markdown_dashboard(Path(app_ctx.project_root), app_ctx.session_id)
+        except OSError as e:
+            logger.debug("Markdown ダッシュボード更新をスキップ: %s", e)
+
+        return True, applied, skipped_reasons, ack_message_ids, deferred_message_ids

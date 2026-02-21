@@ -2,7 +2,6 @@
 
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -11,9 +10,8 @@ if TYPE_CHECKING:
 from mcp.server.fastmcp import Context, FastMCP
 
 from src.config.role_permissions import requires_worker_admin_receiver
-from src.models.agent import AgentRole, AgentStatus
-from src.models.dashboard import TaskStatus, normalize_task_id
-from src.models.message import Message, MessagePriority, MessageType
+from src.models.agent import AgentRole
+from src.models.message import MessagePriority, MessageType
 from src.tools.helpers import (
     ADMIN_DASHBOARD_GRANT_SECONDS,
     _owner_polling_blocked_response,
@@ -24,8 +22,7 @@ from src.tools.helpers import (
     get_owner_wait_state,
     notify_agent_via_tmux,
     require_permission,
-    reset_agent_to_idle,
-    save_agent_to_file,
+    resolve_effective_caller_agent_id,
     sync_agents_from_file,
     validate_sender_caller_match,
 )
@@ -92,140 +89,6 @@ def _apply_admin_empty_polling_guard(
         return None
 
     return _admin_polling_blocked_response(tool_name)
-
-
-def _auto_update_dashboard_from_messages(
-    app_ctx: "AppContext", messages: list[Message]
-) -> tuple[bool, int, list[str]]:
-    """Admin の read_messages 時に、タスク関連メッセージから Dashboard を自動更新する。
-
-    # TODO(QUAL-007): この関数は ipc.py 内で Dashboard を直接更新しており、
-    # 責務分離の観点から DashboardManager.apply_task_messages() に移動を検討する。
-    # Dashboard 更新ロジック（ステータス変更・チェックリスト更新・エージェント状態同期）を
-    # DashboardManager 側に集約することで、ipc.py はメッセージの送受信のみに専念できる。
-    """
-    task_messages = [
-        m
-        for m in messages
-        if m.message_type
-        in (
-            MessageType.TASK_PROGRESS,
-            MessageType.TASK_COMPLETE,
-            MessageType.TASK_FAILED,
-        )
-    ]
-    if not task_messages:
-        return False, 0, []
-
-    try:
-        dashboard = ensure_dashboard_manager(app_ctx)
-    except (RuntimeError, AttributeError, OSError) as e:
-        logger.debug("Dashboard 自動更新をスキップ: %s", e)
-        return False, 0, ["dashboard_manager_unavailable"]
-
-    task_map: dict[str, str] = {}
-    for task in dashboard.list_tasks():
-        normalized = normalize_task_id(task.id)
-        if normalized:
-            task_map[normalized] = task.id
-
-    applied = 0
-    skipped_reasons: list[str] = []
-
-    for msg in task_messages:
-        raw_task_id = msg.metadata.get("task_id")
-        normalized_task_id = msg.metadata.get("normalized_task_id") or normalize_task_id(
-            raw_task_id
-        )
-        if not normalized_task_id:
-            skipped_reasons.append("missing_task_id")
-            continue
-        task_id = task_map.get(normalized_task_id)
-        if not task_id:
-            skipped_reasons.append(f"task_not_found:{normalized_task_id}")
-            continue
-
-        try:
-            if msg.message_type == MessageType.TASK_PROGRESS:
-                progress = msg.metadata.get("progress", 0)
-                checklist = msg.metadata.get("checklist")
-                message_text = msg.metadata.get("message")
-                reporter = msg.metadata.get("reporter")
-                status_ok, status_msg = dashboard.update_task_status(
-                    task_id, TaskStatus.IN_PROGRESS, progress
-                )
-                if not status_ok:
-                    skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
-                    continue
-
-                if checklist:
-                    checklist_ok, checklist_msg = dashboard.update_task_checklist(
-                        task_id, checklist, log_message=message_text
-                    )
-                    if not checklist_ok:
-                        skipped_reasons.append(f"checklist_update_error:{task_id}:{checklist_msg}")
-
-                if reporter and reporter in app_ctx.agents:
-                    agent = app_ctx.agents[reporter]
-                    agent.current_task = task_id
-                    if str(agent.role) == AgentRole.WORKER.value:
-                        agent.status = AgentStatus.BUSY
-                    save_agent_to_file(app_ctx, agent)
-                applied += 1
-
-            elif msg.message_type == MessageType.TASK_COMPLETE:
-                reporter = msg.metadata.get("reporter")
-                task = dashboard.get_task(task_id)
-                if task and task.status == TaskStatus.COMPLETED:
-                    skipped_reasons.append(f"already_completed:{task_id}")
-                    continue
-                status_ok, status_msg = dashboard.update_task_status(
-                    task_id, TaskStatus.COMPLETED, progress=100
-                )
-                if not status_ok:
-                    skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
-                    continue
-
-                if reporter and reporter in app_ctx.agents:
-                    agent = app_ctx.agents[reporter]
-                    if agent.current_task == task_id:
-                        agent.current_task = None
-                    if str(agent.role) == AgentRole.WORKER.value:
-                        agent.status = AgentStatus.IDLE
-                    save_agent_to_file(app_ctx, agent)
-                applied += 1
-
-            elif msg.message_type == MessageType.TASK_FAILED:
-                reporter = msg.metadata.get("reporter")
-                task = dashboard.get_task(task_id)
-                if task and task.status == TaskStatus.FAILED:
-                    skipped_reasons.append(f"already_failed:{task_id}")
-                    continue
-                status_ok, status_msg = dashboard.update_task_status(task_id, TaskStatus.FAILED)
-                if not status_ok:
-                    skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
-                    continue
-
-                if reporter and reporter in app_ctx.agents:
-                    agent = app_ctx.agents[reporter]
-                    if agent.current_task == task_id:
-                        agent.current_task = None
-                    if str(agent.role) == AgentRole.WORKER.value:
-                        agent.status = AgentStatus.IDLE
-                    save_agent_to_file(app_ctx, agent)
-                applied += 1
-        except (OSError, ValueError, KeyError, TypeError) as e:
-            logger.debug("タスク %s の Dashboard 更新をスキップ: %s", task_id, e)
-            skipped_reasons.append(f"update_error:{task_id}")
-
-    # Markdown ダッシュボードも更新
-    try:
-        if app_ctx.session_id and app_ctx.project_root:
-            dashboard.save_markdown_dashboard(Path(app_ctx.project_root), app_ctx.session_id)
-    except OSError as e:
-        logger.debug("Markdown ダッシュボード更新をスキップ: %s", e)
-
-    return True, applied, skipped_reasons
 
 
 def _validate_send_message_params(
@@ -648,46 +511,56 @@ def register_tools(mcp: FastMCP) -> None:
         if agent_id not in ipc.get_all_agent_ids():
             ipc.register_agent(agent_id)
 
+        effective_caller_agent_id, caller_error = resolve_effective_caller_agent_id(
+            ctx=ctx,
+            caller_agent_id=caller_agent_id,
+        )
+        if caller_error:
+            return caller_error
+
         sync_agents_from_file(app_ctx)
-        caller = app_ctx.agents.get(caller_agent_id)
+        caller = app_ctx.agents.get(effective_caller_agent_id)
         caller_role = getattr(caller, "role", None)
         is_admin_caller = caller_role in (AgentRole.ADMIN.value, "admin")
         is_owner_caller = caller_role in (AgentRole.OWNER.value, "owner")
 
         owner_wait_state: dict[str, Any] | None = None
-        if is_owner_caller and caller_agent_id:
-            owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
+        if is_owner_caller and effective_caller_agent_id:
+            owner_wait_state = get_owner_wait_state(app_ctx, effective_caller_agent_id)
             if owner_wait_state.get("waiting_for_admin"):
                 # Owner 待機中は自身 inbox の通知待機のみ許可する。
-                if agent_id != caller_agent_id:
+                if agent_id != effective_caller_agent_id:
                     return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
-                if ipc.get_unread_count(caller_agent_id) == 0:
+                if ipc.get_unread_count(effective_caller_agent_id) == 0:
                     return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
 
-        messages = ipc.read_messages(
-            agent_id=agent_id,
-            unread_only=unread_only,
-            message_type=msg_type,
-            mark_as_read=mark_as_read,
-        )
-
-        # Admin の場合: タスク関連メッセージから Dashboard を自動更新
+        # Admin の場合: unread=0 連続ポーリング抑止を読み取り前に判定
         dashboard_updated = False
         dashboard_updates_applied = 0
         dashboard_updates_skipped_reason: list[str] = []
+        acked_task_message_ids: set[str] = set()
+        deferred_task_message_ids: set[str] = set()
         if is_admin_caller:
-            unread_count = ipc.get_unread_count(agent_id)
+            unread_count_before = ipc.get_unread_count(agent_id)
             guard_error = _apply_admin_empty_polling_guard(
                 app_ctx,
-                caller_agent_id or agent_id,
-                should_guard=bool(unread_only and unread_count == 0),
+                effective_caller_agent_id or agent_id,
+                should_guard=bool(unread_only and unread_count_before == 0),
                 tool_name="read_messages",
             )
             if guard_error:
                 return guard_error
 
+        # 既読化は後段で制御するため、ここでは副作用なしで読み取る
+        messages = ipc.read_messages(
+            agent_id=agent_id,
+            unread_only=unread_only,
+            message_type=msg_type,
+            mark_as_read=False,
+        )
+
         owner_wait_unlocked = False
-        if is_owner_caller and caller_agent_id and owner_wait_state:
+        if is_owner_caller and effective_caller_agent_id and owner_wait_state:
             waiting_for_admin = bool(owner_wait_state.get("waiting_for_admin"))
             expected_admin_id = owner_wait_state.get("admin_id")
             has_admin_notification = any(
@@ -703,20 +576,75 @@ def register_tools(mcp: FastMCP) -> None:
             )
             if waiting_for_admin and has_admin_notification:
                 clear_owner_wait_state(
-                    app_ctx, caller_agent_id, reason="admin_notification_consumed"
+                    app_ctx,
+                    effective_caller_agent_id,
+                    reason="admin_notification_consumed",
                 )
                 owner_wait_unlocked = True
 
         if is_admin_caller:
-            (
-                dashboard_updated,
-                dashboard_updates_applied,
-                dashboard_updates_skipped_reason,
-            ) = _auto_update_dashboard_from_messages(app_ctx, messages)
+            try:
+                dashboard = ensure_dashboard_manager(app_ctx)
+                (
+                    dashboard_updated,
+                    dashboard_updates_applied,
+                    dashboard_updates_skipped_reason,
+                    acked_task_ids,
+                    deferred_task_ids,
+                ) = dashboard.apply_task_messages(app_ctx, messages)
+                acked_task_message_ids = set(acked_task_ids)
+                deferred_task_message_ids = set(deferred_task_ids)
+            except (RuntimeError, AttributeError, OSError) as e:
+                logger.debug("Dashboard 自動更新をスキップ: %s", e)
+                dashboard_updated = False
+                dashboard_updates_applied = 0
+                dashboard_updates_skipped_reason = ["dashboard_manager_unavailable"]
+                deferred_task_message_ids = {
+                    msg.id
+                    for msg in messages
+                    if msg.message_type
+                    in (
+                        MessageType.TASK_PROGRESS,
+                        MessageType.TASK_COMPLETE,
+                        MessageType.TASK_FAILED,
+                    )
+                }
+
             if messages:
-                _mark_admin_ipc_consumed(app_ctx, caller_agent_id or agent_id)
+                _mark_admin_ipc_consumed(app_ctx, effective_caller_agent_id or agent_id)
             else:
-                _mark_admin_waiting_for_ipc(app_ctx, caller_agent_id or agent_id)
+                _mark_admin_waiting_for_ipc(app_ctx, effective_caller_agent_id or agent_id)
+
+        if mark_as_read and messages:
+            task_message_types = {
+                MessageType.TASK_PROGRESS,
+                MessageType.TASK_COMPLETE,
+                MessageType.TASK_FAILED,
+            }
+            mark_ids: list[str] = []
+            for msg in messages:
+                if msg.is_read:
+                    continue
+                if (
+                    is_admin_caller
+                    and msg.message_type in task_message_types
+                    and msg.id in deferred_task_message_ids
+                ):
+                    continue
+                if (
+                    is_admin_caller
+                    and msg.message_type in task_message_types
+                    and msg.id not in acked_task_message_ids
+                ):
+                    continue
+                mark_ids.append(msg.id)
+
+            marked_at = ipc.mark_messages_as_read(agent_id, mark_ids)
+            if marked_at is not None:
+                marked_set = set(mark_ids)
+                for msg in messages:
+                    if msg.id in marked_set and not msg.is_read:
+                        msg.read_at = marked_at
 
         return {
             "success": True,
@@ -757,17 +685,24 @@ def register_tools(mcp: FastMCP) -> None:
         if agent_id not in ipc.get_all_agent_ids():
             ipc.register_agent(agent_id)
 
+        effective_caller_agent_id, caller_error = resolve_effective_caller_agent_id(
+            ctx=ctx,
+            caller_agent_id=caller_agent_id,
+        )
+        if caller_error:
+            return caller_error
+
         count = ipc.get_unread_count(agent_id)
         sync_agents_from_file(app_ctx)
-        caller = app_ctx.agents.get(caller_agent_id)
+        caller = app_ctx.agents.get(effective_caller_agent_id)
         caller_role = getattr(caller, "role", None)
         is_admin_caller = caller_role in (AgentRole.ADMIN.value, "admin")
         is_owner_caller = caller_role in (AgentRole.OWNER.value, "owner")
-        if is_owner_caller and caller_agent_id:
-            owner_wait_state = get_owner_wait_state(app_ctx, caller_agent_id)
+        if is_owner_caller and effective_caller_agent_id:
+            owner_wait_state = get_owner_wait_state(app_ctx, effective_caller_agent_id)
             if owner_wait_state.get("waiting_for_admin"):
                 # Owner 待機中は自身 inbox の通知待機のみ許可する。
-                if agent_id != caller_agent_id:
+                if agent_id != effective_caller_agent_id:
                     return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
                 if count == 0:
                     return _owner_polling_blocked_response(owner_wait_state.get("admin_id"))
@@ -775,16 +710,16 @@ def register_tools(mcp: FastMCP) -> None:
         if is_admin_caller:
             guard_error = _apply_admin_empty_polling_guard(
                 app_ctx,
-                caller_agent_id or agent_id,
+                effective_caller_agent_id or agent_id,
                 should_guard=(count == 0),
                 tool_name="get_unread_count",
             )
             if guard_error:
                 return guard_error
             if count > 0:
-                _mark_admin_ipc_consumed(app_ctx, caller_agent_id or agent_id)
+                _mark_admin_ipc_consumed(app_ctx, effective_caller_agent_id or agent_id)
             else:
-                _mark_admin_waiting_for_ipc(app_ctx, caller_agent_id or agent_id)
+                _mark_admin_waiting_for_ipc(app_ctx, effective_caller_agent_id or agent_id)
 
         return {
             "success": True,

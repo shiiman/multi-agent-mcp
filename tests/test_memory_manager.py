@@ -41,6 +41,15 @@ class TestMemoryManager:
         assert retrieved is not None
         assert retrieved.content == "test content"
 
+    def test_save_creates_entry_file_with_0600(self, manager: MemoryManager) -> None:
+        """保存ファイルが 0600 権限で作成されることをテスト。"""
+        manager.save("secure_key", "secret")
+        entry_path = manager._get_entry_path("secure_key")
+
+        assert entry_path.exists()
+        file_mode = os.stat(entry_path).st_mode & 0o777
+        assert file_mode == 0o600
+
     def test_save_update_existing(self, manager: MemoryManager) -> None:
         """既存エントリの更新テスト。"""
         manager.save("key1", "content1")

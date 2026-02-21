@@ -4,13 +4,15 @@ import asyncio
 import logging
 import re
 import shlex
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.config.settings import Settings
 
+from src.config.constants import SUBPROCESS_TIMEOUT_SECONDS
 from src.config.settings import TerminalApp
 from src.managers import tmux_shared
+from src.managers.subprocess_utils import build_subprocess_error, cleanup_timed_out_process
 from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
 
 logger = logging.getLogger(__name__)
@@ -29,9 +31,12 @@ class TmuxManager(TmuxWorkspaceMixin):
 
     def __init__(self, settings: "Settings") -> None:
         self.settings = settings
+        self.last_subprocess_error: dict[str, Any] | None = None
 
     async def _run(self, *args: str) -> tuple[int, str, str]:
         """tmuxコマンドを実行する。"""
+        self.last_subprocess_error = None
+        command = " ".join(("tmux", *args))
         try:
             proc = await asyncio.create_subprocess_exec(
                 "tmux",
@@ -39,14 +44,29 @@ class TmuxManager(TmuxWorkspaceMixin):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            )
             return proc.returncode or 0, stdout.decode(), stderr.decode()
+        except asyncio.TimeoutError:
+            await cleanup_timed_out_process(proc)
+            return 124, "", self._set_subprocess_error(
+                kind="timeout",
+                command=command,
+                message="tmux コマンド実行がタイムアウトしました",
+                timeout_seconds=SUBPROCESS_TIMEOUT_SECONDS,
+            )
         except FileNotFoundError:
             logger.error("tmux がインストールされていません")
             return 1, "", "tmux not found"
         except Exception as e:
             logger.error(f"tmux コマンド実行エラー: {e}")
-            return 1, "", str(e)
+            return 1, "", self._set_subprocess_error(
+                kind="spawn_error",
+                command=command,
+                message=str(e),
+            )
 
     def _get_window_name(self, window_index: int) -> str:
         """ウィンドウインデックスからウィンドウ名を取得する。"""
@@ -133,17 +153,34 @@ class TmuxManager(TmuxWorkspaceMixin):
 
     async def _run_exec(self, *args: str) -> tuple[int, str, str]:
         """サブプロセスをリスト形式で安全に実行する。"""
+        self.last_subprocess_error = None
+        command = " ".join(args)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            )
             return proc.returncode or 0, stdout.decode(), stderr.decode()
+        except asyncio.TimeoutError:
+            await cleanup_timed_out_process(proc)
+            return 124, "", self._set_subprocess_error(
+                kind="timeout",
+                command=command,
+                message="コマンド実行がタイムアウトしました",
+                timeout_seconds=SUBPROCESS_TIMEOUT_SECONDS,
+            )
         except Exception as e:
             logger.error(f"コマンド実行エラー: {e}")
-            return 1, "", str(e)
+            return 1, "", self._set_subprocess_error(
+                kind="spawn_error",
+                command=command,
+                message=str(e),
+            )
 
     async def open_session_in_terminal(
         self,
@@ -301,3 +338,21 @@ class TmuxManager(TmuxWorkspaceMixin):
         '''
         code, _, _ = await self._run_exec("osascript", "-e", applescript)
         return code == 0
+
+    def _set_subprocess_error(
+        self,
+        *,
+        kind: str,
+        command: str,
+        message: str,
+        timeout_seconds: float | None = None,
+    ) -> str:
+        """共通ユーティリティを使い、エラー情報を構築して self に保存する。"""
+        json_str, error_info = build_subprocess_error(
+            kind=kind,
+            command=command,
+            message=message,
+            timeout_seconds=timeout_seconds,
+        )
+        self.last_subprocess_error = error_info
+        return json_str

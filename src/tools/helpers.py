@@ -174,9 +174,11 @@ from src.tools.helpers_permissions import (  # noqa: E402, F401
     get_admin_poll_state,
     get_agent_role,
     get_app_ctx,
+    get_authenticated_agent_id,
     get_owner_wait_state,
     mark_owner_waiting_for_admin,
     require_permission,
+    resolve_effective_caller_agent_id,
     reset_agent_to_idle,
     validate_sender_caller_match,
 )
