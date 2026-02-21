@@ -143,6 +143,33 @@ def ipc_no_git_mock_ctx(ipc_no_git_ctx):
     return mock
 
 
+def _make_agent(
+    agent_id: str,
+    role: AgentRole,
+    *,
+    status: AgentStatus = AgentStatus.IDLE,
+    working_dir: str = "/tmp",
+    tmux_session: str | None = None,
+    session_name: str | None = None,
+    window_index: int | None = None,
+    pane_index: int | None = None,
+) -> Agent:
+    """テスト用 Agent を生成するファクトリ関数。"""
+    now = datetime.now()
+    return Agent(
+        id=agent_id,
+        role=role,
+        status=status,
+        tmux_session=tmux_session,
+        session_name=session_name,
+        window_index=window_index,
+        pane_index=pane_index,
+        working_dir=working_dir,
+        created_at=now,
+        last_activity=now,
+    )
+
+
 class TestSendMessage:
     """send_message ツールのテスト。"""
 
@@ -164,15 +191,8 @@ class TestSendMessage:
 
         # Owner を追加
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         result = await send_message(
@@ -205,15 +225,8 @@ class TestSendMessage:
 
         # Owner を追加
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         result = await send_message(
@@ -246,27 +259,17 @@ class TestSendMessage:
         assert send_message is not None
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         cleanup_result = {
@@ -313,27 +316,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         result = await send_message(
@@ -368,27 +361,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         feature_branch = "feature/task-impl"
@@ -469,27 +452,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         feature_branch = "feature/task-partial"
@@ -571,27 +544,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         missing_task = app_ctx.dashboard_manager.create_task(
@@ -635,27 +598,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         impl_task = app_ctx.dashboard_manager.create_task(title="API e2e hardening")
@@ -698,27 +651,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         ui_task = app_ctx.dashboard_manager.create_task(
@@ -782,30 +725,23 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         result = await send_message(
@@ -840,30 +776,23 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         result = await send_message(
@@ -898,39 +827,26 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         result = await send_message(
@@ -964,42 +880,31 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["worker-002"] = Agent(
-            id="worker-002",
-            role=AgentRole.WORKER,
-            status=AgentStatus.IDLE,
+        app_ctx.agents["worker-002"] = _make_agent(
+            "worker-002", AgentRole.WORKER,
             tmux_session="test:0.2",
             session_name="test",
             window_index=0,
             pane_index=2,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         result = await send_message(
@@ -1033,30 +938,23 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         result = await send_message(
@@ -1090,27 +988,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         result = await send_message(
@@ -1144,30 +1032,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            session_name=None,
-            window_index=None,
-            pane_index=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         with patch(
@@ -1208,27 +1083,17 @@ class TestSendMessage:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         with patch("src.tools.ipc.notify_agent_via_tmux", new=AsyncMock(return_value=False)):
@@ -1270,15 +1135,8 @@ class TestReadMessages:
 
         # Owner を追加
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         result = await read_messages(
@@ -1309,27 +1167,17 @@ class TestReadMessages:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         result = await read_messages(
@@ -1359,18 +1207,14 @@ class TestReadMessages:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         result = await read_messages(
@@ -1401,18 +1245,14 @@ class TestReadMessages:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         first = await read_messages(
@@ -1452,33 +1292,23 @@ class TestReadMessages:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
         app_ctx._owner_wait_state["owner-001"] = {
             "waiting_for_admin": True,
             "admin_id": "admin-001",
             "session_id": "issue-001",
-            "locked_at": now,
+            "locked_at": datetime.now(),
             "unlocked_at": None,
             "unlock_reason": None,
         }
@@ -1513,33 +1343,23 @@ class TestReadMessages:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
         app_ctx._owner_wait_state["owner-001"] = {
             "waiting_for_admin": True,
             "admin_id": "admin-001",
             "session_id": "issue-001",
-            "locked_at": now,
+            "locked_at": datetime.now(),
             "unlocked_at": None,
             "unlock_reason": None,
         }
@@ -1576,33 +1396,23 @@ class TestReadMessages:
         assert read_messages is not None
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
         app_ctx._owner_wait_state["owner-001"] = {
             "waiting_for_admin": True,
             "admin_id": "admin-001",
             "session_id": "issue-001",
-            "locked_at": now,
+            "locked_at": datetime.now(),
             "unlocked_at": None,
             "unlock_reason": None,
         }
@@ -1644,33 +1454,23 @@ class TestReadMessages:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
         app_ctx._owner_wait_state["owner-001"] = {
             "waiting_for_admin": True,
             "admin_id": "admin-001",
             "session_id": "issue-001",
-            "locked_at": now,
+            "locked_at": datetime.now(),
             "unlocked_at": None,
             "unlock_reason": None,
         }
@@ -1716,30 +1516,23 @@ class TestReadMessages:
         assert read_messages is not None
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         task = app_ctx.dashboard_manager.create_task(
@@ -1775,6 +1568,82 @@ class TestReadMessages:
         assert updated is not None
         assert updated.status == TaskStatus.IN_PROGRESS
         assert updated.progress == 50
+        assert app_ctx.ipc_manager.get_unread_count("admin-001") == 0
+
+    @pytest.mark.asyncio
+    async def test_read_messages_uses_authenticated_caller_for_admin_flow(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """caller_agent_id 省略時でも認証済み主体で Admin 分岐できることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+        assert read_messages is not None
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+        )
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+        )
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="authenticated caller target",
+            description="auto update",
+            assigned_agent_id="worker-001",
+        )
+        app_ctx.ipc_manager.send_message(
+            sender_id="worker-001",
+            receiver_id="admin-001",
+            message_type=MessageType.TASK_PROGRESS,
+            content="40% reached",
+            metadata={
+                "task_id": f"task:{task.id}",
+                "progress": 40,
+                "message": "40% reached",
+                "reporter": "worker-001",
+            },
+        )
+
+        ipc_mock_ctx.request_context.meta = {"authenticated_agent_id": "admin-001"}
+        result = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id=None,
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["dashboard_updated"] is True
+        assert result["dashboard_updates_applied"] == 1
+        updated = app_ctx.dashboard_manager.get_task(task.id)
+        assert updated is not None
+        assert updated.status == TaskStatus.IN_PROGRESS
+        assert updated.progress == 40
+        assert app_ctx.ipc_manager.get_unread_count("admin-001") == 0
 
     @pytest.mark.asyncio
     async def test_read_messages_admin_auto_updates_dashboard_from_task_failed(
@@ -1797,30 +1666,23 @@ class TestReadMessages:
         assert read_messages is not None
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         task = app_ctx.dashboard_manager.create_task(
@@ -1854,6 +1716,161 @@ class TestReadMessages:
         updated = app_ctx.dashboard_manager.get_task(task.id)
         assert updated is not None
         assert updated.status == TaskStatus.FAILED
+        assert app_ctx.ipc_manager.get_unread_count("admin-001") == 0
+
+    @pytest.mark.asyncio
+    async def test_read_messages_admin_acks_already_completed_message(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """既に完了済みタスクの task_complete メッセージは既読化されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+        assert read_messages is not None
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+        )
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+        )
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="already completed",
+            description="idempotent completion",
+            assigned_agent_id="worker-001",
+        )
+        app_ctx.dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED, progress=100)
+
+        app_ctx.ipc_manager.send_message(
+            sender_id="worker-001",
+            receiver_id="admin-001",
+            message_type=MessageType.TASK_COMPLETE,
+            content="done again",
+            metadata={
+                "task_id": f"task:{task.id}",
+                "reporter": "worker-001",
+            },
+        )
+
+        result = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["dashboard_updates_applied"] == 0
+        assert app_ctx.ipc_manager.get_unread_count("admin-001") == 0
+
+    @pytest.mark.asyncio
+    async def test_read_messages_admin_defers_ack_until_dashboard_apply_success(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """Dashboard 反映に失敗した task メッセージは未読維持され、再試行で既読化される。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.models.message import MessageType
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        read_messages = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "read_messages":
+                read_messages = tool.fn
+                break
+        assert read_messages is not None
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+        )
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+        )
+
+        task = app_ctx.dashboard_manager.create_task(
+            title="retry target",
+            description="auto update retry",
+            assigned_agent_id="worker-001",
+        )
+        sent = app_ctx.ipc_manager.send_message(
+            sender_id="worker-001",
+            receiver_id="admin-001",
+            message_type=MessageType.TASK_PROGRESS,
+            content="30% reached",
+            metadata={
+                "task_id": f"task:{task.id}",
+                "progress": 30,
+                "message": "30% reached",
+                "reporter": "worker-001",
+            },
+        )
+
+        app_ctx.dashboard_manager.apply_task_messages = MagicMock(
+            side_effect=[
+                (True, 0, [f"update_error:{task.id}"], [], [sent.id]),
+                (True, 1, [], [sent.id], []),
+            ]
+        )
+
+        first = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+        assert first["success"] is True
+        assert first["dashboard_updates_applied"] == 0
+        assert app_ctx.ipc_manager.get_unread_count("admin-001") == 1
+
+        second = await read_messages(
+            agent_id="admin-001",
+            unread_only=True,
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+        assert second["success"] is True
+        assert second["dashboard_updates_applied"] == 1
+        assert app_ctx.ipc_manager.get_unread_count("admin-001") == 0
 
 
 class TestGetUnreadCount:
@@ -1877,15 +1894,8 @@ class TestGetUnreadCount:
 
         # Owner を追加
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         result = await get_unread_count(
@@ -1916,18 +1926,14 @@ class TestGetUnreadCount:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
 
         first = await get_unread_count(
@@ -1966,33 +1972,23 @@ class TestGetUnreadCount:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
         app_ctx._owner_wait_state["owner-001"] = {
             "waiting_for_admin": True,
             "admin_id": "admin-001",
             "session_id": "issue-001",
-            "locked_at": now,
+            "locked_at": datetime.now(),
             "unlocked_at": None,
             "unlock_reason": None,
         }
@@ -2027,33 +2023,23 @@ class TestGetUnreadCount:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
         app_ctx._owner_wait_state["owner-001"] = {
             "waiting_for_admin": True,
             "admin_id": "admin-001",
             "session_id": "issue-001",
-            "locked_at": now,
+            "locked_at": datetime.now(),
             "unlocked_at": None,
             "unlock_reason": None,
         }
@@ -2094,33 +2080,23 @@ class TestGetUnreadCount:
         assert get_unread_count is not None
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
         app_ctx._owner_wait_state["owner-001"] = {
             "waiting_for_admin": True,
             "admin_id": "admin-001",
             "session_id": "issue-001",
-            "locked_at": now,
+            "locked_at": datetime.now(),
             "unlocked_at": None,
             "unlock_reason": None,
         }
@@ -2142,6 +2118,56 @@ class TestGetUnreadCount:
         assert result["next_action"] == "wait_for_user_input_or_unlock_owner_wait"
 
     @pytest.mark.asyncio
+    async def test_get_unread_count_uses_authenticated_caller_for_admin_poll_guard(
+        self, ipc_mock_ctx, git_repo
+    ):
+        """認証済み主体を使って Admin ポーリングガードが適用されることをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.ipc import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_unread_count = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_unread_count":
+                get_unread_count = tool.fn
+                break
+        assert get_unread_count is not None
+
+        app_ctx = ipc_mock_ctx.request_context.lifespan_context
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+        )
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
+        )
+
+        ipc_mock_ctx.request_context.meta = {"authenticated_agent_id": "admin-001"}
+        first = await get_unread_count(
+            agent_id="owner-001",
+            caller_agent_id=None,
+            ctx=ipc_mock_ctx,
+        )
+        second = await get_unread_count(
+            agent_id="admin-001",
+            caller_agent_id="admin-001",
+            ctx=ipc_mock_ctx,
+        )
+
+        assert first["success"] is True
+        assert first["unread_count"] == 0
+        assert second["success"] is False
+        assert "polling_blocked" in second["error"]
+
+    @pytest.mark.asyncio
     async def test_worker_get_unread_count_blocks_other_agent(
         self, ipc_mock_ctx, git_repo
     ):
@@ -2160,27 +2186,17 @@ class TestGetUnreadCount:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["worker-001"] = Agent(
-            id="worker-001",
-            role=AgentRole.WORKER,
+        app_ctx.agents["worker-001"] = _make_agent(
+            "worker-001", AgentRole.WORKER,
             status=AgentStatus.BUSY,
             tmux_session="test:0.1",
             session_name="test",
             window_index=0,
             pane_index=1,
             working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         result = await get_unread_count(
@@ -2213,21 +2229,14 @@ class TestUnlockOwnerWait:
                 break
 
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
         app_ctx._owner_wait_state["owner-001"] = {
             "waiting_for_admin": True,
             "admin_id": "admin-001",
             "session_id": "issue-001",
-            "locked_at": now,
+            "locked_at": datetime.now(),
             "unlocked_at": None,
             "unlock_reason": None,
         }
@@ -2272,15 +2281,8 @@ class TestRegisterAgentToIpc:
 
         # Owner を追加
         app_ctx = ipc_mock_ctx.request_context.lifespan_context
-        now = datetime.now()
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            working_dir=str(git_repo),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(git_repo),
         )
 
         result = await register_agent_to_ipc(
@@ -2313,30 +2315,17 @@ class TestQualityGateNoGitMode:
     @staticmethod
     def _setup_admin_owner(app_ctx, work_dir):
         """Admin と Owner エージェントをセットアップする。"""
-        now = datetime.now()
-        app_ctx.agents["admin-001"] = Agent(
-            id="admin-001",
-            role=AgentRole.ADMIN,
+        app_ctx.agents["admin-001"] = _make_agent(
+            "admin-001", AgentRole.ADMIN,
             status=AgentStatus.BUSY,
             tmux_session="test:0.0",
             session_name="test",
             window_index=0,
             pane_index=0,
             working_dir=str(work_dir),
-            created_at=now,
-            last_activity=now,
         )
-        app_ctx.agents["owner-001"] = Agent(
-            id="owner-001",
-            role=AgentRole.OWNER,
-            status=AgentStatus.IDLE,
-            tmux_session=None,
-            session_name=None,
-            window_index=None,
-            pane_index=None,
-            working_dir=str(work_dir),
-            created_at=now,
-            last_activity=now,
+        app_ctx.agents["owner-001"] = _make_agent(
+            "owner-001", AgentRole.OWNER, working_dir=str(work_dir),
         )
 
     @pytest.mark.asyncio

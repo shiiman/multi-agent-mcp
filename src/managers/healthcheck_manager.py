@@ -3,15 +3,21 @@
 エージェントの死活監視を行い、異常を検出したら通知・復旧する。
 """
 
+from __future__ import annotations
+
 import hashlib
 import inspect
 import json
 import logging
+import shlex
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from src.config.settings import normalize_cli_name, resolve_model_for_cli
+from src.config.workflow_guides import get_role_template_path_for_workspace
 
 if TYPE_CHECKING:
     from src.context import AppContext
@@ -72,8 +78,8 @@ class HealthcheckManager:
 
     def __init__(
         self,
-        tmux_manager: "TmuxManager",
-        agents: dict[str, "Agent"],
+        tmux_manager: TmuxManager,
+        agents: dict[str, Agent],
         healthcheck_interval_seconds: int = 60,
         stall_timeout_seconds: int = 600,
         in_progress_no_ipc_timeout_seconds: int = 120,
@@ -96,7 +102,7 @@ class HealthcheckManager:
         self._recovery_failures: dict[str, int] = {}
 
     @staticmethod
-    def _persist_agent(app_ctx: "AppContext | None", agent: "Agent") -> bool:
+    def _persist_agent(app_ctx: AppContext | None, agent: Agent) -> bool:
         """エージェント状態をファイルに永続化する。
 
         循環参照回避のため遅延 import を1箇所に集約している。
@@ -108,6 +114,21 @@ class HealthcheckManager:
         from src.tools.helpers_persistence import save_agent_to_file
 
         return save_agent_to_file(app_ctx, agent)
+
+    @staticmethod
+    def _resolve_dashboard_manager(app_ctx: AppContext | None) -> DashboardManager | None:
+        """DashboardManager を必要に応じて解決する。"""
+        if app_ctx is None:
+            return None
+        if app_ctx.dashboard_manager is not None:
+            return app_ctx.dashboard_manager
+        try:
+            from src.tools.helpers_managers import ensure_dashboard_manager
+
+            return ensure_dashboard_manager(app_ctx)
+        except (AttributeError, OSError, ValueError) as e:
+            logger.debug("DashboardManager の初期化をスキップ: %s", e)
+            return None
 
     @staticmethod
     def _recovery_key(agent_id: str, task_id: str | None) -> str:
@@ -130,7 +151,7 @@ class HealthcheckManager:
             k: v for k, v in self._recovery_failures.items() if _is_key_alive(k)
         }
 
-    async def _capture_pane_hash(self, agent: "Agent") -> str | None:
+    async def _capture_pane_hash(self, agent: Agent) -> str | None:
         """Worker pane の出力ハッシュを取得する。"""
         session_name = agent.resolved_session_name
         if not session_name or agent.window_index is None or agent.pane_index is None:
@@ -153,7 +174,7 @@ class HealthcheckManager:
     async def _is_pane_unchanged_for(
         self,
         agent_id: str,
-        agent: "Agent",
+        agent: Agent,
         timeout_seconds: int,
         now: datetime,
     ) -> bool:
@@ -190,7 +211,7 @@ class HealthcheckManager:
     async def _is_worker_stalled(
         self,
         agent_id: str,
-        agent: "Agent",
+        agent: Agent,
         now: datetime,
     ) -> bool:
         """Worker が無応答状態かを二段階判定で判定する。"""
@@ -206,7 +227,7 @@ class HealthcheckManager:
         )
 
     @staticmethod
-    def _task_activity_at(active_task: "TaskInfo") -> datetime | None:
+    def _task_activity_at(active_task: TaskInfo) -> datetime | None:
         """Task の最終活動時刻を取得する。"""
         metadata = getattr(active_task, "metadata", {}) or {}
         raw_last_update = metadata.get("last_in_progress_update_at")
@@ -232,8 +253,8 @@ class HealthcheckManager:
     async def _is_in_progress_without_ipc(
         self,
         agent_id: str,
-        agent: "Agent",
-        active_task: "TaskInfo",
+        agent: Agent,
+        active_task: TaskInfo,
         now: datetime,
     ) -> bool:
         """in_progress タスクの長時間無通信を判定する。"""
@@ -379,15 +400,312 @@ class HealthcheckManager:
             results.append((status.agent_id, success, message))
         return results
 
+    async def _recreate_recovery_worktree(
+        self,
+        app_ctx: AppContext,
+        old_worktree_path: str,
+        old_branch: str,
+    ) -> tuple[str | None, str | None]:
+        """復旧用に worktree を削除・再作成する。
+
+        Returns:
+            (new_worktree_path, error_message)
+            エラー時は (None, error_message) を返す。
+        """
+        from src.managers.worktree_manager import WorktreeManager
+
+        worktree_manager = WorktreeManager(app_ctx.project_root)
+        detected_base = await worktree_manager.get_current_branch()
+        base_branch = detected_base or "main"
+
+        await worktree_manager.remove_worktree(old_worktree_path, force=True)
+        logger.info("古い worktree を削除: %s", old_worktree_path)
+
+        success, create_msg, actual_path = await worktree_manager.create_worktree(
+            path=old_worktree_path,
+            branch=old_branch,
+            base_branch=base_branch,
+        )
+        if success and actual_path:
+            return actual_path, None
+        if success:
+            return old_worktree_path, None
+
+        import uuid
+
+        fallback_path = f"{old_worktree_path}-{uuid.uuid4().hex[:8]}"
+        retry_ok, retry_msg, retry_path = await worktree_manager.create_worktree(
+            path=fallback_path,
+            branch=old_branch,
+            base_branch=base_branch,
+        )
+        if retry_ok and retry_path:
+            return retry_path, None
+        if retry_ok:
+            return fallback_path, None
+        return None, f"worktree 作成が完全に失敗しました: primary={create_msg}, retry={retry_msg}"
+
+    def _send_recovery_notification(
+        self,
+        app_ctx: AppContext,
+        agent_id: str,
+        new_agent_id: str,
+        task_ids: list[str],
+        worktree_path: str,
+    ) -> bool:
+        """復旧完了を Admin に IPC 通知する。成功時 True を返す。"""
+        ipc = app_ctx.ipc_manager
+        if not task_ids or ipc is None:
+            return False
+        try:
+            from src.models.agent import AgentRole
+            from src.models.message import MessagePriority, MessageType
+
+            admin_ids = [
+                aid for aid, agent in app_ctx.agents.items()
+                if agent.role == AgentRole.ADMIN.value
+            ]
+            notification_content = (
+                f"Worker {agent_id} を復旧しました（新ID: {new_agent_id}）。\n"
+                f"以下のタスクの再送信が必要です: {', '.join(task_ids)}\n"
+                f"worktree_path: {worktree_path}"
+            )
+            for admin_id in admin_ids:
+                if admin_id not in ipc.get_all_agent_ids():
+                    ipc.register_agent(admin_id)
+                ipc.send_message(
+                    sender_id="system",
+                    receiver_id=admin_id,
+                    message_type=MessageType.REQUEST,
+                    content=notification_content,
+                    subject=f"Worker復旧完了: {new_agent_id}",
+                    priority=MessagePriority.HIGH,
+                    metadata={
+                        "recovery_type": "full_recovery",
+                        "old_agent_id": agent_id,
+                        "new_agent_id": new_agent_id,
+                        "reassigned_task_ids": task_ids,
+                        "worktree_path": worktree_path,
+                    },
+                )
+            logger.info("full_recovery 完了通知を Admin に送信: tasks=%s", task_ids)
+            return True
+        except Exception as e:
+            logger.warning("full_recovery 完了通知の送信に失敗: %s", e)
+            return False
+
+    async def execute_full_recovery(self, app_ctx: AppContext, agent_id: str) -> dict[str, Any]:
+        """異常な Worker の完全復旧を実行する。"""
+        agents = app_ctx.agents
+        tmux = app_ctx.tmux
+        old_agent = agents.get(agent_id)
+        if not old_agent:
+            return {
+                "success": False,
+                "error": f"エージェント {agent_id} が見つかりません",
+            }
+
+        from src.models.agent import Agent, AgentRole, AgentStatus
+        from src.models.dashboard import TaskStatus
+
+        if old_agent.role != AgentRole.WORKER.value:
+            return {
+                "success": False,
+                "error": f"Worker のみ復旧可能です（対象: {old_agent.role}）",
+            }
+
+        old_worktree_path = old_agent.worktree_path
+        old_working_dir = (
+            old_agent.working_dir
+            or old_worktree_path
+            or str(app_ctx.project_root or ".")
+        )
+        old_branch = getattr(old_agent, "branch", None)
+        old_ai_cli = old_agent.ai_cli
+        old_ai_cli_pinned = bool(getattr(old_agent, "ai_cli_pinned", False))
+        old_session_name = old_agent.session_name
+        old_window_index = old_agent.window_index
+        old_pane_index = old_agent.pane_index
+        enable_git = bool(getattr(app_ctx.settings, "enable_git", True))
+
+        dashboard = self._resolve_dashboard_manager(app_ctx)
+        reassigned_tasks: list[Any] = []
+        if dashboard:
+            tasks = dashboard.list_tasks()
+            for task in tasks:
+                if task.assigned_agent_id == agent_id and task.status not in [
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                ]:
+                    reassigned_tasks.append(task)
+
+        if not old_branch:
+            old_branch = next(
+                (task.branch for task in reassigned_tasks if getattr(task, "branch", None)),
+                None,
+            )
+
+        if enable_git and old_worktree_path and not old_branch:
+            try:
+                from src.managers.worktree_manager import WorktreeManager
+
+                branch_detector = WorktreeManager(app_ctx.project_root)
+                detected_branch = await branch_detector.get_current_branch(path=old_worktree_path)
+                if detected_branch:
+                    old_branch = detected_branch
+            except Exception as e:
+                logger.debug("復旧時のブランチ自動検出に失敗: %s", e)
+
+        logger.info("full_recovery 開始: agent=%s, tasks=%s", agent_id, len(reassigned_tasks))
+
+        def _build_recovery_failure(status: str, error: str) -> dict[str, Any]:
+            return {
+                "success": False,
+                "status": status,
+                "old_agent_id": agent_id,
+                "new_agent_id": None,
+                "new_worktree_path": None,
+                "reassigned_tasks": [t.id for t in reassigned_tasks if t.id],
+                "error": error,
+                "message": f"エージェント {agent_id} の復旧は {status} で終了しました",
+            }
+
+        if (
+            old_session_name is not None
+            and old_window_index is not None
+            and old_pane_index is not None
+        ):
+            try:
+                window_name = tmux._get_window_name(old_window_index)
+                target = f"{old_session_name}:{window_name}.{old_pane_index}"
+                await tmux._run("send-keys", "-t", target, "C-c")
+            except Exception as e:
+                logger.warning("tmux ペインへの割り込み送信に失敗: %s", e)
+
+        new_worktree_path = old_worktree_path
+        if enable_git and old_worktree_path and old_branch:
+            try:
+                result_path, error = await self._recreate_recovery_worktree(
+                    app_ctx, old_worktree_path, old_branch
+                )
+                if error:
+                    return _build_recovery_failure("failed", error)
+                new_worktree_path = result_path
+                logger.info("新しい worktree を作成: %s", new_worktree_path)
+            except Exception as e:
+                return _build_recovery_failure(
+                    "blocked",
+                    f"worktree 操作に失敗しました: {e}",
+                )
+        elif not enable_git:
+            logger.info("enable_git=false のため worktree 再作成をスキップします")
+
+        # 復旧後にランダム ID を再生成すると同一 worker が増殖して見えるため ID は維持する。
+        new_agent_id = agent_id
+        agents.pop(agent_id, None)
+        tmux_session = None
+        if (
+            old_session_name is not None
+            and old_window_index is not None
+            and old_pane_index is not None
+        ):
+            tmux_session = f"{old_session_name}:{old_window_index}.{old_pane_index}"
+        new_agent = Agent(
+            id=new_agent_id,
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session=tmux_session,
+            working_dir=old_working_dir,
+            created_at=datetime.now(),
+            last_activity=datetime.now(),
+            worktree_path=new_worktree_path,
+            ai_cli=old_ai_cli,
+            ai_cli_pinned=old_ai_cli_pinned,
+            ai_bootstrapped=False,
+            session_name=old_session_name,
+            window_index=old_window_index,
+            pane_index=old_pane_index,
+        )
+        agents[new_agent_id] = new_agent
+        self._persist_agent(app_ctx, new_agent)
+        logger.info("新しい agent を作成: %s", new_agent_id)
+
+        recovery_dir = new_worktree_path or old_working_dir
+        if (
+            old_session_name is not None
+            and old_window_index is not None
+            and old_pane_index is not None
+            and recovery_dir
+        ):
+            try:
+                window_name = tmux._get_window_name(old_window_index)
+                target = f"{old_session_name}:{window_name}.{old_pane_index}"
+                quoted_recovery_dir = shlex.quote(str(recovery_dir))
+                await tmux._run(
+                    "send-keys",
+                    "-t",
+                    target,
+                    f"cd {quoted_recovery_dir}",
+                    "Enter",
+                )
+                await tmux.set_pane_title(
+                    old_session_name, old_window_index, old_pane_index, new_agent_id
+                )
+            except Exception as e:
+                logger.warning("tmux ペインの設定に失敗: %s", e)
+
+        for task in reassigned_tasks:
+            task_id = task.id
+            if task_id and dashboard:
+                try:
+                    dashboard.assign_task(
+                        task_id=task_id,
+                        agent_id=new_agent_id,
+                        branch=task.branch,
+                        worktree_path=new_worktree_path or old_working_dir,
+                    )
+                    logger.info("タスク %s を %s に再割り当て", task_id, new_agent_id)
+                except Exception as e:
+                    logger.warning("タスク再割り当てに失敗: %s", e)
+
+        task_ids = [t.id for t in reassigned_tasks if t.id]
+        effective_worktree = new_worktree_path or old_working_dir
+        notification_sent = self._send_recovery_notification(
+            app_ctx, agent_id, new_agent_id, task_ids, effective_worktree,
+        )
+
+        recovery_status = "recovered"
+        message = (
+            f"エージェント {agent_id} を {new_agent_id} として"
+            f"復旧しました（タスク: {len(reassigned_tasks)} 件再割り当て）"
+        )
+        if task_ids:
+            recovery_status = "resume_pending"
+            message = (
+                f"エージェント {agent_id} を {new_agent_id} として復旧しましたが、"
+                f"タスク再開待ちです（再送信対象: {len(task_ids)} 件）"
+            )
+
+        return {
+            "success": True,
+            "recovery_status": recovery_status,
+            "old_agent_id": agent_id,
+            "new_agent_id": new_agent_id,
+            "new_worktree_path": new_worktree_path or old_working_dir,
+            "reassigned_tasks": [t.id for t in reassigned_tasks],
+            "resume_required": bool(task_ids),
+            "resume_confirmed": not bool(task_ids),
+            "resume_required_task_ids": task_ids,
+            "resume_notification_sent": notification_sent,
+            "message": message,
+        }
+
     async def _run_full_recovery(
-        self, app_ctx: "AppContext", agent_id: str
+        self, app_ctx: AppContext, agent_id: str
     ) -> dict[str, Any]:
         """段階復旧の 2 段目として full_recovery を実行する。"""
         try:
-            # 循環参照回避のため遅延 import（tools レイヤーの関数）
-            from src.tools.healthcheck import execute_full_recovery
-
-            result = await execute_full_recovery(app_ctx, agent_id)
+            result = await self.execute_full_recovery(app_ctx, agent_id)
             if not result.get("success"):
                 return {
                     "status": "failed",
@@ -425,8 +743,8 @@ class HealthcheckManager:
 
     async def _notify_admins_task_failed(
         self,
-        app_ctx: "AppContext",
-        dashboard: "DashboardManager | None",
+        app_ctx: AppContext,
+        dashboard: DashboardManager | None,
         agent_id: str,
         task_id: str,
         reason: str,
@@ -477,10 +795,10 @@ class HealthcheckManager:
 
     async def _finalize_failed_task(
         self,
-        app_ctx: "AppContext | None",
-        dashboard: "DashboardManager | None",
+        app_ctx: AppContext | None,
+        dashboard: DashboardManager | None,
         agent_id: str,
-        agent: "Agent",
+        agent: Agent,
         reason: str,
     ) -> dict[str, str]:
         """復旧失敗上限を超えたタスクを failed 化し、Admin に通知する。"""
@@ -523,10 +841,10 @@ class HealthcheckManager:
     def _sync_worker_active_task(
         self,
         agent_id: str,
-        agent: "Agent",
-        dashboard: "DashboardManager | None",
-        app_ctx: "AppContext | None",
-    ) -> tuple["TaskInfo | None", str | None]:
+        agent: Agent,
+        dashboard: DashboardManager | None,
+        app_ctx: AppContext | None,
+    ) -> tuple[TaskInfo | None, str | None]:
         """Dashboard からアクティブタスクを同期し、エージェント状態を補正する。
 
         Returns:
@@ -586,8 +904,8 @@ class HealthcheckManager:
     async def _diagnose_worker_issue(
         self,
         agent_id: str,
-        agent: "Agent",
-        active_task: "TaskInfo | None",
+        agent: Agent,
+        active_task: TaskInfo | None,
         now: datetime,
     ) -> tuple[str | None, bool]:
         """Worker の異常原因を診断する。
@@ -649,8 +967,8 @@ class HealthcheckManager:
 
     def _save_agent_after_recovery(
         self,
-        app_ctx: "AppContext | None",
-        agent: "Agent",
+        app_ctx: AppContext | None,
+        agent: Agent,
         label: str,
     ) -> None:
         """復旧後のエージェント保存。"""
@@ -664,7 +982,7 @@ class HealthcheckManager:
 
     def _increment_recovery_counter(
         self,
-        dashboard: "DashboardManager | None",
+        dashboard: DashboardManager | None,
         agent_id: str,
         task_id: str | None,
         recovery_reason: str,
@@ -718,8 +1036,8 @@ class HealthcheckManager:
 
     @staticmethod
     def _resolve_resume_task_content(
-        app_ctx: "AppContext",
-        task: "TaskInfo",
+        app_ctx: AppContext,
+        task: TaskInfo,
     ) -> tuple[str | None, str | None]:
         """resume_pending 時に再送する task_content を解決する。
 
@@ -767,19 +1085,17 @@ class HealthcheckManager:
 
     async def _resume_single_task(
         self,
-        app_ctx: "AppContext",
-        dashboard: "DashboardManager",
-        agent: "Agent",
+        app_ctx: AppContext,
+        dashboard: DashboardManager,
+        agent: Agent,
         task_id: str,
         session_id: str,
-        worker_no: int,
-        worker_index: int,
         enable_worktree: bool,
-        profile_settings: Any,
-        caller_agent_id: str | None,
-        send_task_fn: Any,
+        profile_settings: dict[str, Any],
     ) -> dict[str, str] | None:
         """個別タスクの再送を試みる。失敗時は dict を返し、成功時は None を返す。"""
+        from src.models.agent import AgentStatus
+
         task = dashboard.get_task(task_id)
         if task is None:
             return {"task_id": task_id, "error": "task not found"}
@@ -788,81 +1104,179 @@ class HealthcheckManager:
         if task_content is None:
             return {"task_id": task_id, "error": content_error or "task content unavailable"}
 
-        branch = (
-            str(task.branch)
-            if getattr(task, "branch", None)
-            else str(getattr(agent, "branch", "") or "")
-        )
-        if not branch:
-            branch = f"worker-{worker_no}"
-
         task_worktree = (
             str(task.worktree_path)
             if getattr(task, "worktree_path", None)
             else str(agent.worktree_path or agent.working_dir or app_ctx.project_root or ".")
         )
 
-        send_result = await send_task_fn(
-            app_ctx,
-            agent,
-            task_content,
-            task_id,
-            branch,
-            task_worktree,
-            session_id,
-            worker_index,
-            enable_worktree,
-            profile_settings,
-            caller_agent_id,
+        try:
+            project_root = (
+                Path(str(app_ctx.project_root or task_worktree or "."))
+                .expanduser()
+                .resolve()
+            )
+            agent_label = (
+                dashboard.get_agent_label(agent)
+                if hasattr(dashboard, "get_agent_label")
+                else agent.id
+            )
+            task_file = dashboard.write_task_file(
+                project_root=project_root,
+                session_id=session_id,
+                task_id=task_id,
+                agent_label=agent_label,
+                task_content=task_content,
+            )
+        except OSError as e:
+            return {"task_id": task_id, "error": f"task file write failed: {e}"}
+
+        if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
+            return {"task_id": task_id, "error": "worker pane is not configured"}
+
+        worker_model = self._resolve_worker_model_for_cli(
+            app_ctx, agent, profile_settings
         )
-        if bool(send_result.get("task_sent")):
+        agent_cli_name = self._resolve_agent_cli_name(app_ctx, agent)
+        thinking_tokens = int(profile_settings.get("worker_thinking_tokens", 4000))
+        reasoning_effort = str(profile_settings.get("worker_reasoning_effort", "none"))
+        role_template_path = get_role_template_path_for_workspace(
+            "worker",
+            workspace_root=task_worktree if enable_worktree else project_root,
+            enable_git=bool(app_ctx.settings.enable_git),
+        )
+        bootstrap_command = app_ctx.ai_cli.build_stdin_command(
+            cli=agent_cli_name,
+            task_file_path=str(task_file),
+            worktree_path=task_worktree if enable_worktree else None,
+            project_root=str(project_root),
+            model=worker_model,
+            role="worker",
+            role_template_path=str(role_template_path),
+            thinking_tokens=thinking_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+        task_sent = await app_ctx.tmux.send_with_rate_limit_to_pane(
+            agent.session_name,
+            agent.window_index,
+            agent.pane_index,
+            bootstrap_command,
+            clear_input=False,
+            confirm_codex_prompt=agent_cli_name == "codex",
+        )
+        if bool(task_sent):
+            agent.status = AgentStatus.BUSY
+            agent.last_activity = datetime.now()
+            agent.ai_bootstrapped = True
+            try:
+                self._persist_agent(app_ctx, agent)
+            except (OSError, json.JSONDecodeError, ValueError) as e:
+                logger.debug("resume task のエージェント保存に失敗: %s", e)
             return None
 
         return {
             "task_id": task_id,
-            "error": str(send_result.get("dispatch_error") or "dispatch failed"),
+            "error": "dispatch failed",
         }
 
     @staticmethod
-    def _resolve_worker_dispatch_params(
-        app_ctx: "AppContext",
-        agent: "Agent",
-        resolve_worker_number_from_slot: Any,
-        get_current_profile_settings: Any,
-    ) -> tuple[int, int, Any, bool, str | None]:
-        """Worker番号・プロファイル設定・Admin IDを解決する。
+    def _resolve_worker_number_from_slot(
+        app_settings: Any,
+        window_index: int,
+        pane_index: int,
+    ) -> int:
+        """tmux slot から Worker 番号を算出する。"""
+        if window_index == 0:
+            return pane_index
+        workers_per_extra = int(getattr(app_settings, "workers_per_extra_window", 10))
+        return 6 + ((window_index - 1) * workers_per_extra) + pane_index + 1
 
-        Returns:
-            (worker_no, worker_index, profile_settings, enable_worktree, caller_agent_id)
-        """
+    @staticmethod
+    def _get_current_profile_settings(app_ctx: AppContext) -> dict[str, Any]:
+        """現在アクティブなプロファイル設定を取得する。"""
+        from src.config.settings import ModelProfile
+
+        settings = app_ctx.settings
+        if settings.model_profile_active == ModelProfile.STANDARD:
+            return {
+                "profile": ModelProfile.STANDARD.value,
+                "worker_model": settings.model_profile_standard_worker_model,
+                "worker_thinking_tokens": settings.model_profile_standard_worker_thinking_tokens,
+                "worker_reasoning_effort": (
+                    settings.model_profile_standard_worker_reasoning_effort.value
+                ),
+            }
+        return {
+            "profile": ModelProfile.PERFORMANCE.value,
+            "worker_model": settings.model_profile_performance_worker_model,
+            "worker_thinking_tokens": settings.model_profile_performance_worker_thinking_tokens,
+            "worker_reasoning_effort": (
+                settings.model_profile_performance_worker_reasoning_effort.value
+            ),
+        }
+
+    @staticmethod
+    def _resolve_agent_cli_name(app_ctx: AppContext, agent: Agent) -> str:
+        """Agent の CLI 名を文字列で返す。"""
         from src.models.agent import AgentRole
 
-        profile_settings = get_current_profile_settings(app_ctx)
+        if agent.role == AgentRole.WORKER.value:
+            if getattr(agent, "ai_cli_pinned", False) and agent.ai_cli:
+                return normalize_cli_name(agent.ai_cli)
+            if agent.window_index is not None and agent.pane_index is not None:
+                try:
+                    worker_no = HealthcheckManager._resolve_worker_number_from_slot(
+                        app_ctx.settings, agent.window_index, agent.pane_index
+                    )
+                    return app_ctx.settings.get_worker_cli(worker_no).value
+                except (ValueError, TypeError) as e:
+                    logger.debug("Worker CLI の再解決に失敗したため agent.ai_cli を使用: %s", e)
+
+        if agent.ai_cli:
+            return normalize_cli_name(agent.ai_cli)
+        return normalize_cli_name(app_ctx.ai_cli.get_default_cli())
+
+    @staticmethod
+    def _resolve_worker_model_for_cli(
+        app_ctx: AppContext,
+        agent: Agent,
+        profile_settings: dict[str, Any],
+    ) -> str | None:
+        """Worker の実行 CLI に整合するモデル名を解決する。"""
+        if agent.window_index is None or agent.pane_index is None:
+            return None
+        worker_no = HealthcheckManager._resolve_worker_number_from_slot(
+            app_ctx.settings, agent.window_index, agent.pane_index
+        )
+        profile_worker_model = str(profile_settings.get("worker_model", "") or "")
+        configured_model = app_ctx.settings.get_worker_model(worker_no, profile_worker_model)
+        cli_name = HealthcheckManager._resolve_agent_cli_name(app_ctx, agent)
+        return resolve_model_for_cli(
+            cli_name,
+            configured_model,
+            role="worker",
+            cli_defaults=app_ctx.settings.get_cli_default_models(),
+        )
+
+    @staticmethod
+    def _resolve_worker_dispatch_params(
+        app_ctx: AppContext,
+        agent: Agent,
+    ) -> tuple[dict[str, Any], bool]:
+        """プロファイル設定・worktree フラグを解決する。
+
+        Returns:
+            (profile_settings, enable_worktree)
+        """
+        profile_settings = HealthcheckManager._get_current_profile_settings(app_ctx)
         enable_worktree = bool(app_ctx.settings.is_worktree_enabled())
-
-        worker_no = 1
-        if agent.window_index is not None and agent.pane_index is not None:
-            try:
-                worker_no = resolve_worker_number_from_slot(
-                    app_ctx.settings, agent.window_index, agent.pane_index
-                )
-            except (ValueError, TypeError):
-                worker_no = 1
-        worker_index = max(worker_no - 1, 0)
-
-        admin_ids = [
-            aid
-            for aid, a in app_ctx.agents.items()
-            if a.role == AgentRole.ADMIN.value
-        ]
-        caller_agent_id = admin_ids[0] if admin_ids else None
-
-        return worker_no, worker_index, profile_settings, enable_worktree, caller_agent_id
+        _ = agent  # 将来の per-worker 分岐拡張のため引数は維持する
+        return profile_settings, enable_worktree
 
     async def _auto_resume_tasks_after_recovery(
         self,
-        app_ctx: "AppContext | None",
-        dashboard: "DashboardManager | None",
+        app_ctx: AppContext | None,
+        dashboard: DashboardManager | None,
         agent_id: str,
         resume_task_ids: list[str],
     ) -> dict[str, Any]:
@@ -878,24 +1292,19 @@ class HealthcheckManager:
 
         agent = app_ctx.agents.get(agent_id)
         if agent is None:
-            return {"success": False, "error": f"agent not found: {agent_id}", "resumed": [], "failed": []}
+            return {
+                "success": False,
+                "error": f"agent not found: {agent_id}",
+                "resumed": [],
+                "failed": [],
+            }
 
         if dashboard is None:
             return {"success": False, "error": "dashboard is None", "resumed": [], "failed": []}
 
-        try:
-            # 循環参照回避のため遅延 import（tools レイヤーの関数）
-            from src.tools.agent_helpers import (
-                _send_task_to_worker,
-                resolve_worker_number_from_slot,
-            )
-            from src.tools.model_profile import get_current_profile_settings
-        except ImportError as e:
-            return {"success": False, "error": str(e), "resumed": [], "failed": []}
-
-        worker_no, worker_index, profile_settings, enable_worktree, caller_agent_id = (
+        profile_settings, enable_worktree = (
             self._resolve_worker_dispatch_params(
-                app_ctx, agent, resolve_worker_number_from_slot, get_current_profile_settings
+                app_ctx, agent
             )
         )
 
@@ -904,8 +1313,8 @@ class HealthcheckManager:
         for task_id in resume_task_ids:
             error = await self._resume_single_task(
                 app_ctx, dashboard, agent, task_id, session_id,
-                worker_no, worker_index, enable_worktree,
-                profile_settings, caller_agent_id, _send_task_to_worker,
+                enable_worktree,
+                profile_settings,
             )
             if error is None:
                 resumed.append(task_id)
@@ -916,8 +1325,8 @@ class HealthcheckManager:
 
     async def _handle_resume_pending(
         self,
-        app_ctx: "AppContext | None",
-        dashboard: "DashboardManager | None",
+        app_ctx: AppContext | None,
+        dashboard: DashboardManager | None,
         agent_id: str,
         recovery_reason: str,
         full_result: dict[str, Any],
@@ -968,10 +1377,10 @@ class HealthcheckManager:
 
     async def _handle_recovery_escalation(
         self,
-        app_ctx: "AppContext | None",
-        dashboard: "DashboardManager | None",
+        app_ctx: AppContext | None,
+        dashboard: DashboardManager | None,
         agent_id: str,
-        agent: "Agent",
+        agent: Agent,
         recovery_reason: str,
         message: str,
         full_status: str,
@@ -1006,10 +1415,10 @@ class HealthcheckManager:
 
     async def _attempt_staged_recovery(
         self,
-        app_ctx: "AppContext | None",
-        dashboard: "DashboardManager | None",
+        app_ctx: AppContext | None,
+        dashboard: DashboardManager | None,
         agent_id: str,
-        agent: "Agent",
+        agent: Agent,
         recovery_reason: str,
         force_recovery: bool,
         task_key: str,
@@ -1073,9 +1482,9 @@ class HealthcheckManager:
 
     def _collect_workers_to_diagnose(
         self,
-        app_ctx: "AppContext | None",
-        dashboard: "DashboardManager | None",
-    ) -> tuple[list[tuple[str, "Agent", "TaskInfo | None", str | None, str]], list[str]]:
+        app_ctx: AppContext | None,
+        dashboard: DashboardManager | None,
+    ) -> tuple[list[tuple[str, Agent, TaskInfo | None, str | None, str]], list[str]]:
         """フェーズ1: 診断対象の Worker を収集する。
 
         Returns:
@@ -1083,9 +1492,7 @@ class HealthcheckManager:
         """
         from src.models.agent import AgentRole, AgentStatus
 
-        workers_to_diagnose: list[
-            tuple[str, "Agent", "TaskInfo | None", str | None, str]
-        ] = []
+        workers_to_diagnose: list[tuple[str, Agent, TaskInfo | None, str | None, str]] = []
         skipped: list[str] = []
 
         for agent_id, agent in list(self.agents.items()):
@@ -1127,9 +1534,9 @@ class HealthcheckManager:
 
     async def _process_recovery_results(
         self,
-        app_ctx: "AppContext | None",
-        dashboard: "DashboardManager | None",
-        workers_to_diagnose: list[tuple[str, "Agent", "TaskInfo | None", str | None, str]],
+        app_ctx: AppContext | None,
+        dashboard: DashboardManager | None,
+        workers_to_diagnose: list[tuple[str, Agent, TaskInfo | None, str | None, str]],
         diagnose_results: list[Any],
     ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
         """フェーズ3: 診断結果に基づき復旧を逐次実行する。
@@ -1143,7 +1550,7 @@ class HealthcheckManager:
 
         for (
             agent_id, agent, _active_task, _active_task_id, current_key
-        ), diag_result in zip(workers_to_diagnose, diagnose_results):
+        ), diag_result in zip(workers_to_diagnose, diagnose_results, strict=False):
             if isinstance(diag_result, Exception):
                 logger.debug("Worker 診断に失敗: agent=%s error=%s", agent_id, diag_result)
                 continue
@@ -1177,7 +1584,7 @@ class HealthcheckManager:
         return recovered, escalated, failed_tasks
 
     async def monitor_and_recover_workers(
-        self, app_ctx: "AppContext | None" = None
+        self, app_ctx: AppContext | None = None
     ) -> dict[str, Any]:
         """Worker の健全性を監視し、必要なら段階復旧する。"""
         import asyncio
@@ -1186,9 +1593,7 @@ class HealthcheckManager:
         self.last_monitor_at = now
         self._prune_state()
 
-        dashboard: DashboardManager | None = (
-            app_ctx.dashboard_manager if app_ctx is not None else None
-        )
+        dashboard: DashboardManager | None = self._resolve_dashboard_manager(app_ctx)
 
         # フェーズ1: 診断対象の Worker を収集（同期処理）
         workers_to_diagnose, skipped = self._collect_workers_to_diagnose(app_ctx, dashboard)

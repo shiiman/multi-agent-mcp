@@ -211,7 +211,7 @@ class TestGetRoleGuide:
         )
 
         assert result["success"] is False
-        assert "見つかりません" in result["error"]
+        assert "無効なロール" in result["error"]
 
 
 class TestListRoleGuides:

@@ -1,5 +1,7 @@
 """WorktreeManagerのテスト。"""
 
+import asyncio
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -46,6 +48,80 @@ class TestWorktreeManager:
         branch = await worktree_manager.get_current_branch()
         # 初期状態では master または main
         assert branch in ["master", "main"]
+
+    @pytest.mark.asyncio
+    async def test_run_command_timeout_kills_process_and_returns_structured_error(
+        self, worktree_manager, monkeypatch
+    ):
+        """_run_command は timeout 時に kill を実行し構造化エラーを返す。"""
+
+        class _FakeProc:
+            def __init__(self) -> None:
+                self.returncode = None
+                self.kill_called = False
+
+            async def communicate(self):
+                return b"", b""
+
+            async def wait(self):
+                self.returncode = -9
+                return -9
+
+            def kill(self) -> None:
+                self.kill_called = True
+                self.returncode = -9
+
+            def terminate(self) -> None:
+                self.returncode = -15
+
+        fake_proc = _FakeProc()
+
+        async def _fake_wait_for(awaitable, timeout):
+            _fake_wait_for.calls += 1
+            if _fake_wait_for.calls == 1:
+                awaitable.close()
+                raise asyncio.TimeoutError
+            return await awaitable
+
+        _fake_wait_for.calls = 0
+
+        async def _fake_create_subprocess_exec(*args, **kwargs):
+            return fake_proc
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+        monkeypatch.setattr(asyncio, "wait_for", _fake_wait_for)
+
+        code, stdout, stderr = await worktree_manager._run_command("git", "status")
+
+        assert code == 124
+        assert stdout == ""
+        assert fake_proc.kill_called is True
+        assert worktree_manager.last_subprocess_error is not None
+        assert worktree_manager.last_subprocess_error["kind"] == "timeout"
+        payload = json.loads(stderr)
+        assert payload["kind"] == "timeout"
+        # SEC-001: command はエラーレスポンスに含めない
+        assert "command" not in payload
+        assert payload["cwd"] == worktree_manager.repo_path
+
+    @pytest.mark.asyncio
+    async def test_run_command_not_found_returns_structured_error(
+        self, worktree_manager, monkeypatch
+    ):
+        """_run_command は not found を構造化エラーで返す。"""
+
+        async def _fake_create_subprocess_exec(*args, **kwargs):
+            raise FileNotFoundError
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+
+        code, _, stderr = await worktree_manager._run_command("missing-cmd", "--version")
+
+        assert code == 1
+        payload = json.loads(stderr)
+        assert payload["kind"] == "not_found"
+        # SEC-001: command はエラーレスポンスに含めない
+        assert "command" not in payload
 
 
 class TestWorktreeManagerCreateWorktree:

@@ -47,7 +47,11 @@ def ensure_project_root_from_caller(app_ctx: AppContext, caller_agent_id: str | 
                 refresh_app_settings(app_ctx, candidate)
             except (ValueError, OSError) as e:
                 logger.warning("project settings の再読み込みをスキップ: %s", e)
-            logger.debug("caller_agent_id %s から project_root を設定: %s", caller_agent_id, candidate)
+            logger.debug(
+                "caller_agent_id %s から project_root を設定: %s",
+                caller_agent_id,
+                candidate,
+            )
             return True
 
         # レジストリの値が現在の app_ctx と異なる場合は再同期する
@@ -278,6 +282,71 @@ def get_app_ctx(ctx: Any) -> AppContext:
     return ctx.request_context.lifespan_context
 
 
+_AUTHENTICATED_AGENT_ID_KEYS = (
+    "authenticated_agent_id",
+    "authenticatedAgentId",
+)
+
+
+def _extract_text_value(container: Any, key: str) -> str | None:
+    """dict/オブジェクトから文字列フィールドを安全に抽出する。"""
+    value: Any = None
+    if isinstance(container, dict):
+        value = container.get(key)
+    else:
+        value = getattr(container, key, None)
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return None
+
+
+def get_authenticated_agent_id(ctx: Any) -> str | None:
+    """MCP Context から認証済み主体の agent_id を取得する。
+
+    Notes:
+        RequestContext.meta は Pydantic Model / dict のどちらでも来るため、
+        両形式を許容して抽出する。
+    """
+    request_context = getattr(ctx, "request_context", None)
+    if request_context is None:
+        return None
+
+    meta = getattr(request_context, "meta", None)
+    if meta is None:
+        return None
+
+    for key in _AUTHENTICATED_AGENT_ID_KEYS:
+        candidate = _extract_text_value(meta, key)
+        if candidate:
+            return candidate
+    return None
+
+
+def resolve_effective_caller_agent_id(
+    ctx: Any,
+    caller_agent_id: str | None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """caller_agent_id と認証済み主体から実効 caller を決定する。"""
+    authenticated_agent_id = get_authenticated_agent_id(ctx)
+    if authenticated_agent_id is None:
+        return caller_agent_id, None
+
+    if caller_agent_id is not None and caller_agent_id != authenticated_agent_id:
+        logger.warning(
+            "caller/auth mismatch: caller_agent_id=%s authenticated_agent_id=%s",
+            caller_agent_id,
+            authenticated_agent_id,
+        )
+        return None, {
+            "success": False,
+            "error_code": "CALLER_AUTH_MISMATCH",
+            "error": "caller_agent_id と認証済み主体が一致しないため拒否しました。",
+        }
+    return authenticated_agent_id, None
+
+
 def require_permission(
     ctx: Any,
     tool_name: str,
@@ -289,13 +358,18 @@ def require_permission(
     Returns:
         (app_ctx, error_or_none) のタプル。error が None なら許可。
     """
-    # NOTE: 権限チェックは caller_agent_id パラメータ（呼び出し元の自己申告値）に依存する。
-    # MCP プロトコルの認証機構が整備された際は、信頼アンカーの更新を検討すること。
     app_ctx = get_app_ctx(ctx)
+    effective_caller_agent_id, caller_error = resolve_effective_caller_agent_id(
+        ctx=ctx,
+        caller_agent_id=caller_agent_id,
+    )
+    if caller_error:
+        return app_ctx, caller_error
+
     error = check_tool_permission(
         app_ctx,
         tool_name,
-        caller_agent_id,
+        effective_caller_agent_id,
         target_agent_id=target_agent_id,
     )
     return app_ctx, error

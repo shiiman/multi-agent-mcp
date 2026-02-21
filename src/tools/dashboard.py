@@ -550,31 +550,38 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"Admin への進捗通知に失敗しました: {e}",
             }
 
-        # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
+        # 🔴 Admin に tmux 通知を送信（IPC 通知駆動）
+        # 通知失敗は「部分失敗」として扱い、主処理（IPC 保存成功）は成功を維持する。
+        notification_error: str | None = None
+        warning: str | None = None
+        delivery_state = "delivered"
         if admin_notified and admin_ids:
             sync_agents_from_file(app_ctx)
             admin_agent = app_ctx.agents.get(admin_ids[0])
             if admin_agent is None:
-                return {
-                    "success": False,
-                    "error": f"Admin エージェント {admin_ids[0]} が見つかりません",
-                    "task_id": task_id,
-                    "progress": actual_progress,
-                    "admin_notified": admin_notified,
-                    "notification_sent": False,
-                }
-            notification_sent = await notify_agent_via_tmux(
-                app_ctx, admin_agent, "task_progress", caller_agent_id
-            )
-            if not notification_sent:
-                return {
-                    "success": False,
-                    "error": "Admin への tmux 通知に失敗しました",
-                    "task_id": task_id,
-                    "progress": actual_progress,
-                    "admin_notified": admin_notified,
-                    "notification_sent": False,
-                }
+                notification_error = f"admin_agent_not_found:{admin_ids[0]}"
+                warning = "Admin エージェントが見つからないため tmux 通知をスキップしました"
+                delivery_state = "queued_unnotified"
+                logger.warning(
+                    "進捗通知をスキップ: task=%s reporter=%s reason=%s",
+                    task_id,
+                    caller_agent_id,
+                    notification_error,
+                )
+            else:
+                notification_sent = await notify_agent_via_tmux(
+                    app_ctx, admin_agent, "task_progress", caller_agent_id
+                )
+                if not notification_sent:
+                    notification_error = "tmux_notification_failed"
+                    warning = "Admin への tmux 通知に失敗しましたが、進捗報告は保存済みです"
+                    delivery_state = "queued_unnotified"
+                    logger.warning(
+                        "進捗通知の部分失敗: task=%s reporter=%s admin=%s",
+                        task_id,
+                        caller_agent_id,
+                        admin_ids[0],
+                    )
 
         return {
             "success": True,
@@ -582,6 +589,9 @@ def register_tools(mcp: FastMCP) -> None:
             "progress": actual_progress,
             "admin_notified": admin_notified,
             "notification_sent": notification_sent,
+            "delivery_state": delivery_state,
+            "warning": warning,
+            "notification_error": notification_error,
             "cost_snapshot": worker_cost_snapshot,
             "message": f"進捗 {actual_progress}% を報告しました",
         }
@@ -690,23 +700,39 @@ def register_tools(mcp: FastMCP) -> None:
             },
         )
 
-        # 🔴 Admin に tmux 通知を送信（IPC 通知駆動のため必須）
+        # 🔴 Admin に tmux 通知を送信（IPC 通知駆動）
+        # 通知失敗は部分失敗として返し、後続処理（worker状態更新/メモリ保存）は継続する。
+        notification_sent = False
+        notification_error: str | None = None
+        warning: str | None = None
+        delivery_state = "delivered"
         sync_agents_from_file(app_ctx)
         admin_agent = app_ctx.agents.get(admin_id)
-        notification_sent = await notify_agent_via_tmux(
-            app_ctx, admin_agent, msg_type.value, caller_agent_id
-        )
-        if not notification_sent:
-            return {
-                "success": False,
-                "error": "Admin への tmux 通知に失敗しました",
-                "task_id": task_id,
-                "normalized_task_id": normalized_task_id,
-                "message_id": completion_message.id,
-                "reported_status": status,
-                "notification_sent": False,
-                "cost_snapshot": worker_cost_snapshot,
-            }
+        if admin_agent is None:
+            notification_error = f"admin_agent_not_found:{admin_id}"
+            warning = "Admin エージェントが見つからないため tmux 通知をスキップしました"
+            delivery_state = "queued_unnotified"
+            logger.warning(
+                "完了通知をスキップ: task=%s reporter=%s reason=%s",
+                task_id,
+                caller_agent_id,
+                notification_error,
+            )
+        else:
+            notification_sent = await notify_agent_via_tmux(
+                app_ctx, admin_agent, msg_type.value, caller_agent_id
+            )
+            if not notification_sent:
+                notification_error = "tmux_notification_failed"
+                warning = "Admin への tmux 通知に失敗しましたが、完了報告は保存済みです"
+                delivery_state = "queued_unnotified"
+                logger.warning(
+                    "完了通知の部分失敗: task=%s reporter=%s admin=%s status=%s",
+                    task_id,
+                    caller_agent_id,
+                    admin_id,
+                    status,
+                )
 
         # 🔴 Worker 自身を IDLE にリセット
         if caller_agent_id:
@@ -741,6 +767,9 @@ def register_tools(mcp: FastMCP) -> None:
             "reported_status": status,
             "memory_saved": memory_saved,
             "notification_sent": notification_sent,
+            "delivery_state": delivery_state,
+            "warning": warning,
+            "notification_error": notification_error,
             "cost_snapshot": worker_cost_snapshot,
         }
 

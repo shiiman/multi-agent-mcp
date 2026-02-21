@@ -1,6 +1,7 @@
 """セッション管理ツール実装。"""
 
 import logging
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +29,20 @@ from src.tools.session_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
+def _validate_session_id(session_id: str | None) -> str | None:
+    """session_id の安全性を検証する。"""
+    if session_id is None:
+        return None
+    if not _SESSION_ID_PATTERN.fullmatch(session_id):
+        logger.warning("不正な session_id を拒否しました")
+        raise ValueError(
+            "session_id には英数字・ハイフン・アンダースコアのみ使用できます。"
+        )
+    return session_id
 
 
 def _apply_sortable_session_prefix(session_id: str | None) -> tuple[str | None, dict[str, Any]]:
@@ -285,6 +300,14 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
+        try:
+            normalized_session_id = _validate_session_id(session_id)
+        except ValueError as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
         tmux = app_ctx.tmux
         working_dir_path = str(Path(working_dir).expanduser())
         try:
@@ -383,18 +406,18 @@ def register_tools(mcp: FastMCP) -> None:
         migration_result = {
             "executed": False,
             "source_session_id": app_ctx.session_id,
-            "target_session_id": session_id,
+            "target_session_id": normalized_session_id,
             "source_removed": False,
         }
-        resolved_session_id = session_id
+        resolved_session_id = normalized_session_id
         session_id_resolution = {
-            "requested_session_id": session_id,
-            "resolved_session_id": session_id,
+            "requested_session_id": normalized_session_id,
+            "resolved_session_id": normalized_session_id,
             "collision_avoided": False,
         }
         session_id_prefix = {
-            "requested_session_id": session_id,
-            "prefixed_session_id": session_id,
+            "requested_session_id": normalized_session_id,
+            "prefixed_session_id": normalized_session_id,
             "prefix_applied": False,
         }
         provisional_cleanup_result = {
@@ -402,19 +425,28 @@ def register_tools(mcp: FastMCP) -> None:
             "removed_dirs": [],
             "errors": [],
         }
-        if session_id:
-            prefixed_session_id, session_id_prefix = _apply_sortable_session_prefix(session_id)
+        if normalized_session_id:
+            prefixed_session_id, session_id_prefix = _apply_sortable_session_prefix(
+                normalized_session_id
+            )
             if (
                 session_id_prefix.get("prefix_applied")
                 and prefixed_session_id
-                and prefixed_session_id != session_id
+                and prefixed_session_id != normalized_session_id
             ):
                 logger.info(
                     "session_id に時系列プレフィックスを付与します: %s -> %s",
-                    session_id,
+                    normalized_session_id,
                     prefixed_session_id,
                 )
             resolved_session_id = prefixed_session_id
+            try:
+                _validate_session_id(resolved_session_id)
+            except ValueError as e:
+                return {
+                    "success": False,
+                    "error": str(e),
+                }
             session_id_resolution["resolved_session_id"] = resolved_session_id
             migration_result = _migrate_provisional_session_dir(
                 project_root=resolved_project_root,
@@ -544,7 +576,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "success": True,
                     "session_name": session_name,
                     "session_id": resolved_session_id,
-                    "requested_session_id": session_id,
+                    "requested_session_id": normalized_session_id,
                     "session_id_resolution": session_id_resolution,
                     "session_id_prefix": session_id_prefix,
                     "gtr_status": gtr_status,
@@ -560,7 +592,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": False,
                     "session_id": resolved_session_id,
-                    "requested_session_id": session_id,
+                    "requested_session_id": normalized_session_id,
                     "session_id_resolution": session_id_resolution,
                     "session_id_prefix": session_id_prefix,
                     "gtr_status": gtr_status,
@@ -580,7 +612,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "success": True,
                     "session_name": session_name,
                     "session_id": resolved_session_id,
-                    "requested_session_id": session_id,
+                    "requested_session_id": normalized_session_id,
                     "session_id_resolution": session_id_resolution,
                     "session_id_prefix": session_id_prefix,
                     "gtr_status": gtr_status,
@@ -596,7 +628,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": False,
                     "session_id": resolved_session_id,
-                    "requested_session_id": session_id,
+                    "requested_session_id": normalized_session_id,
                     "session_id_resolution": session_id_resolution,
                     "session_id_prefix": session_id_prefix,
                     "gtr_status": gtr_status,

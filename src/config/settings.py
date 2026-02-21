@@ -4,7 +4,7 @@ import json
 import os
 from enum import Enum
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
@@ -75,14 +75,14 @@ class TerminalApp(str, Enum):
 class ModelProfile(str, Enum):
     """モデルプロファイル。
 
-    タスクの重要度に応じてモデルやリソースを切り替える。
+    タスクの重要度に応じて、Codex 系モデルのリソース配分を切り替える。
     """
 
     STANDARD = "standard"
-    """標準プロファイル - コスト重視、Sonnet"""
+    """標準プロファイル - Codex/GPT-5.3 を前提にコスト重視で運用。"""
 
     PERFORMANCE = "performance"
-    """高性能プロファイル - 性能重視、Opus"""
+    """高性能プロファイル - Codex/GPT-5.3 を前提に高スループットで運用。"""
 
 
 class ReasoningEffort(str, Enum):
@@ -188,6 +188,19 @@ def resolve_model_for_cli(
         return defaults.get(role, model)
 
     return model
+
+
+def normalize_cli_name(cli: Any) -> str:
+    """CLI 名を正規化して返す。
+
+    Enum の value を展開し、``aicli.`` プレフィックスを除去して小文字化する。
+    """
+    if hasattr(cli, "value"):
+        cli = str(cli.value)
+    raw = str(cli or "").strip().lower()
+    if raw.startswith("aicli."):
+        raw = raw.split(".", 1)[1]
+    return raw
 
 
 # AI CLI のデフォルトコマンドマッピング

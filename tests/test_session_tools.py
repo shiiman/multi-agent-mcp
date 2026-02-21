@@ -13,6 +13,7 @@ from src.tools.session_state import (
 from src.tools.session_tools import (
     _apply_sortable_session_prefix,
     _migrate_provisional_session_dir,
+    _validate_session_id,
 )
 
 # cleanup_session_resources 内で resolve_main_repo_root が呼ばれるのをモック
@@ -295,3 +296,12 @@ class TestSessionPrefixing:
 
         assert prefixed == session_id
         assert meta["prefix_applied"] is False
+
+    def test_validate_session_id_allows_safe_chars(self):
+        """安全文字のみの session_id は許可される。"""
+        assert _validate_session_id("task_alpha-001") == "task_alpha-001"
+
+    def test_validate_session_id_rejects_path_separator(self):
+        """パス区切りを含む session_id は拒否される。"""
+        with pytest.raises(ValueError, match="英数字・ハイフン・アンダースコア"):
+            _validate_session_id("../task-001")

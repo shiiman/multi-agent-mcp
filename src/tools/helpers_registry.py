@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from src.config.constants import PRIVATE_FILE_MODE
 from src.config.settings import get_mcp_dir
 from src.tools.helpers_git import resolve_main_repo_root
 
@@ -65,6 +66,7 @@ def save_agent_to_registry(
     fd, tmp_path = tempfile.mkstemp(dir=str(registry_dir), suffix=".tmp")
     try:
         with open(lock_file_path, "a+", encoding="utf-8") as lock_fh:
+            os.chmod(lock_file_path, PRIVATE_FILE_MODE)
             try:
                 import fcntl
 
@@ -75,7 +77,10 @@ def save_agent_to_registry(
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
+            os.chmod(tmp_path, PRIVATE_FILE_MODE)
             os.replace(tmp_path, str(agent_file))
+            # 防御的再設定: umask やファイルシステム差異で権限が変わる場合に備える
+            os.chmod(agent_file, PRIVATE_FILE_MODE)
     except BaseException:
         # 書き込み失敗時は一時ファイルを削除
         try:

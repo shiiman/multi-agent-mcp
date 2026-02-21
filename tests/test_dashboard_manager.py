@@ -86,6 +86,13 @@ class TestDashboardManager:
         assert task.title == "Test Task"
         assert task.status == TaskStatus.PENDING
 
+    def test_dashboard_file_permissions_are_private(self, dashboard_manager):
+        """dashboard.md が 0600 権限で保存されることをテスト。"""
+        dashboard_manager.create_task(title="Permission Check")
+        dashboard_path = dashboard_manager.dashboard_dir / "dashboard.md"
+        assert dashboard_path.exists()
+        assert (dashboard_path.stat().st_mode & 0o777) == 0o600
+
     def test_update_task_status(self, dashboard_manager):
         """タスクステータス更新をテスト。"""
         task = dashboard_manager.create_task(title="Test Task")
@@ -242,9 +249,7 @@ class TestDashboardManager:
         task = dashboard_manager.create_task(title="Terminal Task")
         dashboard_manager.update_task_status(task.id, TaskStatus.COMPLETED)
 
-        success, message = dashboard_manager.update_task_status(
-            task.id, TaskStatus.IN_PROGRESS
-        )
+        success, message = dashboard_manager.update_task_status(task.id, TaskStatus.IN_PROGRESS)
         assert success is False
         assert "reopen_task" in message
 
@@ -427,9 +432,7 @@ class TestTaskFileManagement:
 class TestDashboardMarkdownSync:
     """Markdown 同期処理の追加テスト。"""
 
-    def test_dashboard_lock_fails_fast_in_event_loop_context(
-        self, dashboard_manager, monkeypatch
-    ):
+    def test_dashboard_lock_fails_fast_in_event_loop_context(self, dashboard_manager, monkeypatch):
         """event loop 実行中は lock 待機を行わず即座に timeout することをテスト。"""
         sleep_calls: list[float] = []
 
@@ -558,6 +561,194 @@ class TestDashboardMarkdownSync:
         repaired = dashboard_manager.get_task(task.id)
         assert repaired is not None
         assert repaired.started_at is not None
+
+    def test_save_markdown_dashboard_ipc_sync_uses_delta_after_initial_snapshot(
+        self, dashboard_manager, monkeypatch
+    ):
+        """2回目以降は IPC メッセージ差分のみを反映することをテスト。"""
+        session_dir = dashboard_manager.dashboard_dir.parent
+        ipc_dir = session_dir / "ipc" / "admin-001"
+        ipc_dir.mkdir(parents=True, exist_ok=True)
+
+        def _write_message(filename: str, body: str) -> None:
+            (ipc_dir / filename).write_text(
+                (
+                    "---\n"
+                    "id: test-msg-id\n"
+                    "sender_id: worker-001\n"
+                    "receiver_id: admin-001\n"
+                    "message_type: request\n"
+                    "priority: high\n"
+                    "subject: 差分同期\n"
+                    f"created_at: '{filename[:4]}-{filename[4:6]}-{filename[6:8]}T"
+                    f"{filename[9:11]}:{filename[11:13]}:{filename[13:15]}'\n"
+                    "read_at: null\n"
+                    "---\n\n"
+                    f"{body}\n"
+                ),
+                encoding="utf-8",
+            )
+
+        _write_message("20260206_170000_000000_a.md", "message-1")
+        _write_message("20260206_170001_000000_b.md", "message-2")
+
+        project_root = session_dir / "project"
+        project_root.mkdir(exist_ok=True)
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+
+        parse_calls = {"count": 0}
+        original_parse = dashboard_manager._parse_ipc_message
+
+        def _counted_parse(file_path):
+            parse_calls["count"] += 1
+            return original_parse(file_path)
+
+        monkeypatch.setattr(dashboard_manager, "_parse_ipc_message", _counted_parse)
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+        assert parse_calls["count"] == 0
+
+        _write_message("20260206_170002_000000_c.md", "message-3")
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+        assert parse_calls["count"] == 1
+
+        messages_content = (dashboard_manager.dashboard_dir / "messages.md").read_text(
+            encoding="utf-8"
+        )
+        assert "message-1" in messages_content
+        assert "message-2" in messages_content
+        assert "message-3" in messages_content
+
+    def test_save_markdown_dashboard_ipc_sync_recovers_from_corrupted_checkpoint(
+        self, dashboard_manager, monkeypatch
+    ):
+        """チェックポイント破損時に全件再収集へフォールバックすることをテスト。"""
+        session_dir = dashboard_manager.dashboard_dir.parent
+        ipc_dir = session_dir / "ipc" / "admin-001"
+        ipc_dir.mkdir(parents=True, exist_ok=True)
+
+        msg_1 = ipc_dir / "20260206_170000_000000_a.md"
+        msg_1.write_text(
+            (
+                "---\n"
+                "id: msg-1\n"
+                "sender_id: worker-001\n"
+                "receiver_id: admin-001\n"
+                "message_type: request\n"
+                "subject: first\n"
+                "created_at: '2026-02-06T17:00:00'\n"
+                "---\n\n"
+                "first\n"
+            ),
+            encoding="utf-8",
+        )
+        msg_2 = ipc_dir / "20260206_170001_000000_b.md"
+        msg_2.write_text(
+            (
+                "---\n"
+                "id: msg-2\n"
+                "sender_id: worker-001\n"
+                "receiver_id: admin-001\n"
+                "message_type: request\n"
+                "subject: second\n"
+                "created_at: '2026-02-06T17:00:01'\n"
+                "---\n\n"
+                "second\n"
+            ),
+            encoding="utf-8",
+        )
+
+        project_root = session_dir / "project"
+        project_root.mkdir(exist_ok=True)
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+
+        checkpoint_path = dashboard_manager.dashboard_dir / "ipc_sync_state.json"
+        checkpoint_path.write_text("{broken-json", encoding="utf-8")
+        dashboard_manager._clear_ipc_sync_cache()
+
+        parse_calls = {"count": 0}
+        original_parse = dashboard_manager._parse_ipc_message
+
+        def _counted_parse(file_path):
+            parse_calls["count"] += 1
+            return original_parse(file_path)
+
+        monkeypatch.setattr(dashboard_manager, "_parse_ipc_message", _counted_parse)
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+
+        assert parse_calls["count"] == 2
+        report = dashboard_manager.get_last_sync_report()
+        assert report is not None
+        assert report["ipc_sync"]["mode"] == "full"
+
+    def test_save_markdown_dashboard_ipc_sync_keeps_delta_after_manager_restart(
+        self, temp_dir, monkeypatch
+    ):
+        """再起動後もチェックポイントを使って差分のみ再収集することをテスト。"""
+        dashboard_dir = temp_dir / ".dashboard"
+        manager1 = DashboardManager(
+            workspace_id="test-workspace",
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        manager1.initialize()
+
+        session_dir = dashboard_dir.parent
+        ipc_dir = session_dir / "ipc" / "admin-001"
+        ipc_dir.mkdir(parents=True, exist_ok=True)
+        (ipc_dir / "20260206_170000_000000_a.md").write_text(
+            (
+                "---\n"
+                "id: msg-1\n"
+                "sender_id: worker-001\n"
+                "receiver_id: admin-001\n"
+                "message_type: request\n"
+                "subject: first\n"
+                "created_at: '2026-02-06T17:00:00'\n"
+                "---\n\n"
+                "message-1\n"
+            ),
+            encoding="utf-8",
+        )
+        project_root = session_dir / "project"
+        project_root.mkdir(exist_ok=True)
+        manager1.save_markdown_dashboard(project_root, "test-session")
+        assert (dashboard_dir / "ipc_sync_state.json").exists()
+
+        manager2 = DashboardManager(
+            workspace_id="test-workspace",
+            workspace_path=str(temp_dir),
+            dashboard_dir=str(dashboard_dir),
+        )
+        manager2.initialize()
+        (ipc_dir / "20260206_170001_000000_b.md").write_text(
+            (
+                "---\n"
+                "id: msg-2\n"
+                "sender_id: worker-001\n"
+                "receiver_id: admin-001\n"
+                "message_type: request\n"
+                "subject: second\n"
+                "created_at: '2026-02-06T17:00:01'\n"
+                "---\n\n"
+                "message-2\n"
+            ),
+            encoding="utf-8",
+        )
+
+        parse_calls = {"count": 0}
+        original_parse = manager2._parse_ipc_message
+
+        def _counted_parse(file_path):
+            parse_calls["count"] += 1
+            return original_parse(file_path)
+
+        monkeypatch.setattr(manager2, "_parse_ipc_message", _counted_parse)
+        manager2.save_markdown_dashboard(project_root, "test-session")
+
+        assert parse_calls["count"] == 1
+        messages_content = (dashboard_dir / "messages.md").read_text(encoding="utf-8")
+        assert "message-1" in messages_content
+        assert "message-2" in messages_content
 
     def test_read_task_file_not_exists(self, dashboard_manager, temp_dir):
         """存在しないタスクファイル読み取りをテスト。"""
@@ -817,9 +1008,7 @@ class TestMarkdownDashboard:
         assert "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 | worktree |" not in md_content
         assert "| ID | タイトル | 状態 | 担当 | 進捗 | 開始 | 終了 |" in md_content
 
-    def test_task_table_renders_start_and_end_times_in_hhmmss(
-        self, dashboard_manager, monkeypatch
-    ):
+    def test_task_table_renders_start_and_end_times_in_hhmmss(self, dashboard_manager, monkeypatch):
         """タスク表で開始/終了時刻を HH:mm:ss 形式で表示することをテスト。"""
         monkeypatch.setenv("MCP_ENABLE_WORKTREE", "false")
 
@@ -1189,3 +1378,41 @@ class TestDashboardCost:
         dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=1000)
         estimate = dashboard_manager.get_cost_estimate()
         assert estimate["estimated_cost_usd"] > 0
+
+    def test_non_claude_actual_cost_is_downgraded_to_estimated(self, dashboard_manager):
+        """Claude 以外の actual 指定は estimated として記録されることをテスト。"""
+        dashboard_manager.record_api_call(
+            ai_cli="codex",
+            estimated_tokens=1000,
+            agent_id="agent-001",
+            actual_cost_usd=9.9,
+            cost_source="actual",
+        )
+        dashboard = dashboard_manager.get_dashboard()
+        call = dashboard.cost.calls[-1]
+        assert call.ai_cli == "codex"
+        assert call.cost_source == "estimated"
+        assert call.actual_cost_usd is None
+        assert dashboard.cost.actual_cost_usd == 0.0
+
+    def test_claude_actual_cost_uses_latest_snapshot_per_agent(self, dashboard_manager):
+        """Claude 実測コストは agent ごとの最新値を採用することをテスト。"""
+        dashboard_manager.record_api_call(
+            ai_cli="claude",
+            estimated_tokens=1000,
+            agent_id="agent-001",
+            actual_cost_usd=1.25,
+            cost_source="actual",
+        )
+        dashboard_manager.record_api_call(
+            ai_cli="claude",
+            estimated_tokens=1000,
+            agent_id="agent-001",
+            actual_cost_usd=2.5,
+            cost_source="actual",
+        )
+
+        summary = dashboard_manager.get_cost_summary()
+        assert summary["actual_cost_usd"] == pytest.approx(2.5, rel=1e-6)
+        assert summary["total_cost_usd"] == pytest.approx(2.5, rel=1e-6)
+        assert dashboard_manager.get_cost_by_agent("agent-001") == pytest.approx(2.5, rel=1e-6)

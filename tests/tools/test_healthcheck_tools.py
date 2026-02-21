@@ -517,6 +517,9 @@ class TestFullRecovery:
             def __init__(self, _repo_path: str) -> None:
                 pass
 
+            async def get_current_branch(self) -> str | None:
+                return "main"
+
             async def remove_worktree(self, _path: str, force: bool = False) -> tuple[bool, str]:
                 return True, "removed"
 
@@ -577,6 +580,9 @@ class TestFullRecovery:
             def __init__(self, _repo_path: str) -> None:
                 pass
 
+            async def get_current_branch(self) -> str | None:
+                return "main"
+
             async def remove_worktree(self, _path: str, force: bool = False) -> tuple[bool, str]:
                 _ = force
                 raise RuntimeError("boom")
@@ -593,6 +599,70 @@ class TestFullRecovery:
         assert result["new_worktree_path"] is None
         assert "worktree 操作に失敗しました" in result["error"]
         assert worker.id in app_ctx.agents
+
+    @pytest.mark.asyncio
+    async def test_execute_full_recovery_worktree_fallback_path_succeeds(
+        self, healthcheck_mock_ctx, git_repo, monkeypatch
+    ):
+        """初回 worktree 作成が失敗しフォールバックパスで成功する場合のテスト。"""
+        from src.tools.healthcheck import execute_full_recovery
+
+        app_ctx = healthcheck_mock_ctx.request_context.lifespan_context
+        app_ctx.settings.enable_git = True
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-fallback",
+            role=AgentRole.WORKER,
+            status=AgentStatus.ERROR,
+            tmux_session=None,
+            session_name=None,
+            window_index=None,
+            pane_index=None,
+            working_dir=str(git_repo / "worker-fallback"),
+            worktree_path=str(git_repo / "worker-fallback"),
+            branch="worker-fallback",
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents[worker.id] = worker
+
+        class StubWorktreeManager:
+            create_calls = 0
+
+            def __init__(self, _repo_path: str) -> None:
+                pass
+
+            async def get_current_branch(self) -> str | None:
+                return "main"
+
+            async def remove_worktree(self, _path: str, force: bool = False) -> tuple[bool, str]:
+                return True, "removed"
+
+            async def create_worktree(
+                self,
+                path: str,
+                branch: str,
+                create_branch: bool = True,
+                base_branch: str | None = None,
+            ) -> tuple[bool, str, str | None]:
+                StubWorktreeManager.create_calls += 1
+                if StubWorktreeManager.create_calls == 1:
+                    # 初回は失敗
+                    return False, "create failed", None
+                # フォールバック（2回目）は成功
+                return True, "ok", path
+
+        monkeypatch.setattr(
+            "src.managers.worktree_manager.WorktreeManager",
+            StubWorktreeManager,
+        )
+
+        result = await execute_full_recovery(app_ctx, worker.id)
+
+        assert result["success"] is True
+        assert result["new_worktree_path"] is not None
+        assert StubWorktreeManager.create_calls == 2
 
 
 class TestHealthcheckAiCliCommands:

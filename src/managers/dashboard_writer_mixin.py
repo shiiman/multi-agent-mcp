@@ -7,10 +7,12 @@ import logging
 import os
 import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 
 import yaml
 
+from src.config.constants import PRIVATE_FILE_MODE
 from src.models.dashboard import Dashboard
 
 logger = logging.getLogger(__name__)
@@ -76,21 +78,30 @@ class DashboardWriterMixin:
                 sort_keys=False,
             )
             content = f"---\n{yaml_str}---\n\n{md_content}"
-            dashboard_path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp_path = tempfile.mkstemp(dir=str(dashboard_path.parent), suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(content)
-                os.replace(tmp_path, str(dashboard_path))
-            except BaseException:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+            self._atomic_write_text(dashboard_path, content)
             # 書き込み成功時にキャッシュを無効化
             self._read_cache = None
             self._read_cache_mtime = 0
         except OSError as e:
             logger.error(f"ダッシュボード保存エラー: {e}")
+            raise
+
+    def _atomic_write_text(self, file_path: Path, content: str) -> None:
+        """テキストを原子的に書き込む。"""
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp_path, PRIVATE_FILE_MODE)
+            os.replace(tmp_path, str(file_path))
+            # 防御的再設定: umask やファイルシステム差異で権限が変わる場合に備える
+            os.chmod(file_path, PRIVATE_FILE_MODE)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
             raise

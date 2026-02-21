@@ -1,5 +1,7 @@
 """ターミナル実装の回帰テスト。"""
 
+import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -39,6 +41,111 @@ class TestTerminalExecutorBase:
 
         assert (code, stdout, stderr) == (0, "ok", "")
         executor._run_exec.assert_awaited_once_with("osascript", "-e", "return \"ok\"")
+
+    @pytest.mark.asyncio
+    async def test_run_exec_timeout_kills_process_and_returns_structured_error(self, monkeypatch):
+        """_run_exec はタイムアウト時に kill し、構造化エラーを返す。"""
+        executor = DummyExecutor()
+
+        class _FakeProc:
+            def __init__(self) -> None:
+                self.returncode = None
+                self.kill_called = False
+
+            async def communicate(self):
+                return b"", b""
+
+            async def wait(self):
+                self.returncode = -9
+                return -9
+
+            def kill(self) -> None:
+                self.kill_called = True
+                self.returncode = -9
+
+            def terminate(self) -> None:
+                self.returncode = -15
+
+        fake_proc = _FakeProc()
+
+        async def _fake_wait_for(awaitable, timeout):
+            _fake_wait_for.calls += 1
+            if _fake_wait_for.calls == 1:
+                awaitable.close()
+                raise asyncio.TimeoutError
+            return await awaitable
+
+        _fake_wait_for.calls = 0
+
+        async def _fake_create_subprocess_exec(*args, **kwargs):
+            return fake_proc
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+        monkeypatch.setattr(asyncio, "wait_for", _fake_wait_for)
+
+        code, stdout, stderr = await executor._run_exec("echo", "hello")
+
+        assert code == 124
+        assert stdout == ""
+        assert fake_proc.kill_called is True
+        assert executor.last_subprocess_error is not None
+        assert executor.last_subprocess_error["kind"] == "timeout"
+        error_payload = json.loads(stderr)
+        assert error_payload["kind"] == "timeout"
+        # SEC-001: command はエラーレスポンスに含めない
+        assert "command" not in error_payload
+
+    @pytest.mark.asyncio
+    async def test_run_shell_timeout_kills_process_and_returns_structured_error(self, monkeypatch):
+        """_run_shell はタイムアウト時に kill し、構造化エラーを返す。"""
+        executor = DummyExecutor()
+
+        class _FakeProc:
+            def __init__(self) -> None:
+                self.returncode = None
+                self.kill_called = False
+
+            async def communicate(self):
+                return b"", b""
+
+            async def wait(self):
+                self.returncode = -9
+                return -9
+
+            def kill(self) -> None:
+                self.kill_called = True
+                self.returncode = -9
+
+            def terminate(self) -> None:
+                self.returncode = -15
+
+        fake_proc = _FakeProc()
+
+        async def _fake_wait_for(awaitable, timeout):
+            _fake_wait_for.calls += 1
+            if _fake_wait_for.calls == 1:
+                awaitable.close()
+                raise asyncio.TimeoutError
+            return await awaitable
+
+        _fake_wait_for.calls = 0
+
+        async def _fake_create_subprocess_shell(*args, **kwargs):
+            return fake_proc
+
+        monkeypatch.setattr(asyncio, "create_subprocess_shell", _fake_create_subprocess_shell)
+        monkeypatch.setattr(asyncio, "wait_for", _fake_wait_for)
+
+        code, stdout, stderr = await executor._run_shell("echo hello")
+
+        assert code == 124
+        assert stdout == ""
+        assert fake_proc.kill_called is True
+        assert executor.last_subprocess_error is not None
+        error_payload = json.loads(stderr)
+        assert error_payload["kind"] == "timeout"
+        # SEC-001: command はエラーレスポンスに含めない
+        assert "command" not in error_payload
 
 
 class TestGhosttyExecutor:

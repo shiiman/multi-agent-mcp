@@ -462,6 +462,22 @@ class TestAgentFilePersistence:
         result = save_agent_to_file(persistence_ctx, sample_agent)
         assert result is True
 
+    def test_save_agent_to_file_sets_0600_permissions(self, persistence_ctx, sample_agent):
+        """agents.json と lock ファイルが 0600 権限になることをテスト。"""
+        result = save_agent_to_file(persistence_ctx, sample_agent)
+        assert result is True
+
+        session_dir = (
+            Path(persistence_ctx.project_root) / ".multi-agent-mcp" / persistence_ctx.session_id
+        )
+        agents_file = session_dir / "agents.json"
+        lock_file = session_dir / "agents.lock"
+
+        assert agents_file.exists()
+        assert lock_file.exists()
+        assert (agents_file.stat().st_mode & 0o777) == 0o600
+        assert (lock_file.stat().st_mode & 0o777) == 0o600
+
     def test_load_agents_from_file(self, persistence_ctx, sample_agent):
         """保存済みファイルから Agent を正しく復元できることをテスト。"""
         save_agent_to_file(persistence_ctx, sample_agent)
@@ -719,6 +735,33 @@ class TestHelpersImportCompat:
         assert isinstance(BOOTSTRAP_TOOLS, set)
 
 
+class TestRegistryPersistence:
+    """registry 永続化のテスト。"""
+
+    def test_save_agent_to_registry_sets_0600_permissions(self, temp_dir, monkeypatch):
+        """registry JSON と lock ファイルが 0600 権限になることをテスト。"""
+        from src.tools import helpers_registry
+
+        global_mcp_dir = temp_dir / "global-mcp"
+        monkeypatch.setattr(helpers_registry, "_get_global_mcp_dir", lambda: global_mcp_dir)
+
+        helpers_registry.save_agent_to_registry(
+            agent_id="agent-reg-001",
+            owner_id="owner-reg-001",
+            project_root="/tmp/project",
+            session_id="session-reg",
+        )
+
+        registry_dir = global_mcp_dir / "agents"
+        agent_file = registry_dir / "agent-reg-001.json"
+        lock_file = registry_dir / "agent-reg-001.lock"
+
+        assert agent_file.exists()
+        assert lock_file.exists()
+        assert (agent_file.stat().st_mode & 0o777) == 0o600
+        assert (lock_file.stat().st_mode & 0o777) == 0o600
+
+
 class TestRequirePermission:
     """get_app_ctx / require_permission ヘルパーのテスト。"""
 
@@ -769,6 +812,83 @@ class TestRequirePermission:
         assert result_ctx is app_ctx
         assert error is not None
         assert error["success"] is False
+
+    @patch("src.tools.helpers_permissions.sync_agents_from_file")
+    def test_require_permission_uses_authenticated_agent_id(self, _mock_sync, app_ctx):
+        """認証済み主体IDがある場合は caller_agent_id なしでも許可判定できることをテスト。"""
+        from src.tools.helpers import require_permission
+
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir="/tmp",
+            created_at=now,
+            last_activity=now,
+        )
+        ctx = self._make_mock_ctx(app_ctx)
+        ctx.request_context.meta = {"authenticated_agent_id": "owner-001"}
+
+        result_ctx, error = require_permission(ctx, "create_task", None)
+
+        assert result_ctx is app_ctx
+        assert error is None
+
+    @patch("src.tools.helpers_permissions.sync_agents_from_file")
+    def test_require_permission_rejects_mismatched_authenticated_agent_id(
+        self, _mock_sync, app_ctx
+    ):
+        """caller_agent_id と認証済み主体IDが不一致な場合に拒否されることをテスト。"""
+        from src.tools.helpers import require_permission
+
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir="/tmp",
+            created_at=now,
+            last_activity=now,
+        )
+        ctx = self._make_mock_ctx(app_ctx)
+        ctx.request_context.meta = {"authenticated_agent_id": "owner-001"}
+
+        result_ctx, error = require_permission(ctx, "create_task", "worker-001")
+
+        assert result_ctx is app_ctx
+        assert error is not None
+        assert error["success"] is False
+        assert error["error_code"] == "CALLER_AUTH_MISMATCH"
+        assert "authenticated_agent_id" not in error["error"]
+        assert "caller_agent_id=" not in error["error"]
+
+    @patch("src.tools.helpers_permissions.sync_agents_from_file")
+    def test_require_permission_ignores_untrusted_meta_keys(self, _mock_sync, app_ctx):
+        """認証済みキー以外の meta は caller 解決に使用しないことをテスト。"""
+        from src.tools.helpers import require_permission
+
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir="/tmp",
+            created_at=now,
+            last_activity=now,
+        )
+        ctx = self._make_mock_ctx(app_ctx)
+        ctx.request_context.meta = {"agent_id": "owner-001"}
+
+        result_ctx, error = require_permission(ctx, "create_task", None)
+
+        assert result_ctx is app_ctx
+        assert error is not None
+        assert error["success"] is False
+        assert error["error_code"] == "MISSING_CALLER_ID"
 
 
 class TestEnsureProjectRootFromCaller:
@@ -841,6 +961,15 @@ class TestEnsureDashboardManager:
         assert str(manager.dashboard_dir).endswith(".multi-agent-mcp/new-session/dashboard")
         assert app_ctx.workspace_id == "new-session"
 
+    def test_rejects_path_escape_via_session_id(self, app_ctx, git_repo):
+        from src.tools.helpers_managers import ensure_dashboard_manager
+
+        app_ctx.project_root = str(git_repo)
+        app_ctx.session_id = "../escape"
+
+        with pytest.raises(ValueError, match="パス逸脱"):
+            ensure_dashboard_manager(app_ctx)
+
 
 class TestEnsureIpcManager:
     """ensure_ipc_manager のセッション切替挙動テスト。"""
@@ -861,6 +990,15 @@ class TestEnsureIpcManager:
         assert manager is app_ctx.ipc_manager
         assert str(manager.ipc_dir).endswith(".multi-agent-mcp/new-session/ipc")
         assert manager.ipc_dir != old_ipc_dir
+
+    def test_rejects_path_escape_via_session_id(self, app_ctx, git_repo):
+        from src.tools.helpers_managers import ensure_ipc_manager
+
+        app_ctx.project_root = str(git_repo)
+        app_ctx.session_id = "../../escape"
+
+        with pytest.raises(ValueError, match="パス逸脱"):
+            ensure_ipc_manager(app_ctx)
 
 
 class TestCodexPromptDetection:

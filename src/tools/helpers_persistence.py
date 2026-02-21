@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src.config.constants import PRIVATE_FILE_MODE
 from src.config.settings import get_mcp_dir
 from src.context import AppContext
 from src.models.agent import AgentRole
@@ -115,6 +116,7 @@ def _agents_file_lock(agents_file: Path) -> Iterator[None]:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        os.chmod(lock_path, PRIVATE_FILE_MODE)
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             yield
@@ -130,7 +132,12 @@ def _atomic_write_json(file_path: Path, payload: dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, PRIVATE_FILE_MODE)
         os.replace(tmp_path, str(file_path))
+        # 防御的再設定: umask やファイルシステム差異で権限が変わる場合に備える
+        os.chmod(file_path, PRIVATE_FILE_MODE)
     except BaseException:
         try:
             os.unlink(tmp_path)

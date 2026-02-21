@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.managers.tmux_manager import TmuxManager
 
-from src.config.settings import AICli, Settings, resolve_model_for_cli
+from src.config.settings import AICli, Settings, normalize_cli_name, resolve_model_for_cli
 from src.config.workflow_guides import get_role_template_path_for_workspace
 from src.context import AppContext
 from src.managers.tmux_manager import (
@@ -35,16 +35,6 @@ from src.tools.task_templates import generate_7section_task
 logger = logging.getLogger(__name__)
 
 _SHELL_COMMANDS = {"zsh", "bash", "sh", "fish"}
-
-
-def _normalize_cli_name(cli: AICli | str | None) -> str:
-    """CLI 名を正規化して返す。"""
-    if hasattr(cli, "value"):
-        cli = str(cli.value)
-    raw = str(cli or "").strip().lower()
-    if raw.startswith("aicli."):
-        raw = raw.split(".", 1)[1]
-    return raw
 
 
 def _get_next_worker_slot(
@@ -131,7 +121,7 @@ def _resolve_agent_cli_name(agent: Agent, app_ctx: AppContext) -> str:
     if agent.role == AgentRole.WORKER:
         # preferred_cli / 明示指定で pin された Worker は agent 側設定を優先する。
         if getattr(agent, "ai_cli_pinned", False) and agent.ai_cli:
-            return _normalize_cli_name(agent.ai_cli)
+            return normalize_cli_name(agent.ai_cli)
 
         if agent.window_index is not None and agent.pane_index is not None:
             try:
@@ -145,8 +135,8 @@ def _resolve_agent_cli_name(agent: Agent, app_ctx: AppContext) -> str:
                 logger.debug("Worker CLI の再解決に失敗したため agent.ai_cli を使用: %s", e)
 
     if agent.ai_cli:
-        return _normalize_cli_name(agent.ai_cli)
-    return _normalize_cli_name(app_ctx.ai_cli.get_default_cli())
+        return normalize_cli_name(agent.ai_cli)
+    return normalize_cli_name(app_ctx.ai_cli.get_default_cli())
 
 
 def _resolve_agent_enable_git(
