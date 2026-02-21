@@ -8,7 +8,7 @@ YAML Front Matter 付き Markdown で統一管理。
 import asyncio
 import logging
 import time
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -120,3 +120,43 @@ class DashboardManager(
                 yield
             finally:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    @asynccontextmanager
+    async def _dashboard_file_lock_async(self):
+        """Dashboard 読み書き用の排他ロックを非同期で取得する。
+
+        fcntl.flock のビジーウェイトを asyncio.to_thread() でスレッドに委譲し、
+        イベントループをブロックしない。
+        """
+        import fcntl
+
+        lock_path = self._get_dashboard_lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        timeout = self._dashboard_lock_timeout_seconds
+
+        def _acquire_lock(fileno: int) -> None:
+            """ブロッキングなロック取得をワーカースレッドで実行する。"""
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    fcntl.flock(fileno, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return
+                except BlockingIOError:
+                    time.sleep(0.01)
+            # タイムアウト — ブロッキングフォールバックは使わず例外を送出
+            raise asyncio.TimeoutError(
+                f"Dashboard ファイルロックの取得がタイムアウトしました ({timeout}秒)"
+            )
+
+        lock_file = None
+        try:
+            lock_file = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115
+            await asyncio.to_thread(_acquire_lock, lock_file.fileno())
+            yield
+        finally:
+            if lock_file is not None:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                lock_file.close()

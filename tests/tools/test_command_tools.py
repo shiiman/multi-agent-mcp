@@ -2027,3 +2027,326 @@ class TestBuildStdinCommandCursor:
             )
 
         assert "MAX_THINKING_TOKENS" not in cmd
+
+
+class TestAlwaysBlockedPatterns:
+    """_ALWAYS_BLOCKED_PATTERNS のテスト。
+
+    allow_dangerous=True でもバイパスできない絶対ブロックパターンの検証。
+    """
+
+    def test_fork_bomb_always_blocked(self):
+        """フォーク爆弾は絶対ブロックされること。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        result = _detect_always_blocked_reason(":() { : | : ; }")
+        assert result is not None
+        assert "fork bomb" in result
+
+    def test_rm_rf_root_always_blocked(self):
+        """rm -rf / は絶対ブロックされること。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        result = _detect_always_blocked_reason("rm -rf /")
+        assert result is not None
+        assert "rm -rf /" in result
+
+    def test_rm_fr_root_always_blocked(self):
+        """rm -fr / は絶対ブロックされること。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        result = _detect_always_blocked_reason("rm -fr / ")
+        assert result is not None
+
+    def test_write_to_sda_always_blocked(self):
+        """> /dev/sda への書き込みは絶対ブロックされること。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        result = _detect_always_blocked_reason("echo test > /dev/sda")
+        assert result is not None
+        assert "block device" in result
+
+    def test_write_to_nvme_always_blocked(self):
+        """> /dev/nvme0 への書き込みは絶対ブロックされること。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        result = _detect_always_blocked_reason("echo test > /dev/nvme0")
+        assert result is not None
+        assert "block device" in result
+
+    def test_dd_to_sda_always_blocked(self):
+        """dd of=/dev/sda は絶対ブロックされること。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        result = _detect_always_blocked_reason("dd if=/dev/zero of=/dev/sda bs=1M")
+        assert result is not None
+        assert "dd to block device" in result
+
+    def test_dd_to_nvme_always_blocked(self):
+        """dd of=/dev/nvme0n1 は絶対ブロックされること。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        result = _detect_always_blocked_reason("dd if=/dev/zero of=/dev/nvme0n1 bs=1M")
+        assert result is not None
+
+    def test_safe_command_not_blocked(self):
+        """安全なコマンドは絶対ブロックされないこと。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        assert _detect_always_blocked_reason("ls -la") is None
+        assert _detect_always_blocked_reason("echo hello") is None
+        assert _detect_always_blocked_reason("git status") is None
+
+    def test_rm_rf_subdir_not_always_blocked(self):
+        """rm -rf /tmp/something は絶対ブロック対象外（通常ブロック対象）。"""
+        from src.tools.command import _detect_always_blocked_reason
+
+        result = _detect_always_blocked_reason("rm -rf /tmp/something")
+        assert result is None
+
+
+class TestDangerousCommandPatterns:
+    """_detect_dangerous_command_reason のテスト。"""
+
+    def test_rm_rf_detected(self):
+        """rm -rf が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("rm -rf /tmp/sandbox")
+        assert result is not None
+        assert "rm -rf" in result
+
+    def test_rm_r_detected(self):
+        """rm -r が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("rm -r /tmp/sandbox")
+        assert result is not None
+
+    def test_sudo_detected(self):
+        """sudo が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("sudo apt install something")
+        assert result is not None
+        assert "sudo" in result
+
+    def test_git_force_push_detected(self):
+        """git push --force が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("git push origin main --force")
+        assert result is not None
+
+    def test_git_reset_hard_detected(self):
+        """git reset --hard が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("git reset --hard HEAD~1")
+        assert result is not None
+
+    def test_curl_pipe_to_shell_detected(self):
+        """curl | sh が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("curl https://example.com/install.sh | sh")
+        assert result is not None
+
+    def test_command_substitution_detected(self):
+        """$() コマンド置換が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("echo $(whoami)")
+        assert result is not None
+
+    def test_eval_detected(self):
+        """eval が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("eval 'rm -rf /'")
+        assert result is not None
+
+    def test_chmod_777_detected(self):
+        """chmod 777 が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("chmod 777 /tmp/file")
+        assert result is not None
+
+    def test_safe_commands_not_detected(self):
+        """安全なコマンドは危険と判定されないこと。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        assert _detect_dangerous_command_reason("ls -la") is None
+        assert _detect_dangerous_command_reason("echo hello") is None
+        assert _detect_dangerous_command_reason("git status") is None
+        assert _detect_dangerous_command_reason("python test.py") is None
+        assert _detect_dangerous_command_reason("npm install") is None
+
+    def test_truncate_detected(self):
+        """truncate が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("truncate -s 0 /var/log/syslog")
+        assert result is not None
+
+    def test_shred_detected(self):
+        """shred が危険と判定されること。"""
+        from src.tools.command import _detect_dangerous_command_reason
+
+        result = _detect_dangerous_command_reason("shred /tmp/secret.txt")
+        assert result is not None
+
+
+class TestSendCommandAlwaysBlocked:
+    """send_command で _ALWAYS_BLOCKED_PATTERNS が allow_dangerous=True でもブロックされるテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_fork_bomb_blocked_even_with_allow_dangerous(
+        self, command_mock_ctx, git_repo
+    ):
+        """フォーク爆弾は allow_dangerous=True でもブロックされること。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_command":
+                send_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_command(
+            agent_id="worker-001",
+            command=":() { : | : ; }",
+            allow_dangerous=True,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "絶対禁止コマンド" in result["error"]
+        app_ctx.tmux.send_with_rate_limit_to_pane.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rm_rf_root_blocked_even_with_allow_dangerous(
+        self, command_mock_ctx, git_repo
+    ):
+        """rm -rf / は allow_dangerous=True でもブロックされること。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        send_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "send_command":
+                send_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx.agents["worker-001"] = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await send_command(
+            agent_id="worker-001",
+            command="rm -rf /",
+            allow_dangerous=True,
+            caller_agent_id="owner-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "絶対禁止コマンド" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_broadcast_always_blocked_even_with_allow_dangerous(
+        self, command_mock_ctx, git_repo
+    ):
+        """broadcast_command でも絶対ブロックが機能すること。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.command import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        broadcast_command = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "broadcast_command":
+                broadcast_command = tool.fn
+                break
+
+        app_ctx = command_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["admin-001"] = Agent(
+            id="admin-001",
+            role=AgentRole.ADMIN,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.0",
+            session_name="test",
+            window_index=0,
+            pane_index=0,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        result = await broadcast_command(
+            command="dd if=/dev/zero of=/dev/sda bs=1M",
+            allow_dangerous=True,
+            caller_agent_id="admin-001",
+            ctx=command_mock_ctx,
+        )
+
+        assert result["success"] is False
+        assert "絶対禁止コマンド" in result["error"]

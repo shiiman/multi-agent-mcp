@@ -60,6 +60,22 @@ _DANGEROUS_COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(^|\s)git\s+push\s+.*--force\b", re.IGNORECASE), "git force push"),
     (re.compile(r"(^|\s)git\s+reset\s+--hard\b", re.IGNORECASE), "git reset hard"),
     (re.compile(r">\s*/dev/sd[a-z]", re.IGNORECASE), "write to block device"),
+    (re.compile(r"(^|\s)rm\s+-r\b", re.IGNORECASE), "rm -r"),
+    (re.compile(r"(^|\s)truncate\b", re.IGNORECASE), "truncate"),
+    (re.compile(r"(^|\s)shred\b", re.IGNORECASE), "shred"),
+    (re.compile(r"\$\(", re.IGNORECASE), "command substitution $()"),
+    (re.compile(r"`[^`]+`"), "backtick command substitution"),
+    (re.compile(r"(^|\s)eval\b", re.IGNORECASE), "eval"),
+    (re.compile(r"(^|\s)exec\b", re.IGNORECASE), "exec"),
+]
+
+# allow_dangerous=True でもバイパスできない絶対ブロックパターン
+_ALWAYS_BLOCKED_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r":\s*\(\)\s*\{\s*:\s*\|\s*:\s*;\s*\}", re.IGNORECASE), "fork bomb"),
+    (re.compile(r"(^|\s)rm\s+(-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*)\s+/(\s|$|\*)", re.IGNORECASE), "rm -rf /"),
+    (re.compile(r">\s*/dev/sd[a-z]", re.IGNORECASE), "write to block device"),
+    (re.compile(r">\s*/dev/nvme[0-9]", re.IGNORECASE), "write to block device"),
+    (re.compile(r"(^|\s)dd\s+.*of=/dev/(sd|nvme|hd)", re.IGNORECASE), "dd to block device"),
 ]
 
 
@@ -67,6 +83,15 @@ def _detect_dangerous_command_reason(command: str) -> str | None:
     """危険コマンドに該当する理由を返す。"""
     normalized = command.strip()
     for pattern, reason in _DANGEROUS_COMMAND_PATTERNS:
+        if pattern.search(normalized):
+            return reason
+    return None
+
+
+def _detect_always_blocked_reason(command: str) -> str | None:
+    """allow_dangerous=True でもバイパスできない絶対ブロックパターンを確認する。"""
+    normalized = command.strip()
+    for pattern, reason in _ALWAYS_BLOCKED_PATTERNS:
         if pattern.search(normalized):
             return reason
     return None
@@ -160,6 +185,27 @@ def register_tools(mcp: FastMCP) -> None:
             return {
                 "success": False,
                 "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
+            }
+
+        # allow_dangerous=True でもバイパスできない絶対ブロックチェック
+        always_blocked = _detect_always_blocked_reason(command)
+        if always_blocked:
+            _audit_command_guard(
+                tool_name="send_command",
+                caller_agent_id=caller_agent_id,
+                command=command,
+                reason=always_blocked,
+                allowed=False,
+                target=agent_id,
+            )
+            return {
+                "success": False,
+                "agent_id": agent_id,
+                "command": command,
+                "error": (
+                    "絶対禁止コマンドをブロックしました。"
+                    f" reason={always_blocked}, このコマンドは実行できません。"
+                ),
             }
 
         dangerous_reason = _detect_dangerous_command_reason(command)
@@ -854,6 +900,27 @@ def register_tools(mcp: FastMCP) -> None:
                     "success": False,
                     "error": f"無効な役割です: {role}（有効: owner, admin, worker）",
                 }
+
+        # allow_dangerous=True でもバイパスできない絶対ブロックチェック
+        always_blocked = _detect_always_blocked_reason(command)
+        if always_blocked:
+            _audit_command_guard(
+                tool_name="broadcast_command",
+                caller_agent_id=caller_agent_id,
+                command=command,
+                reason=always_blocked,
+                allowed=False,
+                role_filter=role,
+            )
+            return {
+                "success": False,
+                "command": command,
+                "role_filter": role,
+                "error": (
+                    "絶対禁止コマンドをブロックしました。"
+                    f" reason={always_blocked}, このコマンドは実行できません。"
+                ),
+            }
 
         dangerous_reason = _detect_dangerous_command_reason(command)
         if dangerous_reason and not allow_dangerous:

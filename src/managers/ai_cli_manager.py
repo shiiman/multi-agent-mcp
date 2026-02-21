@@ -41,9 +41,9 @@ class AiCliManager:
             cmd, is_available = self._resolve_cli_command(cli)
             self._available_clis[cli] = is_available
             if is_available:
-                logger.info(f"AI CLI '{cli.value}' が利用可能です (command: {cmd})")
+                logger.info("AI CLI '%s' が利用可能です (command: %s)", cli.value, cmd)
             else:
-                logger.debug(f"AI CLI '{cli.value}' は見つかりませんでした")
+                logger.debug("AI CLI '%s' は見つかりませんでした", cli.value)
 
     def _resolve_cli_command(self, cli: AICli) -> tuple[str, bool]:
         """実行に利用する CLI コマンドを解決する。
@@ -388,8 +388,8 @@ class AiCliManager:
 
         except FileNotFoundError:
             return False, f"{cli.value} コマンドが見つかりません"
-        except Exception as e:
-            logger.error(f"AI CLI起動エラー: {e}")
+        except (OSError, ValueError) as e:
+            logger.error("AI CLI起動エラー: %s", e)
             return False, f"AI CLI起動エラー: {e}"
 
     def refresh_availability(self) -> dict[AICli, bool]:
@@ -539,8 +539,8 @@ class AiCliManager:
                 error_msg = stderr.decode().strip() if stderr else "不明なエラー"
                 return False, f"Ghostty の起動に失敗しました: {error_msg}"
 
-        except Exception as e:
-            logger.error(f"Ghostty 起動エラー: {e}")
+        except (OSError, ValueError) as e:
+            logger.error("Ghostty 起動エラー: %s", e)
             return False, f"Ghostty 起動エラー: {e}"
 
     async def _is_ghostty_running(self) -> bool:
@@ -563,7 +563,7 @@ class AiCliManager:
             stdout, _ = await proc.communicate()
             if proc.returncode == 0:
                 return "true" in stdout.decode().lower()
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.debug("Ghostty 起動確認の AppleScript 判定に失敗: %s", e)
 
         # AppleScript 判定が失敗する環境向けフォールバック
@@ -579,7 +579,7 @@ class AiCliManager:
                 await proc.communicate()
                 if proc.returncode == 0:
                     return True
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 logger.debug("pgrep による Ghostty 検出に失敗 (%s): %s", process_name, e)
                 continue
         return False
@@ -630,7 +630,7 @@ class AiCliManager:
                 stderr.decode().strip() if stderr else "unknown",
             )
             return False
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.debug("Ghostty タブ追加の AppleScript 実行に失敗: %s", e)
             return False
 
@@ -683,8 +683,8 @@ class AiCliManager:
                 error_msg = stderr.decode().strip() if stderr else "不明なエラー"
                 return False, f"iTerm2 の起動に失敗しました: {error_msg}"
 
-        except Exception as e:
-            logger.error(f"iTerm2 起動エラー: {e}")
+        except (OSError, ValueError) as e:
+            logger.error("iTerm2 起動エラー: %s", e)
             return False, f"iTerm2 起動エラー: {e}"
 
     async def _open_in_terminal_app(self, worktree_path: str, command: str) -> tuple[bool, str]:
@@ -734,6 +734,6 @@ class AiCliManager:
                 error_msg = stderr.decode().strip() if stderr else "不明なエラー"
                 return False, f"Terminal.app の起動に失敗しました: {error_msg}"
 
-        except Exception as e:
-            logger.error(f"Terminal.app 起動エラー: {e}")
+        except (OSError, ValueError) as e:
+            logger.error("Terminal.app 起動エラー: %s", e)
             return False, f"Terminal.app 起動エラー: {e}"

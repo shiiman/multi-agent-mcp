@@ -416,6 +416,9 @@ class Settings(BaseSettings):
         default=WorkerCliMode.UNIFORM,
         description="Worker CLI 設定モード（uniform/per-worker）",
     )
+    # per-worker モード（MCP_WORKER_CLI_MODE=per-worker）でのみ使用されるフィールド。
+    # 型安全性のため getattr による動的アクセスを使用しており、
+    # 将来的にはより型安全な設計への移行を検討。
     worker_cli_1: str | None = Field(default=None, description="Worker 1 の CLI")
     worker_cli_2: str | None = Field(default=None, description="Worker 2 の CLI")
     worker_cli_3: str | None = Field(default=None, description="Worker 3 の CLI")

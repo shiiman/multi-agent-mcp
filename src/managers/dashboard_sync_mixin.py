@@ -38,6 +38,9 @@ class DashboardSyncMixin:
     def save_markdown_dashboard(self, project_root: Path, session_id: str) -> Path:
         """Markdownダッシュボードをファイルに保存する。
 
+        ロック外で agents.json / IPC メッセージをプリフェッチし、
+        ロック内では Dashboard オブジェクト更新と書き込みのみ行う。
+
         Args:
             project_root: プロジェクトルートパス
             session_id: Issue番号または一意なタスクID（例: "94", "a1b2c3d4"）
@@ -54,6 +57,38 @@ class DashboardSyncMixin:
             "messages_write": self._build_sync_stage_report(),
         }
 
+        # ── ロック外プリフェッチ: agents.json ──
+        prefetched_agents: dict | None = None
+        agents_file_exists = agents_file.exists()
+        if agents_file_exists:
+            try:
+                with open(agents_file, encoding="utf-8") as f:
+                    prefetched_agents = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                sync_report["agents_sync"]["success"] = False
+                sync_report["agents_sync"]["error"] = self._format_sync_error(e)
+                logger.warning("agents.json の読み込みに失敗: %s", e)
+
+        # ── ロック外プリフェッチ: IPC メッセージ ──
+        prefetched_messages: list[MessageSummary] | None = None
+        ipc_dir = session_dir / "ipc"
+        if ipc_dir.exists():
+            try:
+                all_messages: list[MessageSummary] = []
+                for agent_dir in ipc_dir.iterdir():
+                    if agent_dir.is_dir():
+                        for msg_file in agent_dir.glob("*.md"):
+                            msg = self._parse_ipc_message(msg_file)
+                            if msg:
+                                all_messages.append(msg)
+                all_messages.sort(key=lambda m: m.created_at or datetime.min)
+                prefetched_messages = all_messages
+            except (OSError, ValueError, TypeError) as e:
+                sync_report["ipc_sync"]["success"] = False
+                sync_report["ipc_sync"]["error"] = self._format_sync_error(e)
+                logger.warning("IPC メッセージの収集に失敗: %s", e)
+
+        # ── ロック内: Dashboard 更新 + 書き込み ──
         def _sync(dashboard) -> None:
             if dashboard.session_started_at is None:
                 dashboard.session_started_at = datetime.now()
@@ -70,15 +105,11 @@ class DashboardSyncMixin:
                 if dashboard.session_started_at is None and task.started_at is not None:
                     dashboard.session_started_at = task.started_at
 
-            # 🔴 agents.json からエージェント情報を同期
-            if agents_file.exists():
+            # プリフェッチ済み agents データを Dashboard に適用
+            if prefetched_agents is not None:
                 try:
-                    with open(agents_file, encoding="utf-8") as f:
-                        agents_data = json.load(f)
-
                     dashboard.agents = []
-                    for agent_id, agent_dict in agents_data.items():
-                        # last_activity を datetime に変換
+                    for agent_id, agent_dict in prefetched_agents.items():
                         last_activity = agent_dict.get("last_activity")
                         if isinstance(last_activity, str):
                             try:
@@ -118,35 +149,23 @@ class DashboardSyncMixin:
                         dashboard.agents.append(summary)
 
                     dashboard.calculate_stats()
-                    logger.debug(f"agents.json から {len(dashboard.agents)} 件のエージェントを同期")
+                    logger.debug(
+                        "agents.json から %d 件のエージェントを同期",
+                        len(dashboard.agents),
+                    )
                     sync_report["agents_sync"]["count"] = len(dashboard.agents)
-                except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+                except (TypeError, ValueError) as e:
                     sync_report["agents_sync"]["success"] = False
                     sync_report["agents_sync"]["error"] = self._format_sync_error(e)
-                    logger.warning("agents.json の読み込みに失敗: %s", e)
+                    logger.warning("agents データの処理に失敗: %s", e)
             else:
                 sync_report["agents_sync"]["count"] = len(dashboard.agents)
 
-            # 🔴 IPC メッセージを収集（Dashboard 表示用）
-            ipc_dir = session_dir / "ipc"
-            if ipc_dir.exists():
-                try:
-                    all_messages: list[MessageSummary] = []
-                    for agent_dir in ipc_dir.iterdir():
-                        if agent_dir.is_dir():
-                            for msg_file in agent_dir.glob("*.md"):
-                                msg = self._parse_ipc_message(msg_file)
-                                if msg:
-                                    all_messages.append(msg)
-                    # 時系列順ソート（全件保持）
-                    all_messages.sort(key=lambda m: m.created_at or datetime.min)
-                    dashboard.messages = all_messages
-                    logger.debug(f"IPC メッセージ {len(dashboard.messages)} 件を収集")
-                    sync_report["ipc_sync"]["count"] = len(dashboard.messages)
-                except (OSError, ValueError, TypeError) as e:
-                    sync_report["ipc_sync"]["success"] = False
-                    sync_report["ipc_sync"]["error"] = self._format_sync_error(e)
-                    logger.warning("IPC メッセージの収集に失敗: %s", e)
+            # プリフェッチ済み IPC メッセージを Dashboard に適用
+            if prefetched_messages is not None:
+                dashboard.messages = prefetched_messages
+                logger.debug("IPC メッセージ %d 件を収集", len(dashboard.messages))
+                sync_report["ipc_sync"]["count"] = len(dashboard.messages)
             else:
                 sync_report["ipc_sync"]["count"] = len(dashboard.messages)
 

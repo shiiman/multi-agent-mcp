@@ -4,11 +4,15 @@
 """
 
 import re
+import string
 from pathlib import Path
 from typing import Any
 
 # テンプレート名に許可される文字パターン（英数字、ハイフン、アンダースコア）
 _VALID_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+# 許可されたカテゴリの一覧
+_ALLOWED_CATEGORIES = frozenset({"roles", "tasks", "scripts/bash", "scripts/applescript", "reports"})
 
 
 class TemplateLoader:
@@ -39,6 +43,13 @@ class TemplateLoader:
         Raises:
             FileNotFoundError: テンプレートが見つからない場合
         """
+        # カテゴリの明示的バリデーション
+        if category not in _ALLOWED_CATEGORIES:
+            raise ValueError(
+                f"許可されていないカテゴリです: '{category}' "
+                f"（許可: {', '.join(sorted(_ALLOWED_CATEGORIES))}）"
+            )
+
         # テンプレート名の明示的バリデーション
         if not _VALID_NAME_PATTERN.match(name):
             raise FileNotFoundError(
@@ -70,6 +81,8 @@ class TemplateLoader:
     def render(self, category: str, name: str, **kwargs: Any) -> str:
         """テンプレートを読み込んで変数を置換する。
 
+        safe_substitute を使用するため、未定義の変数があっても KeyError にならない。
+
         Args:
             category: カテゴリ
             name: テンプレート名
@@ -78,8 +91,42 @@ class TemplateLoader:
         Returns:
             置換後の文字列
         """
-        template = self.load(category, name)
-        return template.format(**kwargs)
+        template_content = self.load(category, name)
+        return self._safe_render(template_content, **kwargs)
+
+    @staticmethod
+    def _safe_render(template_content: str, **kwargs: Any) -> str:
+        """テンプレート文字列を safe_substitute で置換する。
+
+        {variable} 形式のテンプレートを string.Template の ${variable} 形式に
+        内部変換してから safe_substitute を適用する。
+
+        制限事項:
+            - {variable:02d} や {variable!r} 等のフォーマット指定には非対応。
+              単純な {variable} 形式のみ置換される。
+
+        Args:
+            template_content: テンプレート文字列（{variable} 形式）
+            **kwargs: 置換する変数
+
+        Returns:
+            置換後の文字列
+        """
+        import uuid
+
+        # 既存の $ をエスケープ（シェルスクリプト等の $VAR を保護）
+        text = template_content.replace("$", "$$")
+        # {{ / }} をプレースホルダーに退避（format() でのリテラル {} 表現）
+        # UUID ベースのセンチネルでテンプレート内容との衝突を防止
+        sentinel = uuid.uuid4().hex
+        _LBRACE = f"__LBRACE_{sentinel}__"
+        _RBRACE = f"__RBRACE_{sentinel}__"
+        text = text.replace("{{", _LBRACE).replace("}}", _RBRACE)
+        # {variable} → ${variable} に変換
+        text = re.sub(r"\{(\w+)\}", r"${\1}", text)
+        # プレースホルダーをリテラル { / } に復元
+        text = text.replace(_LBRACE, "{").replace(_RBRACE, "}")
+        return string.Template(text).safe_substitute(**kwargs)
 
     def _get_extension(self, category: str) -> str:
         """カテゴリから拡張子を推定する。"""

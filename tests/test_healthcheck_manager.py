@@ -339,6 +339,7 @@ class TestHealthcheckMonitoring:
         app_ctx = SimpleNamespace(agents={worker.id: worker})
         result = await healthcheck._attempt_staged_recovery(
             app_ctx=app_ctx,
+            dashboard=None,
             agent_id=worker.id,
             agent=worker,
             recovery_reason="ai_process_dead",
@@ -395,6 +396,7 @@ class TestHealthcheckMonitoring:
         app_ctx = SimpleNamespace(agents={worker.id: worker})
         result = await healthcheck._attempt_staged_recovery(
             app_ctx=app_ctx,
+            dashboard=None,
             agent_id=worker.id,
             agent=worker,
             recovery_reason="ai_process_dead",
@@ -599,7 +601,7 @@ class TestHealthcheckMonitoring:
         dashboard._write_dashboard = MagicMock(side_effect=AssertionError("no direct write"))  # type: ignore[method-assign]
 
         healthcheck._increment_recovery_counter(
-            app_ctx=app_ctx,
+            dashboard=dashboard,
             agent_id=worker.id,
             task_id=task.id,
             recovery_reason="in_progress_no_ipc",
@@ -672,7 +674,7 @@ class TestHealthcheckMonitoring:
         )
 
         healthcheck._increment_recovery_counter(
-            app_ctx=app_ctx,
+            dashboard=dashboard,
             agent_id=worker.id,
             task_id=task.id,
             recovery_reason="task_stalled",
@@ -681,3 +683,406 @@ class TestHealthcheckMonitoring:
         current_task = dashboard.get_task(task.id)
         assert current_task is not None
         assert current_task.metadata["process_recovery_count"] == 2
+
+
+class TestIsAiRunning:
+    """_is_ai_running ユーティリティ関数のテスト。"""
+
+    def test_codex_is_detected(self):
+        """codex コマンドが AI 実行中と判定されること。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("codex") is True
+
+    def test_codex_arch_suffix_is_detected(self):
+        """codex-aarch64-a のようなアーキテクチャサフィックス付きも検出されること。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("codex-aarch64-a") is True
+
+    def test_claude_is_detected(self):
+        """claude コマンドが AI 実行中と判定されること。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("claude") is True
+
+    def test_gemini_is_detected(self):
+        """gemini コマンドが AI 実行中と判定されること。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("gemini") is True
+
+    def test_agent_is_detected(self):
+        """agent コマンドが AI 実行中と判定されること。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("agent") is True
+
+    def test_cursor_agent_is_detected(self):
+        """cursor-agent コマンドが AI 実行中と判定されること。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("cursor-agent") is True
+
+    def test_shell_is_not_ai(self):
+        """bash/zsh は AI 実行中ではないこと。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("bash") is False
+        assert _is_ai_running("zsh") is False
+
+    def test_empty_string(self):
+        """空文字列は AI 実行中ではないこと。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("") is False
+
+    def test_case_insensitive(self):
+        """大文字小文字を区別しないこと。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("CODEX") is True
+        assert _is_ai_running("Claude") is True
+
+    def test_whitespace_trimmed(self):
+        """前後の空白が除去されること。"""
+        from src.managers.healthcheck_manager import _is_ai_running
+
+        assert _is_ai_running("  codex  ") is True
+
+
+class TestCheckAgentEdgeCases:
+    """check_agent の追加エッジケーステスト。"""
+
+    @pytest.mark.asyncio
+    async def test_check_agent_no_session_name(self):
+        """session_name が None のエージェントは unhealthy になること。"""
+        now = datetime.now()
+        agent = Agent(
+            id="agent-no-session",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            session_name=None,
+            created_at=now,
+            last_activity=now,
+        )
+        tmux = MagicMock()
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={"agent-no-session": agent},
+        )
+        status = await healthcheck.check_agent("agent-no-session")
+        assert status.is_healthy is False
+        assert "tmux セッション情報が未設定" in status.error_message
+
+    @pytest.mark.asyncio
+    async def test_check_agent_ai_process_dead(self):
+        """Worker がタスク実行中なのにシェルに戻っている場合は ai_process_dead。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-dead",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task="task-001",
+            created_at=now,
+            last_activity=now,
+        )
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=True)
+        tmux.get_pane_current_command = AsyncMock(return_value="bash")
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={"worker-dead": agent},
+        )
+        status = await healthcheck.check_agent("worker-dead")
+        assert status.is_healthy is False
+        assert status.tmux_session_alive is True
+        assert status.error_message == "ai_process_dead"
+        assert status.pane_current_command == "bash"
+
+    @pytest.mark.asyncio
+    async def test_check_agent_healthy_worker_running_ai(self):
+        """Worker が AI CLI 実行中で正常な場合は healthy。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-healthy",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task="task-001",
+            created_at=now,
+            last_activity=now,
+        )
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=True)
+        tmux.get_pane_current_command = AsyncMock(return_value="codex")
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={"worker-healthy": agent},
+        )
+        status = await healthcheck.check_agent("worker-healthy")
+        assert status.is_healthy is True
+        assert status.tmux_session_alive is True
+        assert status.pane_current_command == "codex"
+
+
+class TestPruneState:
+    """_prune_state メソッドのテスト。"""
+
+    def test_prune_removes_stale_entries(self):
+        """削除されたエージェントの監視状態が掃除されること。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            created_at=now,
+            last_activity=now,
+        )
+        tmux = MagicMock()
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={"worker-001": agent},
+        )
+        # 存在しないエージェントの状態を手動設定
+        healthcheck._pane_hash["worker-old"] = "abc123"
+        healthcheck._pane_last_changed_at["worker-old"] = now
+        healthcheck._recovery_failures["worker-old:task-1"] = 2
+        # 存在するエージェントの状態も設定
+        healthcheck._pane_hash["worker-001"] = "def456"
+        healthcheck._recovery_failures["worker-001:task-2"] = 1
+
+        healthcheck._prune_state()
+
+        # 存在しないエージェントのデータは削除される
+        assert "worker-old" not in healthcheck._pane_hash
+        assert "worker-old" not in healthcheck._pane_last_changed_at
+        assert "worker-old:task-1" not in healthcheck._recovery_failures
+        # 存在するエージェントのデータは保持される
+        assert "worker-001" in healthcheck._pane_hash
+        assert "worker-001:task-2" in healthcheck._recovery_failures
+
+
+class TestTaskActivityAt:
+    """_task_activity_at 静的メソッドのテスト。"""
+
+    def test_metadata_datetime(self):
+        """metadata に datetime オブジェクトがある場合にそれを返すこと。"""
+        from src.models.dashboard import TaskInfo
+
+        now = datetime.now()
+        task = MagicMock(spec=TaskInfo)
+        task.metadata = {"last_in_progress_update_at": now}
+        task.logs = []
+        task.started_at = None
+
+        result = HealthcheckManager._task_activity_at(task)
+        assert result == now
+
+    def test_metadata_iso_string(self):
+        """metadata に ISO 文字列がある場合にパースされること。"""
+        from src.models.dashboard import TaskInfo
+
+        now = datetime.now()
+        task = MagicMock(spec=TaskInfo)
+        task.metadata = {"last_in_progress_update_at": now.isoformat()}
+        task.logs = []
+        task.started_at = None
+
+        result = HealthcheckManager._task_activity_at(task)
+        assert result is not None
+        assert abs((result - now).total_seconds()) < 1
+
+    def test_metadata_invalid_string(self):
+        """metadata に不正な文字列がある場合は None を返すこと。"""
+        from src.models.dashboard import TaskInfo
+
+        task = MagicMock(spec=TaskInfo)
+        task.metadata = {"last_in_progress_update_at": "not-a-date"}
+        task.logs = []
+        task.started_at = datetime.now()
+
+        result = HealthcheckManager._task_activity_at(task)
+        # started_at にフォールバックする
+        assert result == task.started_at
+
+    def test_no_metadata_returns_started_at(self):
+        """metadata がない場合は started_at を返すこと。"""
+        from src.models.dashboard import TaskInfo
+
+        now = datetime.now()
+        task = MagicMock(spec=TaskInfo)
+        task.metadata = {}
+        task.logs = []
+        task.started_at = now
+
+        result = HealthcheckManager._task_activity_at(task)
+        assert result == now
+
+    def test_no_info_returns_none(self):
+        """metadata も started_at もない場合は None を返すこと。"""
+        from src.models.dashboard import TaskInfo
+
+        task = MagicMock(spec=TaskInfo)
+        task.metadata = {}
+        task.logs = []
+        task.started_at = None
+
+        result = HealthcheckManager._task_activity_at(task)
+        assert result is None
+
+
+class TestComposeRecoveryFailureReason:
+    """_compose_recovery_failure_reason のテスト。"""
+
+    def test_all_fields_populated(self):
+        """全フィールドが含まれた文字列を返すこと。"""
+        reason = HealthcheckManager._compose_recovery_failure_reason(
+            recovery_reason="ai_process_dead",
+            attempt_error="session not found",
+            full_recovery_status="failed",
+            full_recovery_error="tmux unavailable",
+        )
+        assert "recovery_reason=ai_process_dead" in reason
+        assert "attempt_recovery_error=session not found" in reason
+        assert "full_recovery_status=failed" in reason
+        assert "full_recovery_error=tmux unavailable" in reason
+
+    def test_empty_errors_show_none(self):
+        """空のエラーは 'none' と表示されること。"""
+        reason = HealthcheckManager._compose_recovery_failure_reason(
+            recovery_reason="task_stalled",
+            attempt_error="",
+            full_recovery_status="not_executed",
+            full_recovery_error="",
+        )
+        assert "attempt_recovery_error=none" in reason
+        assert "full_recovery_error=none" in reason
+
+
+class TestHealthStatusToDict:
+    """HealthStatus.to_dict のテスト。"""
+
+    def test_to_dict_contains_all_fields(self):
+        """to_dict が全フィールドを含むこと。"""
+        from src.managers.healthcheck_manager import HealthStatus
+
+        status = HealthStatus(
+            agent_id="test-001",
+            is_healthy=True,
+            tmux_session_alive=True,
+            error_message=None,
+            pane_current_command="codex",
+        )
+        d = status.to_dict()
+        assert d["agent_id"] == "test-001"
+        assert d["is_healthy"] is True
+        assert d["tmux_session_alive"] is True
+        assert d["error_message"] is None
+        assert d["pane_current_command"] == "codex"
+
+
+class TestGetSummaryWithMonitorAt:
+    """get_summary の last_monitor_at テスト。"""
+
+    def test_summary_with_last_monitor_at(self):
+        """last_monitor_at が設定されている場合に ISO 文字列で返ること。"""
+        now = datetime.now()
+        tmux = MagicMock()
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={},
+        )
+        healthcheck.last_monitor_at = now
+        summary = healthcheck.get_summary()
+        assert summary["last_monitor_at"] == now.isoformat()
+        assert summary["in_progress_no_ipc_timeout_seconds"] == 120
+
+
+class TestIsWorkerStalledEdgeCases:
+    """_is_worker_stalled のエッジケーステスト。"""
+
+    @pytest.mark.asyncio
+    async def test_no_current_task_returns_false(self):
+        """current_task がない場合は stalled ではないこと。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task=None,
+            created_at=now,
+            last_activity=now - timedelta(seconds=1000),
+        )
+        tmux = MagicMock()
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={"worker-001": agent},
+            stall_timeout_seconds=10,
+        )
+        result = await healthcheck._is_worker_stalled("worker-001", agent, now)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_no_last_activity_returns_false(self):
+        """last_activity がない場合は stalled ではないこと。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task="task-001",
+            created_at=now,
+            last_activity=now,
+        )
+        agent.last_activity = None
+        tmux = MagicMock()
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={"worker-001": agent},
+            stall_timeout_seconds=10,
+        )
+        result = await healthcheck._is_worker_stalled("worker-001", agent, now)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_recent_activity_returns_false(self):
+        """last_activity が最近の場合は stalled ではないこと。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task="task-001",
+            created_at=now,
+            last_activity=now - timedelta(seconds=5),
+        )
+        tmux = MagicMock()
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={"worker-001": agent},
+            stall_timeout_seconds=600,
+        )
+        result = await healthcheck._is_worker_stalled("worker-001", agent, now)
+        assert result is False

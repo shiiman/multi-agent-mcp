@@ -73,16 +73,33 @@ class DashboardCostMixin:
             )
             dashboard.cost.calls.append(record)
 
+            # インクリメンタルに統計を更新（全件走査を回避）
+            # NOTE: 浮動小数点の加算誤差が蓄積するため、100回ごとに全件再計算で補正
+            cost = dashboard.cost
+            cost.total_api_calls += 1
+            cost.estimated_tokens += tokens
+            cost.estimated_cost_usd += estimated_cost
+
             if (
                 source == "actual"
                 and actual_cost_usd is not None
                 and agent_id
                 and normalized_cli == "claude"
             ):
-                dashboard.cost.actual_cost_by_agent[agent_id] = actual_cost_usd
+                # agent の実測コスト更新: 旧値との差分を反映
+                old_agent_actual = cost.actual_cost_by_agent.get(agent_id, 0.0)
+                cost.actual_cost_by_agent[agent_id] = actual_cost_usd
+                delta_actual = actual_cost_usd - old_agent_actual
+                cost.actual_cost_usd += delta_actual
+                # actual コールは estimated_non_actual に含まれないので差分のみ反映
+                cost.total_cost_usd += delta_actual
+            else:
+                # non-actual: estimated_cost が total_cost にも加算される
+                cost.total_cost_usd += estimated_cost
 
-            # 統計を再計算
-            self._recalculate_cost_stats(dashboard)
+            # 1000回ごとに全件再計算で浮動小数点誤差を補正
+            if cost.total_api_calls % 1000 == 0:
+                self._recalculate_cost_stats(dashboard)
 
         self.run_dashboard_transaction(_record)
 
