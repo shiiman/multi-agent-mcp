@@ -36,7 +36,7 @@ async def _send_macos_notification(msg_type_value: str, sender_id: str) -> bool:
             timeout=5,
         )
         return True
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         logger.warning("macOS 通知の送信に失敗: %s", e)
         return False
 
@@ -101,7 +101,7 @@ async def notify_agent_via_tmux(
                     attempt + 1,
                 )
                 return True
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.warning("tmux 通知の送信に失敗 (attempt=%d): %s", attempt + 1, e)
 
         if attempt < _TMUX_NOTIFY_MAX_RETRIES - 1:

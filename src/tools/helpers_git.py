@@ -78,7 +78,7 @@ def _run_git_capture(project_root: str, args: list[str]) -> tuple[bool, str]:
             text=True,
             check=False,
         )
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return False, str(e)
     if proc.returncode != 0:
         return False, (proc.stderr or proc.stdout).strip()
@@ -139,7 +139,7 @@ def _is_branch_tree_equal_to_head(project_root: str, branch: str) -> tuple[bool,
             text=True,
             check=False,
         )
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return False, str(e)
 
     if proc.returncode == 0:
@@ -236,7 +236,7 @@ def _check_branch_merge_state(project_root: str, branches: list[str]) -> list[di
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         logger.debug("ブランチマージ状態の確認に失敗: %s", e)
         return []
 

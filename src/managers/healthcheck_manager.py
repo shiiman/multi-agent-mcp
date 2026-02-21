@@ -851,7 +851,7 @@ class HealthcheckManager:
         admin_ids = [
             aid
             for aid, a in app_ctx.agents.items()
-            if str(getattr(getattr(a, "role", ""), "value", getattr(a, "role", ""))) == "admin"
+            if str(a.role) == "admin"
         ]
         caller_agent_id = admin_ids[0] if admin_ids else None
 

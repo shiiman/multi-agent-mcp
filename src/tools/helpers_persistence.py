@@ -208,7 +208,9 @@ def load_agents_from_file(app_ctx: AppContext, agents_file: Path | None = None) 
                 role_value = data.get("role")
                 if role_value not in _VALID_ROLES:
                     logger.warning(
-                        f"エージェント {agent_id} の不正なロール値をスキップ: {role_value!r}"
+                        "エージェント %s の不正なロール値をスキップ: %r",
+                        agent_id,
+                        role_value,
                     )
                     continue
                 # datetime 文字列を datetime オブジェクトに変換

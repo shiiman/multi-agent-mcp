@@ -46,7 +46,7 @@ class TemplateLoader:
         # カテゴリの明示的バリデーション
         if category not in _ALLOWED_CATEGORIES:
             raise ValueError(
-                f"許可されていないカテゴリです: '{category}'"
+                f"許可されていないカテゴリです: '{category}' "
                 f"（許可: {', '.join(sorted(_ALLOWED_CATEGORIES))}）"
             )
 
@@ -111,11 +111,13 @@ class TemplateLoader:
         # 既存の $ をエスケープ（シェルスクリプト等の $VAR を保護）
         text = template_content.replace("$", "$$")
         # {{ / }} をプレースホルダーに退避（format() でのリテラル {} 表現）
-        text = text.replace("{{", "\x00LBRACE\x00").replace("}}", "\x00RBRACE\x00")
+        _LBRACE = "__LBRACE_SENTINEL__"
+        _RBRACE = "__RBRACE_SENTINEL__"
+        text = text.replace("{{", _LBRACE).replace("}}", _RBRACE)
         # {variable} → ${variable} に変換
         text = re.sub(r"\{(\w+)\}", r"${\1}", text)
         # プレースホルダーをリテラル { / } に復元
-        text = text.replace("\x00LBRACE\x00", "{").replace("\x00RBRACE\x00", "}")
+        text = text.replace(_LBRACE, "{").replace(_RBRACE, "}")
         return string.Template(text).safe_substitute(**kwargs)
 
     def _get_extension(self, category: str) -> str:

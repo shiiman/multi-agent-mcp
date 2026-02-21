@@ -143,13 +143,20 @@ class DashboardManager(
                     return
                 except BlockingIOError:
                     time.sleep(0.01)
-            # タイムアウト — ブロッキングフォールバック
-            fcntl.flock(fileno, fcntl.LOCK_EX)
+            # タイムアウト — ブロッキングフォールバックは使わず例外を送出
+            raise TimeoutError(
+                f"Dashboard ファイルロックの取得がタイムアウトしました ({timeout}秒)"
+            )
 
-        lock_file = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115
+        lock_file = None
         try:
+            lock_file = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115
             await asyncio.to_thread(_acquire_lock, lock_file.fileno())
             yield
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-            lock_file.close()
+            if lock_file is not None:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                lock_file.close()

@@ -72,7 +72,7 @@ _DANGEROUS_COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # allow_dangerous=True でもバイパスできない絶対ブロックパターン
 _ALWAYS_BLOCKED_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r":\s*\(\)\s*\{\s*:\s*\|\s*:\s*;\s*\}", re.IGNORECASE), "fork bomb"),
-    (re.compile(r"(^|\s)rm\s+(-rf|-fr)\s+/\s*$", re.IGNORECASE), "rm -rf /"),
+    (re.compile(r"(^|\s)rm\s+(-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*)\s+/(\s|$)", re.IGNORECASE), "rm -rf /"),
     (re.compile(r">\s*/dev/sd[a-z]", re.IGNORECASE), "write to block device"),
     (re.compile(r">\s*/dev/nvme[0-9]", re.IGNORECASE), "write to block device"),
     (re.compile(r"(^|\s)dd\s+.*of=/dev/(sd|nvme|hd)", re.IGNORECASE), "dd to block device"),

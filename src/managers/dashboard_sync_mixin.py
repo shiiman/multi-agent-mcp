@@ -150,7 +150,8 @@ class DashboardSyncMixin:
 
                     dashboard.calculate_stats()
                     logger.debug(
-                        f"agents.json から {len(dashboard.agents)} 件のエージェントを同期"
+                        "agents.json から %d 件のエージェントを同期",
+                        len(dashboard.agents),
                     )
                     sync_report["agents_sync"]["count"] = len(dashboard.agents)
                 except (TypeError, ValueError) as e:
@@ -163,7 +164,7 @@ class DashboardSyncMixin:
             # プリフェッチ済み IPC メッセージを Dashboard に適用
             if prefetched_messages is not None:
                 dashboard.messages = prefetched_messages
-                logger.debug(f"IPC メッセージ {len(dashboard.messages)} 件を収集")
+                logger.debug("IPC メッセージ %d 件を収集", len(dashboard.messages))
                 sync_report["ipc_sync"]["count"] = len(dashboard.messages)
             else:
                 sync_report["ipc_sync"]["count"] = len(dashboard.messages)
