@@ -267,11 +267,13 @@ async def _deliver_notification(
     receiver_agent = app_ctx.agents.get(receiver_id)
     sender_agent = app_ctx.agents.get(sender_id)
 
-    is_admin_to_owner = (
+    # macOS通知は admin→owner の task_complete のみ（フォールバック禁止）
+    is_admin_task_complete_to_owner = (
         sender_agent
         and receiver_agent
         and str(getattr(sender_agent, "role", "")) == AgentRole.ADMIN.value
         and str(getattr(receiver_agent, "role", "")) == AgentRole.OWNER.value
+        and msg_type == MessageType.TASK_COMPLETE
     )
 
     if not receiver_agent:
@@ -288,13 +290,8 @@ async def _deliver_notification(
         )
         if tmux_ok:
             return True, "tmux"
-        if is_admin_to_owner:
-            from src.tools.helpers import _send_macos_notification
-
-            macos_ok = await _send_macos_notification(msg_type.value, sender_id)
-            if macos_ok:
-                return True, "macos_fallback"
-    elif is_admin_to_owner:
+        # 仕様: macOS通知は admin→owner の task_complete のみに限定。tmux失敗時のフォールバックは行わない
+    elif is_admin_task_complete_to_owner:
         from src.tools.helpers import _send_macos_notification
 
         macos_ok = await _send_macos_notification(msg_type.value, sender_id)

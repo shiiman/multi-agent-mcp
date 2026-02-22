@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import shlex
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -574,25 +575,40 @@ def _prepare_worker_task_content(
         enable_cursor_image_routing=app_ctx.settings.enable_cursor_image_routing,
     )
 
-    # レポートテンプレートのファイルパス注入
+    # レポートテンプレートのファイルパス注入（ワークスペース内にミラーコピー）
     if report_template:
         # 循環インポート回避のため遅延インポート
         from src.config.template_loader import get_template_loader
 
         loader = get_template_loader()
         try:
-            template_path = loader.resolve_path("reports", report_template)
-            final_task_content += (
-                "\n\n---\n\n## レポート出力形式\n\n"
-                f"テンプレートファイル: `{template_path}`\n\n"
-                "このテンプレートファイルを読み込み、プレースホルダー（[...]）を"
-                "実際の調査結果に置き換えてレポートを作成してください。\n"
-            )
+            source_path = loader.resolve_path("reports", report_template)
         except FileNotFoundError:
             logger.warning(
                 "レポートテンプレート '%s' が見つかりません",
                 report_template,
             )
+            source_path = None
+
+        if source_path is not None:
+            try:
+                # ワークスペース内にミラーを作成（Gemini CLI等のワークスペース外参照制限を回避）
+                mcp_dir = app_ctx.settings.mcp_dir
+                mirror_dir = project_root / mcp_dir / "runtime" / "templates" / "reports"
+                mirror_dir.mkdir(parents=True, exist_ok=True)
+                mirror_path = mirror_dir / source_path.name
+                shutil.copyfile(source_path, mirror_path)
+                final_task_content += (
+                    "\n\n---\n\n## レポート出力形式\n\n"
+                    f"テンプレートファイル: `{mirror_path}`\n\n"
+                    "このテンプレートファイルを読み込み、プレースホルダー（[...]）を"
+                    "実際の調査結果に置き換えてレポートを作成してください。\n"
+                )
+            except OSError:
+                logger.warning(
+                    "レポートテンプレート '%s' のミラーコピーに失敗",
+                    report_template,
+                )
 
     # タスクファイル作成
     dashboard = ensure_dashboard_manager(app_ctx)

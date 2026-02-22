@@ -155,6 +155,12 @@ class TemplateLoader:
         Raises:
             FileNotFoundError: テンプレートが見つからない、または不正なパスの場合
         """
+        # テンプレート名の明示的バリデーション（load() と同等）
+        if not _VALID_NAME_PATTERN.match(name):
+            raise FileNotFoundError(
+                f"不正なテンプレート名です: '{name}'（英数字・ハイフン・アンダースコアのみ許可）"
+            )
+
         ext = self._get_extension(category)
         path = (self._base_dir / category / f"{name}{ext}").resolve()
 
