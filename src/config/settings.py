@@ -475,10 +475,10 @@ class Settings(BaseSettings):
 
     # 品質チェック・イテレーション設定
     quality_check_max_iterations: int = Field(
-        default=5,
+        default=3,
         description="品質チェックの最大イテレーション回数",
     )
-    """品質チェックの最大イテレーション回数（デフォルト: 5）"""
+    """品質チェックの最大イテレーション回数（デフォルト: 3）"""
 
     quality_check_same_issue_limit: int = Field(
         default=3,
@@ -507,13 +507,16 @@ class Settings(BaseSettings):
 
     # コスト推定設定
     estimated_tokens_per_call: int = Field(
-        default=2000,
+        default=5000,
         description="1回のAPI呼び出しあたりの推定トークン数",
     )
-    """1回のAPI呼び出しあたりの推定トークン数（デフォルト: 2000）"""
+    """1回のAPI呼び出しあたりの推定トークン数（デフォルト: 5000）"""
 
+    # 短縮キー(claude:opus等)は後方互換のため維持。正式キー(claude:claude-opus-4-6等)を併記
     model_cost_table_json: str = Field(
         default='{"claude:opus":0.03,"claude:sonnet":0.015,'
+        '"claude:claude-opus-4-6":0.03,"claude:claude-sonnet-4-6":0.015,'
+        '"claude:claude-haiku-4-5-20251001":0.003,'
         '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro-preview":0.012,'
         '"gemini:gemini-3-flash-preview":0.003,'
         '"gemini:gemini-3-pro":0.005,"gemini:gemini-3-flash":0.0025,'

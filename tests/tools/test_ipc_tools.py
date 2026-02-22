@@ -1014,10 +1014,10 @@ class TestSendMessage:
         assert "sender_id と caller_agent_id が一致しない" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_admin_to_owner_non_complete_uses_macos_fallback(
+    async def test_admin_to_owner_non_complete_no_macos_notification(
         self, ipc_mock_ctx, git_repo
     ):
-        """admin→owner の task_complete 以外でも macOS 通知することをテスト。"""
+        """admin→owner の task_complete 以外では macOS 通知しないことをテスト。"""
         from mcp.server.fastmcp import FastMCP
 
         from src.tools.ipc import register_tools
@@ -1058,11 +1058,10 @@ class TestSendMessage:
                 ctx=ipc_mock_ctx,
             )
 
-        assert result["success"] is True
-        assert result["delivery_state"] == "delivered"
-        assert result["notification_sent"] is True
-        assert result["notification_method"] == "macos"
-        mock_macos.assert_awaited_once()
+        # task_complete 以外では macOS 通知は発火しない
+        assert result["success"] is False
+        assert result["notification_sent"] is False
+        mock_macos.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_send_message_returns_failed_delivery_when_tmux_notify_fails(
@@ -2401,10 +2400,10 @@ class TestQualityGateNoGitMode:
         assert any("未完了タスク" in r for r in result["gate"]["reasons"])
 
     @pytest.mark.asyncio
-    async def test_admin_to_owner_status_update_uses_macos_fallback(
+    async def test_admin_to_owner_status_update_no_macos_notification(
         self, ipc_no_git_mock_ctx
     ):
-        """admin→owner の status_update で macOS フォールバックが動作することをテスト。"""
+        """admin→owner の status_update では macOS 通知しないことをテスト。"""
         send_message = self._get_send_message_fn()
         app_ctx = ipc_no_git_mock_ctx.request_context.lifespan_context
         self._setup_admin_owner(app_ctx, app_ctx.project_root)
@@ -2425,8 +2424,7 @@ class TestQualityGateNoGitMode:
                 ctx=ipc_no_git_mock_ctx,
             )
 
-        assert result["success"] is True
-        assert result["delivery_state"] == "delivered"
-        assert result["notification_sent"] is True
-        assert result["notification_method"] == "macos"
-        mock_macos.assert_awaited_once()
+        # task_complete 以外では macOS 通知は発火しない
+        assert result["success"] is False
+        assert result["notification_sent"] is False
+        mock_macos.assert_not_awaited()

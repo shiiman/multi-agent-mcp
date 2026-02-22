@@ -347,10 +347,11 @@ class TestReportTemplateInjection:
         assert "## レポート出力形式" in content
         assert "テンプレートファイル:" in content
 
-        # パスが templates/reports/security.md を指していること
-        loader = get_template_loader()
-        expected_path = str(loader._base_dir / "reports" / "security.md")
-        assert expected_path in content
+        # ワークスペース内のミラーパスを指していること（settings.mcp_dir を使用）
+        mirror_path = str(
+            project_root / settings.mcp_dir / "runtime" / "templates" / "reports" / "security.md"
+        )
+        assert mirror_path in content
 
     def test_prepare_worker_task_content_without_report_template(self, git_repo, settings):
         """report_template=None の場合はレポートセクションが含まれないこと。"""
@@ -394,6 +395,33 @@ class TestReportTemplateInjection:
         )
 
         # テンプレートパスが注入されないこと
+        content = task_file.read_text(encoding="utf-8")
+        assert "## レポート出力形式" not in content
+
+    def test_prepare_worker_task_content_mirror_copy_oserror(self, git_repo, settings):
+        """ミラーコピー時の OSError でもエラーにならないこと。"""
+        from unittest.mock import patch
+
+        from src.tools.agent_helpers import _prepare_worker_task_content
+
+        app_ctx, agent = self._make_app_ctx(git_repo, settings)
+
+        # shutil.copyfile が OSError を発生させる
+        with patch("src.tools.agent_helpers.shutil.copyfile", side_effect=OSError("ディスク容量不足")):
+            project_root, task_file = _prepare_worker_task_content(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content="OSError テスト",
+                task_id="task-004",
+                branch="feature/test",
+                worktree_path=str(git_repo),
+                session_id="test-session",
+                enable_worktree=False,
+                caller_agent_id="admin-001",
+                report_template="security",
+            )
+
+        # OSError 時はレポートセクションが注入されないこと
         content = task_file.read_text(encoding="utf-8")
         assert "## レポート出力形式" not in content
 
