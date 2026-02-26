@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.managers.terminal.base import TerminalExecutor
+from src.managers.terminal.cmux import CmuxExecutor
 from src.managers.terminal.ghostty import GhosttyExecutor
 from src.managers.terminal.iterm2 import ITerm2Executor
 from src.managers.terminal.terminal_app import TerminalAppExecutor
@@ -232,3 +233,142 @@ class TestTerminalAppExecutor:
         assert "タブ" in message
         executor._run_osascript.assert_awaited_once()
         executor._run_shell.assert_not_called()
+
+
+class TestCmuxExecutor:
+    """cmux 実装のテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_name_property(self):
+        """name プロパティが 'cmux' を返す。"""
+        executor = CmuxExecutor()
+        assert executor.name == "cmux"
+
+    @pytest.mark.asyncio
+    async def test_open_workspace_with_single_quote_command(self):
+        """シングルクォートを含むコマンドでも workspace 実行できる。"""
+        error_message = "_run_shell should not be called"
+        executor = CmuxExecutor()
+        executor._run_osascript = AsyncMock(return_value=(0, "", ""))
+        executor._run_shell = AsyncMock(side_effect=AssertionError(error_message))
+
+        success = await executor._open_workspace(
+            "exec bash '/tmp/it\\'s-script.sh'"
+        )
+
+        assert success is True
+        executor._run_osascript.assert_awaited_once()
+        executor._run_shell.assert_not_called()
+        script = executor._run_osascript.await_args.args[0]
+        assert 'exists process "cmux"' in script
+        # Cmd+N で workspace を開く（タブではなく）
+        assert 'keystroke "n" using command down' in script
+
+    @pytest.mark.asyncio
+    async def test_is_running_uses_pgrep_fallback(self):
+        """AppleScript 判定失敗時は pgrep 判定で既起動を検出する。"""
+        executor = CmuxExecutor()
+        executor._run_osascript = AsyncMock(return_value=(1, "", "osascript error"))
+        executor._run_exec = AsyncMock(return_value=(0, "1234\n", ""))
+
+        running = await executor._is_running()
+
+        assert running is True
+        executor._run_exec.assert_awaited_once_with("pgrep", "-x", "cmux")
+
+    @pytest.mark.asyncio
+    async def test_is_available_with_which(self, monkeypatch):
+        """which で cmux が見つかる場合に利用可能と判定する。"""
+        executor = CmuxExecutor()
+        monkeypatch.setattr(
+            "src.managers.terminal.cmux.shutil.which",
+            lambda x: "/usr/local/bin/cmux" if x == "cmux" else None,
+        )
+        assert await executor.is_available() is True
+
+    @pytest.mark.asyncio
+    async def test_is_available_with_app_bundle(self, monkeypatch):
+        """cmux.app が存在する場合に利用可能と判定する。"""
+        from pathlib import Path
+
+        executor = CmuxExecutor()
+        monkeypatch.setattr(
+            "src.managers.terminal.cmux.shutil.which",
+            lambda x: None,
+        )
+        original_exists = Path.exists
+
+        def mock_exists(self):
+            if str(self) == "/Applications/cmux.app":
+                return True
+            if str(self) == "/Applications/cmux.app/Contents/MacOS/cmux":
+                return False
+            return original_exists(self)
+
+        monkeypatch.setattr(Path, "exists", mock_exists)
+        assert await executor.is_available() is True
+
+    @pytest.mark.asyncio
+    async def test_close_workspace_finds_and_closes_matching_window(self):
+        """セッション名に一致するウィンドウを検索 → tmux kill → Cmd+W で閉じる。"""
+        executor = CmuxExecutor()
+        executor._is_running = AsyncMock(return_value=True)
+        # 1回目: ウィンドウ検索 (found), 2回目: Cmd+W (closed)
+        executor._run_osascript = AsyncMock(
+            side_effect=[
+                (0, "found", ""),
+                (0, "closed", ""),
+            ]
+        )
+        executor._run_exec = AsyncMock(return_value=(0, "", ""))
+
+        result = await executor.close_workspace("my-session")
+
+        assert result is True
+        assert executor._run_osascript.await_count == 2
+        # 1回目: ウィンドウタイトルでセッション名をマッチング
+        find_script = executor._run_osascript.await_args_list[0].args[0]
+        assert 'contains "my-session"' in find_script
+        # 2回目: Cmd+W で閉じる
+        close_script = executor._run_osascript.await_args_list[1].args[0]
+        assert 'keystroke "w" using command down' in close_script
+        # tmux kill-session が呼ばれた
+        executor._run_exec.assert_any_await(
+            "tmux", "kill-session", "-t", "my-session"
+        )
+
+    @pytest.mark.asyncio
+    async def test_close_workspace_returns_false_when_not_found(self):
+        """一致するウィンドウがない場合 False を返す。"""
+        executor = CmuxExecutor()
+        executor._is_running = AsyncMock(return_value=True)
+        executor._run_osascript = AsyncMock(
+            return_value=(0, "not_found", "")
+        )
+
+        result = await executor.close_workspace("nonexistent-session")
+
+        assert result is False
+        # 検索のみ（1回）で終了
+        executor._run_osascript.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_workspace_returns_false_when_not_running(self):
+        """cmux が起動していない場合 False を返す。"""
+        executor = CmuxExecutor()
+        executor._is_running = AsyncMock(return_value=False)
+
+        result = await executor.close_workspace("my-session")
+
+        assert result is False
+        # osascript は呼ばれない
+        assert not hasattr(executor, "_run_osascript") or not isinstance(
+            getattr(executor, "_run_osascript"), AsyncMock
+        )
+
+    @pytest.mark.asyncio
+    async def test_close_workspace_base_returns_false(self):
+        """基底クラスの close_workspace はデフォルト False を返す。"""
+        executor = DummyExecutor()
+        result = await executor.close_workspace("any-session")
+        assert result is False

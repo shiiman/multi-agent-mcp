@@ -60,6 +60,7 @@ multi-agent-mcp/
 │   │   ├── persona_manager.py   # Task-based persona optimization
 │   │   └── terminal/            # Terminal app implementations
 │   │       ├── base.py          # Abstract base class
+│   │       ├── cmux.py          # cmux terminal support
 │   │       ├── ghostty.py       # Ghostty terminal support
 │   │       ├── iterm2.py        # iTerm2 terminal support
 │   │       └── terminal_app.py  # macOS Terminal.app support
@@ -266,7 +267,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_CODEX_ENTER_RETRY_MAX` | Max retries for Codex Enter resend | 3 |
 | `MCP_CODEX_ENTER_RETRY_INTERVAL_MS` | Interval between Codex Enter retries (ms) | 250 |
 | `MCP_SEND_COOLDOWN_SECONDS` | Minimum cooldown between pane sends | 2.0 |
-| `MCP_DEFAULT_TERMINAL` | Default terminal app | auto |
+| `MCP_DEFAULT_TERMINAL` | Default terminal app (auto: cmux → ghostty → iterm2 → terminal) | auto |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | codex |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | gpt-5.3-codex |

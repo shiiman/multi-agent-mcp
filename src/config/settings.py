@@ -60,7 +60,10 @@ class TerminalApp(str, Enum):
     """サポートするターミナルアプリ。"""
 
     AUTO = "auto"
-    """自動検出（ghostty → iTerm2 → Terminal.app）"""
+    """自動検出（cmux → ghostty → iTerm2 → Terminal.app）"""
+
+    CMUX = "cmux"
+    """cmux"""
 
     GHOSTTY = "ghostty"
     """Ghostty"""

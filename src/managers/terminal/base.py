@@ -144,6 +144,20 @@ class TerminalExecutor(ABC):
         """AppleScript 文字列用にエスケープする。"""
         return value.replace("\\", "\\\\").replace('"', '\\"')
 
+    async def close_workspace(self, session_name: str) -> bool:
+        """セッション名に対応するターミナル workspace を閉じる。
+
+        デフォルトは何もしない（no-op）。
+        ターミナル固有の実装でオーバーライドする。
+
+        Args:
+            session_name: tmux セッション名（ウィンドウタイトルのマッチングに使用）
+
+        Returns:
+            workspace を閉じた場合 True
+        """
+        return False
+
     def _extract_session_name(self, script: str) -> str:
         """スクリプトからセッション名を抽出する。
 

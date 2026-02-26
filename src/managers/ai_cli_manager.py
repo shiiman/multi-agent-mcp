@@ -459,7 +459,9 @@ class AiCliManager:
             terminal = await self._detect_terminal()
 
         # ターミナルで開く
-        if terminal == TerminalApp.GHOSTTY:
+        if terminal == TerminalApp.CMUX:
+            return await self._open_in_cmux(worktree_path, args)
+        elif terminal == TerminalApp.GHOSTTY:
             return await self._open_in_ghostty(worktree_path, args)
         elif terminal == TerminalApp.ITERM2:
             command = " ".join(shlex.quote(arg) for arg in args)
@@ -473,11 +475,16 @@ class AiCliManager:
     async def _detect_terminal(self) -> TerminalApp:
         """利用可能なターミナルアプリを検出する。
 
-        優先順位: Ghostty → iTerm2 → Terminal.app
+        優先順位: cmux → Ghostty → iTerm2 → Terminal.app
 
         Returns:
             検出されたターミナルアプリ
         """
+        # cmux を確認
+        cmux_app = Path("/Applications/cmux.app")
+        if cmux_app.exists():
+            return TerminalApp.CMUX
+
         # Ghostty を確認
         ghostty_app = Path("/Applications/Ghostty.app")
         if ghostty_app.exists():
@@ -490,6 +497,146 @@ class AiCliManager:
 
         # デフォルトは Terminal.app
         return TerminalApp.TERMINAL
+
+    async def _open_in_cmux(
+        self, worktree_path: str, command_args: list[str]
+    ) -> tuple[bool, str]:
+        """cmux で新しい workspace を開いてコマンドを実行する。
+
+        Args:
+            worktree_path: 作業ディレクトリのパス
+            command_args: 実行するコマンド引数（argv 形式）
+
+        Returns:
+            (成功したかどうか, メッセージ) のタプル
+        """
+        try:
+            cmd = (
+                "cd "
+                + shlex.quote(worktree_path)
+                + " && "
+                + " ".join(shlex.quote(arg) for arg in command_args)
+            )
+
+            if await self._is_cmux_running():
+                opened = await self._open_cmux_workspace(cmd)
+                if opened:
+                    return (
+                        True,
+                        "cmux の新しい workspace でターミナルを開きました",
+                    )
+                logger.warning(
+                    "cmux workspace 追加に失敗したため、"
+                    "新規ウィンドウで再試行します"
+                )
+
+            proc = await asyncio.create_subprocess_exec(
+                "open",
+                "-na",
+                "cmux.app",
+                "--args",
+                f"--working-directory={worktree_path}",
+                "-e",
+                *command_args,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+
+            if proc.returncode == 0:
+                return True, "cmux でターミナルを開きました"
+            else:
+                error_msg = (
+                    stderr.decode().strip() if stderr else "不明なエラー"
+                )
+                return False, f"cmux の起動に失敗しました: {error_msg}"
+
+        except (OSError, ValueError) as e:
+            logger.error("cmux 起動エラー: %s", e)
+            return False, f"cmux 起動エラー: {e}"
+
+    async def _is_cmux_running(self) -> bool:
+        """cmux が起動中かを確認する。"""
+        applescript = """
+        if application "cmux" is running then
+            return "true"
+        else
+            return "false"
+        end if
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "osascript",
+                "-e",
+                applescript,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                return "true" in stdout.decode().lower()
+        except (OSError, ValueError) as e:
+            logger.debug("cmux 起動確認の AppleScript 判定に失敗: %s", e)
+
+        # AppleScript 判定が失敗する環境向けフォールバック
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pgrep",
+                "-x",
+                "cmux",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            if proc.returncode == 0:
+                return True
+        except (OSError, ValueError) as e:
+            logger.debug("pgrep による cmux 検出に失敗: %s", e)
+        return False
+
+    async def _open_cmux_workspace(self, command: str) -> bool:
+        """起動中の cmux に新しい workspace を開いてコマンドを実行する。"""
+        escaped_command = escape_applescript(command)
+        applescript = f'''
+        set the clipboard to "{escaped_command}"
+        tell application "cmux"
+            activate
+        end tell
+        tell application "System Events"
+            if exists process "cmux" then
+                tell process "cmux"
+                    keystroke "n" using command down
+                    delay 0.5
+                    keystroke "v" using command down
+                    delay 0.1
+                    keystroke return
+                end tell
+            else
+                error "cmux process not found"
+            end if
+        end tell
+        '''
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "osascript",
+                "-e",
+                applescript,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                return True
+            logger.warning(
+                "cmux workspace 追加失敗: %s",
+                stderr.decode().strip() if stderr else "unknown",
+            )
+            return False
+        except (OSError, ValueError) as e:
+            logger.debug(
+                "cmux workspace の AppleScript 実行に失敗: %s", e
+            )
+            return False
 
     async def _open_in_ghostty(
         self, worktree_path: str, command_args: list[str]

@@ -807,7 +807,7 @@ class TmuxWorkspaceMixin:
         import shutil
         import tempfile
 
-        from .terminal import GhosttyExecutor, ITerm2Executor, TerminalAppExecutor
+        from .terminal import CmuxExecutor, GhosttyExecutor, ITerm2Executor, TerminalAppExecutor
 
         # 作業ディレクトリの検証
         if not os.path.isdir(working_dir):
@@ -840,6 +840,7 @@ class TmuxWorkspaceMixin:
 
         # ターミナル実行クラスの選択
         executors = {
+            TerminalApp.CMUX: CmuxExecutor(),
             TerminalApp.GHOSTTY: GhosttyExecutor(),
             TerminalApp.ITERM2: ITerm2Executor(),
             TerminalApp.TERMINAL: TerminalAppExecutor(),
@@ -852,7 +853,12 @@ class TmuxWorkspaceMixin:
                 return await executor.execute_script(working_dir, script, script_path)
 
         # auto: 優先順位で試行
-        for app in [TerminalApp.GHOSTTY, TerminalApp.ITERM2, TerminalApp.TERMINAL]:
+        for app in [
+            TerminalApp.CMUX,
+            TerminalApp.GHOSTTY,
+            TerminalApp.ITERM2,
+            TerminalApp.TERMINAL,
+        ]:
             executor = executors[app]
             if await executor.is_available():
                 success, msg = await executor.execute_script(working_dir, script, script_path)

@@ -232,6 +232,56 @@ def cleanup_orphan_provisional_sessions(
     return result
 
 
+async def _close_terminal_workspaces(
+    app_ctx: AppContext, session_names: list[str]
+) -> int:
+    """ターミナルアプリの workspace を閉じる。
+
+    設定に基づいてターミナル executor を選択し、
+    各セッション名に対応する workspace を閉じる。
+
+    Args:
+        app_ctx: アプリケーションコンテキスト
+        session_names: 閉じる対象の tmux セッション名リスト
+
+    Returns:
+        閉じた workspace の数
+    """
+    if not session_names:
+        return 0
+
+    try:
+        from src.config.settings import TerminalApp
+        from src.managers.terminal import CmuxExecutor
+
+        terminal = app_ctx.settings.default_terminal
+        if terminal == TerminalApp.AUTO:
+            # AUTO の場合は cmux のみ試行（他のターミナルは no-op）
+            executor = CmuxExecutor()
+        elif terminal == TerminalApp.CMUX:
+            executor = CmuxExecutor()
+        else:
+            # cmux 以外のターミナルは close_workspace 未実装（no-op）
+            return 0
+
+        if not await executor.is_available():
+            return 0
+
+        closed = 0
+        for name in session_names:
+            try:
+                if await executor.close_workspace(name):
+                    closed += 1
+            except Exception as e:
+                logger.debug(
+                    "workspace クローズをスキップ: %s (%s)", name, e
+                )
+        return closed
+    except Exception as e:
+        logger.debug("ターミナル workspace クローズをスキップ: %s", e)
+        return 0
+
+
 async def cleanup_session_resources(
     app_ctx: AppContext,
     remove_worktrees: bool = False,
@@ -251,6 +301,7 @@ async def cleanup_session_resources(
         各ステップの結果を含む辞書
     """
     results: dict[str, Any] = {
+        "closed_terminal_workspaces": 0,
         "terminated_sessions": 0,
         "cleared_agents": 0,
         "removed_worktrees": 0,
@@ -269,8 +320,13 @@ async def cleanup_session_resources(
     tmux = app_ctx.tmux
     agents = app_ctx.agents
 
-    # ① tmux セッション kill
+    # ① ターミナル workspace クローズ（内部で tmux kill → Cmd+W の順で処理）
     session_names = _collect_session_names(agents)
+    results["closed_terminal_workspaces"] = await _close_terminal_workspaces(
+        app_ctx, session_names
+    )
+
+    # ② 残りの tmux セッション kill（①で kill 済みのものは無視される）
     results["terminated_sessions"] = await tmux.cleanup_sessions(session_names)
     results["cleared_agents"] = len(agents)
 

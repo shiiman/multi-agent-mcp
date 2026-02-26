@@ -193,6 +193,7 @@ class TmuxManager(TmuxWorkspaceMixin):
             return False
         attach_cmd = f"tmux attach -t {shlex.quote(session_name)}"
         openers = {
+            TerminalApp.CMUX: self._open_in_cmux,
             TerminalApp.GHOSTTY: self._open_in_ghostty,
             TerminalApp.ITERM2: self._open_in_iterm2,
             TerminalApp.TERMINAL: self._open_in_terminal_app,
@@ -200,9 +201,101 @@ class TmuxManager(TmuxWorkspaceMixin):
         selected_terminal = terminal or self.settings.default_terminal
         if selected_terminal in openers:
             return await openers[selected_terminal](attach_cmd)
-        for opener in (self._open_in_ghostty, self._open_in_iterm2, self._open_in_terminal_app):
+        for opener in (
+            self._open_in_cmux,
+            self._open_in_ghostty,
+            self._open_in_iterm2,
+            self._open_in_terminal_app,
+        ):
             if await opener(attach_cmd):
                 return True
+        return False
+
+    async def _open_in_cmux(self, attach_cmd: str) -> bool:
+        """cmux で新しい workspace を開いてセッションにアタッチする。"""
+        import shutil
+        from pathlib import Path
+
+        def _escape_applescript_string(value: str) -> str:
+            return value.replace("\\", "\\\\").replace('"', '\\"')
+
+        async def _is_cmux_running() -> bool:
+            applescript = """
+            if application "cmux" is running then
+                return "true"
+            else
+                return "false"
+            end if
+            """
+            code, stdout, _ = await self._run_exec(
+                "osascript", "-e", applescript
+            )
+            if code == 0:
+                return "true" in stdout.lower()
+
+            code, _, _ = await self._run_exec("pgrep", "-x", "cmux")
+            return code == 0
+
+        async def _open_workspace_in_running_cmux(command: str) -> bool:
+            escaped_command = _escape_applescript_string(command)
+            applescript = f'''
+            set the clipboard to "{escaped_command}"
+            tell application "cmux"
+                activate
+            end tell
+            tell application "System Events"
+                if exists process "cmux" then
+                    tell process "cmux"
+                        keystroke "n" using command down
+                        delay 0.5
+                        keystroke "v" using command down
+                        delay 0.1
+                        keystroke return
+                    end tell
+                else
+                    error "cmux process not found"
+                end if
+            end tell
+            '''
+            code, _, _ = await self._run_exec(
+                "osascript", "-e", applescript
+            )
+            return code == 0
+
+        cmux_path = shutil.which("cmux")
+        cmux_app = Path("/Applications/cmux.app")
+        has_cmux_app = cmux_app.exists()
+        if not cmux_path:
+            macos_cmux = Path("/Applications/cmux.app/Contents/MacOS/cmux")
+            if macos_cmux.exists():
+                cmux_path = str(macos_cmux)
+
+        if not cmux_path and not has_cmux_app:
+            return False
+
+        if await _is_cmux_running():
+            if await _open_workspace_in_running_cmux(attach_cmd):
+                return True
+            logger.warning(
+                "cmux の workspace 追加に失敗したため、"
+                "新規ウィンドウで再試行します"
+            )
+
+        attach_args = shlex.split(attach_cmd)
+        if has_cmux_app:
+            code, _, _ = await self._run_exec(
+                "open",
+                "-na",
+                "cmux.app",
+                "--args",
+                "-e",
+                *attach_args,
+            )
+            return code == 0
+
+        if cmux_path:
+            code, _, _ = await self._run_exec(cmux_path, "-e", *attach_args)
+            return code == 0
         return False
 
     async def _open_in_ghostty(self, attach_cmd: str) -> bool:

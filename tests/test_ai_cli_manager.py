@@ -456,25 +456,28 @@ class TestAiCliManagerTerminal:
     """ターミナル起動機能のテスト。"""
 
     @pytest.mark.asyncio
-    async def test_detect_terminal_ghostty(self, ai_cli_manager):
-        """Ghostty が検出されることをテスト。"""
+    async def test_detect_terminal_cmux(self, ai_cli_manager):
+        """cmux が最優先で検出されることをテスト。"""
         with patch("pathlib.Path.exists") as mock_exists:
             mock_exists.return_value = True
+            terminal = await ai_cli_manager._detect_terminal()
+            assert terminal == TerminalApp.CMUX
+
+    @pytest.mark.asyncio
+    async def test_detect_terminal_ghostty(self, ai_cli_manager):
+        """cmux がない場合に Ghostty が検出されることをテスト。"""
+        with patch("pathlib.Path.exists") as mock_exists:
+            # cmux → False, Ghostty → True
+            mock_exists.side_effect = [False, True]
             terminal = await ai_cli_manager._detect_terminal()
             assert terminal == TerminalApp.GHOSTTY
 
     @pytest.mark.asyncio
     async def test_detect_terminal_iterm2(self, ai_cli_manager):
-        """iTerm2 が検出されることをテスト。"""
+        """cmux/Ghostty がない場合に iTerm2 が検出されることをテスト。"""
         with patch("pathlib.Path.exists") as mock_exists:
-            def exists_side_effect(self=None):
-                # Ghostty がない場合、iTerm2 を返す
-                path = str(mock_exists.call_args)
-                return "iTerm" in path
-
-            mock_exists.side_effect = lambda: False
-            # 最初の呼び出し（Ghostty）は False、2番目（iTerm）は True
-            mock_exists.side_effect = [False, True]
+            # cmux → False, Ghostty → False, iTerm2 → True
+            mock_exists.side_effect = [False, False, True]
             terminal = await ai_cli_manager._detect_terminal()
             assert terminal == TerminalApp.ITERM2
 
