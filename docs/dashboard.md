@@ -281,6 +281,7 @@ cost:
 | ---- | ---------------------- |
 | `claude:opus` | 0.03 |
 | `claude:sonnet` | 0.015 |
+| `codex:gpt-5.4` | 0.01 |
 | `codex:gpt-5.3-codex` | 0.01 |
 | `gemini:gemini-3-pro-preview` | 0.012 |
 | `gemini:gemini-3-flash-preview` | 0.003 |

@@ -117,7 +117,7 @@ class ModelDefaults:
     """Claude Sonnet モデル（Claude CLI が最新バージョンに自動解決）"""
 
     # Codex CLI
-    CODEX_DEFAULT = "gpt-5.3-codex"
+    CODEX_DEFAULT = "gpt-5.4"
     """Codex デフォルトモデル"""
 
     # Cursor CLI
@@ -520,7 +520,7 @@ class Settings(BaseSettings):
         default='{"claude:opus":0.03,"claude:sonnet":0.015,'
         '"claude:claude-opus-4-6":0.03,"claude:claude-sonnet-4-6":0.015,'
         '"claude:claude-haiku-4-5-20251001":0.003,'
-        '"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro-preview":0.012,'
+        '"codex:gpt-5.4":0.01,"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro-preview":0.012,'
         '"gemini:gemini-3-flash-preview":0.003,'
         '"gemini:gemini-3-pro":0.005,"gemini:gemini-3-flash":0.0025,'
         '"cursor:composer-1.5":0.01}',

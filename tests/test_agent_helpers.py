@@ -640,7 +640,7 @@ class TestSendTaskToWorker:
                 worker_index=0,
                 enable_worktree=False,
                 profile_settings={
-                    "worker_model": "gpt-5.3-codex",
+                    "worker_model": "gpt-5.4",
                     "worker_thinking_tokens": 4000,
                     "worker_reasoning_effort": "none",
                 },
@@ -716,7 +716,7 @@ class TestSendTaskToWorker:
                 worker_index=0,
                 enable_worktree=False,
                 profile_settings={
-                    "worker_model": "gpt-5.3-codex",
+                    "worker_model": "gpt-5.4",
                     "worker_thinking_tokens": 4000,
                     "worker_reasoning_effort": "none",
                 },

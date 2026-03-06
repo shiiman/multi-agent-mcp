@@ -270,16 +270,16 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_DEFAULT_TERMINAL` | Default terminal app (auto: cmux → ghostty → iterm2 → terminal) | auto |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | codex |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | gpt-5.3-codex |
-| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | gpt-5.3-codex |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | gpt-5.4 |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | gpt-5.4 |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | Standard Admin thinking tokens | 4000 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | Standard Worker thinking tokens | 4000 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT` | Standard Admin reasoning effort | medium |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT` | Standard Worker reasoning effort | medium |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | codex |
-| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | gpt-5.3-codex |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | gpt-5.3-codex |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | gpt-5.4 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | gpt-5.4 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | Performance Admin thinking tokens | 30000 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | Performance Worker thinking tokens | 4000 |
@@ -288,8 +288,8 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
 | `MCP_CLI_DEFAULT_CLAUDE_ADMIN_MODEL` | Claude CLI Admin default model | opus |
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | Claude CLI Worker default model | sonnet |
-| `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | Codex CLI Admin default model | gpt-5.3-codex |
-| `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | Codex CLI Worker default model | gpt-5.3-codex |
+| `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | Codex CLI Admin default model | gpt-5.4 |
+| `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | Codex CLI Worker default model | gpt-5.4 |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | Gemini CLI Admin default model | gemini-3-pro-preview |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | Gemini CLI Worker default model | gemini-3-flash-preview |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | Cursor CLI Admin default model | composer-1.5 |

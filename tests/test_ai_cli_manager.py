@@ -217,10 +217,10 @@ class TestBuildStdinCommandWithModel:
         """Codex で --model フラグが含まれることをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CODEX, "/tmp/task.md", "/path/to/worktree",
-            model="gpt-5.3-codex",
+            model="gpt-5.4",
         )
         assert "--model" in cmd
-        assert "gpt-5.3-codex" in cmd
+        assert "gpt-5.4" in cmd
         assert "codex exec" not in cmd
         assert "--message" not in cmd
 
@@ -292,12 +292,12 @@ class TestResolveModelForCli:
         assert resolve_model_for_cli("claude", "sonnet", "worker") == "sonnet"
 
     def test_codex_fallback_admin(self):
-        """Codex で opus → gpt-5.3-codex に解決されることをテスト。"""
+        """Codex で opus → gpt-5.4 に解決されることをテスト。"""
         result = resolve_model_for_cli("codex", "opus", "admin")
         assert result == ModelDefaults.CODEX_DEFAULT
 
     def test_codex_fallback_worker(self):
-        """Codex で sonnet → gpt-5.3-codex に解決されることをテスト。"""
+        """Codex で sonnet → gpt-5.4 に解決されることをテスト。"""
         result = resolve_model_for_cli("codex", "sonnet", "worker")
         assert result == ModelDefaults.CODEX_DEFAULT
 
@@ -313,7 +313,7 @@ class TestResolveModelForCli:
 
     def test_explicit_model_not_converted(self):
         """明示指定されたモデル名は変換されないことをテスト。"""
-        assert resolve_model_for_cli("codex", "gpt-5.3-codex", "worker") == "gpt-5.3-codex"
+        assert resolve_model_for_cli("codex", "gpt-5.4", "worker") == "gpt-5.4"
         assert resolve_model_for_cli("gemini", "gemini-3-pro", "admin") == "gemini-3-pro"
         assert resolve_model_for_cli("claude", "claude-opus-4-6", "admin") == "claude-opus-4-6"
         assert resolve_model_for_cli("cursor", "composer-1.5", "worker") == "composer-1.5"
@@ -330,7 +330,7 @@ class TestResolveModelForCli:
             == ModelDefaults.CODEX_DEFAULT
         )
         assert (
-            resolve_model_for_cli("gemini", "gpt-5.3-codex", "worker")
+            resolve_model_for_cli("gemini", "gpt-5.4", "worker")
             == ModelDefaults.GEMINI_LIGHT
         )
         assert resolve_model_for_cli("claude", "gemini-3-pro", "worker") == ModelDefaults.SONNET

@@ -1112,8 +1112,8 @@ class TestSendTask:
         env_file = mcp_dir / ".env"
         env_file.write_text(
             "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n"
-            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.3-codex\n"
-            "MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL=gpt-5.3-codex\n",
+            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.4\n"
+            "MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL=gpt-5.4\n",
             encoding="utf-8",
         )
 
@@ -1152,7 +1152,7 @@ class TestSendTask:
         )
 
         assert result["success"] is True
-        assert "codex --model gpt-5.3-codex" in result["command_sent"]
+        assert "codex --model gpt-5.4" in result["command_sent"]
         assert "codex exec" not in result["command_sent"]
         _, send_kwargs = app_ctx.tmux.send_with_rate_limit_to_pane.await_args
         assert send_kwargs["confirm_codex_prompt"] is True

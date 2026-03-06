@@ -175,7 +175,7 @@ class TestCreateAgent:
         env_file = mcp_dir / ".env"
         env_file.write_text(
             "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n"
-            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.3-codex\n",
+            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.4\n",
             encoding="utf-8",
         )
 
@@ -717,7 +717,7 @@ class TestSendTaskToWorker:
         app_ctx.agents["worker-001"] = worker
 
         profile_settings = {
-            "worker_model": "gpt-5.3-codex",
+            "worker_model": "gpt-5.4",
             "worker_thinking_tokens": 4000,
         }
 
@@ -774,7 +774,7 @@ class TestSendTaskToWorker:
         app_ctx.agents["worker-002"] = worker
 
         profile_settings = {
-            "worker_model": "gpt-5.3-codex",
+            "worker_model": "gpt-5.4",
             "worker_thinking_tokens": 4000,
         }
 
