@@ -105,10 +105,9 @@ def _normalize_owner_wait_error(
 
 
 async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
-    """Admin/Owner 向けに Dashboard のエージェント情報・コスト・Markdownを同期する。"""
+    """Admin/Owner 向けに Dashboard のエージェント情報とコストを同期する。"""
     sync_agents_from_file(app_ctx)
-    for agent in app_ctx.agents.values():
-        dashboard.update_agent_summary(agent)
+    dashboard.sync_agent_summaries(app_ctx.agents.values())
     # 実測コスト収集は Claude の statusLine のみに限定する
     claude_agents = []
     for candidate in app_ctx.agents.values():
@@ -136,12 +135,6 @@ async def _sync_dashboard_for_admin(app_ctx: Any, dashboard: Any) -> None:
             )
         except (OSError, ValueError, TypeError) as e:
             logger.debug("Dashboard 同期時の Claude 実測コスト更新をスキップ: %s", e)
-    # Markdown ダッシュボードを保存
-    if app_ctx.session_id and app_ctx.project_root:
-        try:
-            dashboard.save_markdown_dashboard(app_ctx.project_root, app_ctx.session_id)
-        except OSError as e:
-            logger.warning("Dashboard ファイル更新に失敗: %s", e)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -333,9 +326,6 @@ def register_tools(mcp: FastMCP) -> None:
 
         dashboard = ensure_dashboard_manager(app_ctx)
 
-        # ファイルからエージェント情報を同期
-        sync_agents_from_file(app_ctx)
-
         # エージェントの存在確認
         if agent_id not in app_ctx.agents:
             return {
@@ -472,9 +462,6 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
-        # ファイルから最新のエージェント情報を同期
-        sync_agents_from_file(app_ctx)
-
         # progress の検証（checklist がある場合は自動計算されるためスキップ可）
         if progress is not None and not (0 <= progress <= 100):
             return {
@@ -556,7 +543,6 @@ def register_tools(mcp: FastMCP) -> None:
         warning: str | None = None
         delivery_state = "delivered"
         if admin_notified and admin_ids:
-            sync_agents_from_file(app_ctx)
             admin_agent = app_ctx.agents.get(admin_ids[0])
             if admin_agent is None:
                 notification_error = f"admin_agent_not_found:{admin_ids[0]}"
@@ -626,9 +612,6 @@ def register_tools(mcp: FastMCP) -> None:
         app_ctx, role_error = require_permission(ctx, "report_task_completion", caller_agent_id)
         if role_error:
             return role_error
-
-        # ファイルから最新のエージェント情報を同期
-        sync_agents_from_file(app_ctx)
 
         # Admin を検索
         admin_ids = find_agents_by_role(app_ctx, "admin")
@@ -706,7 +689,6 @@ def register_tools(mcp: FastMCP) -> None:
         notification_error: str | None = None
         warning: str | None = None
         delivery_state = "delivered"
-        sync_agents_from_file(app_ctx)
         admin_agent = app_ctx.agents.get(admin_id)
         if admin_agent is None:
             notification_error = f"admin_agent_not_found:{admin_id}"

@@ -1,6 +1,7 @@
 """Dashboard のエージェント集計・ステータス更新ロジック mixin。"""
 
 import logging
+from collections.abc import Iterable
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -85,6 +86,15 @@ class DashboardAgentMixin:
 
         self._mutate_dashboard(_update_agent)
 
+    def sync_agent_summaries(self, agents: Iterable[Agent]) -> None:
+        """複数 Agent からサマリー一覧を一括同期する。"""
+
+        def _sync(dashboard: Dashboard) -> None:
+            dashboard.agents = [self._build_agent_summary(agent) for agent in agents]
+            dashboard.calculate_stats()
+
+        self._mutate_dashboard(_sync)
+
     def remove_agent_summary(self, agent_id: str) -> None:
         """エージェントサマリーを削除する。
 
@@ -139,14 +149,7 @@ class DashboardAgentMixin:
             agent_manager: AgentManager インスタンス
         """
 
-        def _sync(dashboard: Dashboard) -> None:
-            dashboard.agents = [
-                self._build_agent_summary(agent)
-                for agent in agent_manager.agents.values()
-            ]
-            dashboard.calculate_stats()
-
-        self._mutate_dashboard(_sync)
+        self.sync_agent_summaries(agent_manager.agents.values())
 
     # ------------------------------------------------------------------
     # サマリー取得
@@ -158,7 +161,7 @@ class DashboardAgentMixin:
         Returns:
             サマリー情報の辞書
         """
-        dashboard = self._read_dashboard()
+        dashboard = self._read_dashboard_snapshot()
         cost = dashboard.cost
         pending_tasks = len(dashboard.get_tasks_by_status(TaskStatus.PENDING))
         in_progress_tasks = len(dashboard.get_tasks_by_status(TaskStatus.IN_PROGRESS))

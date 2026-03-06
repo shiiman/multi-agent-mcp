@@ -77,10 +77,16 @@ Multi-Agent MCP が保存・編集するファイルの一覧と、そのディ�
 | 書き込み | `init_tmux_workspace` で初期作成 |
 
 ```env
-MCP_MAX_WORKERS=6
+MCP_MODEL_PROFILE_ACTIVE=standard
+MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS=6
 MCP_ENABLE_WORKTREE=false
 MCP_COST_WARNING_THRESHOLD_USD=10.0
 ```
+
+> `MCP_MAX_WORKERS` は旧キーであり、現行実装では使用されません。  
+> Worker 上限は `MCP_MODEL_PROFILE_ACTIVE` に応じて
+> `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` または
+> `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` で制御されます。
 
 #### `.multi-agent-mcp/config.json`
 

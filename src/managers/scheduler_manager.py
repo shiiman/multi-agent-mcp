@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DashboardProvider = Callable[[], "DashboardManager"]
+
 
 class TaskPriority(IntEnum):
     """タスク優先度。"""
@@ -60,9 +62,10 @@ class SchedulerManager:
 
     def __init__(
         self,
-        dashboard_manager: "DashboardManager",
+        dashboard_manager: "DashboardManager | None",
         agents: dict[str, "Agent"],
         persist_agent_state: Callable[["Agent"], bool] | None = None,
+        dashboard_provider: DashboardProvider | None = None,
     ) -> None:
         """SchedulerManagerを初期化する。
 
@@ -70,14 +73,40 @@ class SchedulerManager:
             dashboard_manager: ダッシュボードマネージャー
             agents: エージェントの辞書（agent_id -> Agent）
             persist_agent_state: エージェント状態永続化コールバック
+            dashboard_provider: 最新の DashboardManager を返すコールバック
         """
-        self.dashboard_manager = dashboard_manager
+        if dashboard_manager is None and dashboard_provider is None:
+            raise ValueError("dashboard_manager または dashboard_provider のどちらかが必要です")
+        self._dashboard_manager = dashboard_manager
+        self._dashboard_provider = dashboard_provider
         self.agents = agents
         self._persist_agent_state = persist_agent_state
         self._task_queue: list[ScheduledTask] = []
         self._assigned_tasks: dict[str, str] = {}  # task_id -> agent_id
         self._task_map: dict[str, ScheduledTask] = {}  # task_id -> ScheduledTask
         self._removed_task_ids: set[str] = set()  # Lazy deletion 用
+
+    @property
+    def dashboard_manager(self) -> "DashboardManager":
+        """最新の DashboardManager を返す。"""
+        if self._dashboard_provider is not None:
+            self._dashboard_manager = self._dashboard_provider()
+        if self._dashboard_manager is None:
+            raise RuntimeError("dashboard_manager が未設定です")
+        return self._dashboard_manager
+
+    def set_dashboard_provider(self, dashboard_provider: DashboardProvider | None) -> None:
+        """Dashboard provider を更新する。"""
+        self._dashboard_provider = dashboard_provider
+        if dashboard_provider is not None:
+            self._dashboard_manager = dashboard_provider()
+
+    def set_persist_agent_state(
+        self,
+        persist_agent_state: Callable[["Agent"], bool] | None,
+    ) -> None:
+        """エージェント永続化コールバックを更新する。"""
+        self._persist_agent_state = persist_agent_state
 
     def enqueue_task(
         self,

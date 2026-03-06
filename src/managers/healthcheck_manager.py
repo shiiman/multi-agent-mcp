@@ -97,6 +97,7 @@ class HealthcheckManager:
         # 二段階判定用の状態
         self._pane_hash: dict[str, str] = {}
         self._pane_last_changed_at: dict[str, datetime] = {}
+        self._monitor_cycle_pane_hash_cache: dict[str, str | None] | None = None
 
         # 同一 worker/task ごとの復旧試行回数
         self._recovery_failures: dict[str, int] = {}
@@ -153,6 +154,12 @@ class HealthcheckManager:
 
     async def _capture_pane_hash(self, agent: Agent) -> str | None:
         """Worker pane の出力ハッシュを取得する。"""
+        if (
+            self._monitor_cycle_pane_hash_cache is not None
+            and agent.id in self._monitor_cycle_pane_hash_cache
+        ):
+            return self._monitor_cycle_pane_hash_cache[agent.id]
+
         session_name = agent.resolved_session_name
         if not session_name or agent.window_index is None or agent.pane_index is None:
             return None
@@ -169,7 +176,10 @@ class HealthcheckManager:
             return None
 
         compact = "\n".join(output.strip().splitlines()[-40:])
-        return hashlib.sha1(compact.encode("utf-8")).hexdigest()
+        pane_hash = hashlib.sha1(compact.encode("utf-8")).hexdigest()
+        if self._monitor_cycle_pane_hash_cache is not None:
+            self._monitor_cycle_pane_hash_cache[agent.id] = pane_hash
+        return pane_hash
 
     async def _is_pane_unchanged_for(
         self,
@@ -838,12 +848,48 @@ class HealthcheckManager:
             "last_monitor_at": self.last_monitor_at.isoformat() if self.last_monitor_at else None,
         }
 
+    @staticmethod
+    def _build_active_task_index(
+        dashboard: DashboardManager | None,
+    ) -> tuple[dict[str, list[TaskInfo]], dict[str, TaskInfo]]:
+        """Dashboard からアクティブタスクの index を構築する。"""
+        from src.models.dashboard import TaskStatus
+
+        if dashboard is None:
+            return {}, {}
+
+        active_tasks_by_agent: dict[str, list[TaskInfo]] = {}
+        tasks_by_id: dict[str, TaskInfo] = {}
+
+        try:
+            for task in dashboard.list_tasks():
+                task_id = getattr(task, "id", None)
+                if isinstance(task_id, str) and task_id:
+                    tasks_by_id[task_id] = task
+
+                assigned_agent_id = getattr(task, "assigned_agent_id", None)
+                if (
+                    not isinstance(assigned_agent_id, str)
+                    or not assigned_agent_id
+                    or task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+                ):
+                    continue
+
+                active_tasks_by_agent.setdefault(assigned_agent_id, []).append(task)
+        except (OSError, KeyError, ValueError, AttributeError) as e:
+            logger.debug("アクティブタスク index の構築に失敗: %s", e)
+            return {}, {}
+
+        return active_tasks_by_agent, tasks_by_id
+
     def _sync_worker_active_task(
         self,
         agent_id: str,
         agent: Agent,
         dashboard: DashboardManager | None,
         app_ctx: AppContext | None,
+        active_tasks_by_agent: dict[str, list[TaskInfo]] | None = None,
+        tasks_by_id: dict[str, TaskInfo] | None = None,
     ) -> tuple[TaskInfo | None, str | None]:
         """Dashboard からアクティブタスクを同期し、エージェント状態を補正する。
 
@@ -860,12 +906,15 @@ class HealthcheckManager:
             return active_task, active_task_id
 
         try:
-            assigned_tasks = dashboard.list_tasks(agent_id=agent_id)
-            active_tasks = [
-                task
-                for task in assigned_tasks
-                if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
-            ]
+            if active_tasks_by_agent is None:
+                assigned_tasks = dashboard.list_tasks(agent_id=agent_id)
+                active_tasks = [
+                    task
+                    for task in assigned_tasks
+                    if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+                ]
+            else:
+                active_tasks = list(active_tasks_by_agent.get(agent_id, []))
             if active_tasks:
                 in_progress = [
                     task for task in active_tasks if task.status == TaskStatus.IN_PROGRESS
@@ -881,7 +930,11 @@ class HealthcheckManager:
                     except (OSError, json.JSONDecodeError, ValueError) as e:
                         logger.debug("BUSY ステータス保存に失敗: %s", e)
             elif agent.current_task:
-                current_dashboard_task = dashboard.get_task(agent.current_task)
+                current_dashboard_task = (
+                    tasks_by_id.get(agent.current_task)
+                    if tasks_by_id is not None
+                    else dashboard.get_task(agent.current_task)
+                )
                 if current_dashboard_task and current_dashboard_task.status in (
                     TaskStatus.COMPLETED,
                     TaskStatus.FAILED,
@@ -895,7 +948,7 @@ class HealthcheckManager:
                     except (OSError, json.JSONDecodeError, ValueError) as e:
                         logger.debug("IDLE ステータス保存に失敗: %s", e)
                     active_task_id = None
-        except (KeyError, ValueError, AttributeError) as e:
+        except (OSError, KeyError, ValueError, AttributeError) as e:
             logger.debug("アクティブタスクの取得に失敗: %s", e)
             active_task = None
 
@@ -1145,7 +1198,7 @@ class HealthcheckManager:
             workspace_root=task_worktree if enable_worktree else project_root,
             enable_git=bool(app_ctx.settings.enable_git),
         )
-        bootstrap_command = app_ctx.ai_cli.build_stdin_command(
+        bootstrap_command, build_error = app_ctx.ai_cli.build_stdin_command_or_error(
             cli=agent_cli_name,
             task_file_path=str(task_file),
             worktree_path=task_worktree if enable_worktree else None,
@@ -1156,7 +1209,15 @@ class HealthcheckManager:
             thinking_tokens=thinking_tokens,
             reasoning_effort=reasoning_effort,
         )
-        task_sent = await app_ctx.tmux.send_with_rate_limit_to_pane(
+        if build_error or bootstrap_command is None:
+            return {
+                "task_id": task_id,
+                "error": build_error or "CLIコマンド生成に失敗しました",
+            }
+        from src.tools.agent_helpers import send_with_scoped_rate_limit
+
+        task_sent = await send_with_scoped_rate_limit(
+            app_ctx,
             agent.session_name,
             agent.window_index,
             agent.pane_index,
@@ -1494,6 +1555,7 @@ class HealthcheckManager:
 
         workers_to_diagnose: list[tuple[str, Agent, TaskInfo | None, str | None, str]] = []
         skipped: list[str] = []
+        active_tasks_by_agent, tasks_by_id = self._build_active_task_index(dashboard)
 
         for agent_id, agent in list(self.agents.items()):
             if agent.role != AgentRole.WORKER.value:
@@ -1508,7 +1570,12 @@ class HealthcheckManager:
                 continue
 
             active_task, active_task_id = self._sync_worker_active_task(
-                agent_id, agent, dashboard, app_ctx
+                agent_id,
+                agent,
+                dashboard,
+                app_ctx,
+                active_tasks_by_agent=active_tasks_by_agent,
+                tasks_by_id=tasks_by_id,
             )
             current_key = self._recovery_key(agent_id, active_task_id)
             stale_keys = [
@@ -1598,15 +1665,19 @@ class HealthcheckManager:
         # フェーズ1: 診断対象の Worker を収集（同期処理）
         workers_to_diagnose, skipped = self._collect_workers_to_diagnose(app_ctx, dashboard)
 
-        # フェーズ2: 診断を並列実行
-        diagnose_results = await asyncio.gather(
-            *[
-                self._diagnose_worker_issue(agent_id, agent, active_task, now)
-                for agent_id, agent, active_task, _active_task_id, _current_key
-                in workers_to_diagnose
-            ],
-            return_exceptions=True,
-        )
+        self._monitor_cycle_pane_hash_cache = {}
+        try:
+            # フェーズ2: 診断を並列実行
+            diagnose_results = await asyncio.gather(
+                *[
+                    self._diagnose_worker_issue(agent_id, agent, active_task, now)
+                    for agent_id, agent, active_task, _active_task_id, _current_key
+                    in workers_to_diagnose
+                ],
+                return_exceptions=True,
+            )
+        finally:
+            self._monitor_cycle_pane_hash_cache = None
 
         # フェーズ3: 復旧は副作用があるため逐次実行
         recovered, escalated, failed_tasks = await self._process_recovery_results(

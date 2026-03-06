@@ -97,6 +97,36 @@ class DashboardManager(
     def _get_dashboard_lock_path(self) -> Path:
         return self.dashboard_dir / "dashboard.lock"
 
+    def _read_dashboard_snapshot(self) -> Dashboard:
+        """読み取り専用の Dashboard スナップショットを取得する。
+
+        writer は atomic replace で更新するため、read-only path では
+        更新系ロックを取らずに最新ファイルを参照する。
+        """
+        dashboard_path = self._get_dashboard_path()
+        try:
+            current_mtime_ns = dashboard_path.stat().st_mtime_ns
+        except OSError:
+            current_mtime_ns = 0
+
+        if (
+            self._read_cache is not None
+            and current_mtime_ns == self._read_cache_mtime
+            and current_mtime_ns != 0
+        ):
+            return self._read_cache
+
+        dashboard = self._read_dashboard_unlocked()
+
+        try:
+            refreshed_mtime_ns = dashboard_path.stat().st_mtime_ns
+        except OSError:
+            refreshed_mtime_ns = current_mtime_ns
+
+        self._read_cache = dashboard
+        self._read_cache_mtime = refreshed_mtime_ns
+        return dashboard
+
     @contextmanager
     def _dashboard_file_lock(self) -> None:
         """Dashboard 読み書き用の排他ロックを取得する。"""

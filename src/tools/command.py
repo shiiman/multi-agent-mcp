@@ -26,6 +26,7 @@ from src.tools.agent_helpers import (
     _send_task_to_worker,
     build_worker_task_branch,
     resolve_worker_number_from_slot,
+    send_with_scoped_rate_limit,
 )
 from src.tools.cost_capture import capture_claude_actual_cost_for_agent
 from src.tools.helpers import (
@@ -173,7 +174,6 @@ def register_tools(mcp: FastMCP) -> None:
         if role_error:
             return role_error
 
-        tmux = app_ctx.tmux
         agents = app_ctx.agents
 
         # ファイルからエージェント情報を同期
@@ -244,7 +244,8 @@ def register_tools(mcp: FastMCP) -> None:
             )
 
         agent_cli_name = _resolve_cli_name_for_dispatch(agent, app_ctx)
-        success = await tmux.send_with_rate_limit_to_pane(
+        success = await send_with_scoped_rate_limit(
+            app_ctx,
             agent.session_name,
             agent.window_index,
             agent.pane_index,
@@ -546,7 +547,6 @@ def register_tools(mcp: FastMCP) -> None:
         agent_enable_git: bool,
     ) -> dict[str, Any]:
         """Admin へのタスク送信処理。"""
-        tmux = app_ctx.tmux
         dashboard = ensure_dashboard_manager(app_ctx)
         if hasattr(dashboard, "get_agent_label"):
             agent_label = dashboard.get_agent_label(agent)
@@ -572,20 +572,19 @@ def register_tools(mcp: FastMCP) -> None:
             enable_git=agent_enable_git,
         )
 
-        try:
-            read_command = app_ctx.ai_cli.build_stdin_command(
-                cli=agent_cli,
-                task_file_path=str(task_file),
-                worktree_path=agent.worktree_path,
-                project_root=str(project_root),
-                model=agent_model,
-                role="admin",
-                role_template_path=str(role_template_path),
-                thinking_tokens=thinking_tokens,
-                reasoning_effort=reasoning_effort,
-            )
-        except ValueError as e:
-            return {"success": False, "error": f"CLIコマンド生成に失敗しました: {e}"}
+        read_command, build_error = app_ctx.ai_cli.build_stdin_command_or_error(
+            cli=agent_cli,
+            task_file_path=str(task_file),
+            worktree_path=agent.worktree_path,
+            project_root=str(project_root),
+            model=agent_model,
+            role="admin",
+            role_template_path=str(role_template_path),
+            thinking_tokens=thinking_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+        if build_error or read_command is None:
+            return {"success": False, "error": build_error or "CLIコマンド生成に失敗しました"}
 
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
             return {
@@ -593,7 +592,8 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": f"エージェント {agent_id} は tmux ペインに配置されていません",
             }
 
-        success = await tmux.send_with_rate_limit_to_pane(
+        success = await send_with_scoped_rate_limit(
+            app_ctx,
             agent.session_name,
             agent.window_index,
             agent.pane_index,
@@ -894,7 +894,6 @@ def register_tools(mcp: FastMCP) -> None:
         # 他インスタンスで追加されたエージェントを取り込んでから配信対象を決定する
         sync_agents_from_file(app_ctx)
 
-        tmux = app_ctx.tmux
         agents = app_ctx.agents
 
         target_role = None
@@ -969,7 +968,8 @@ def register_tools(mcp: FastMCP) -> None:
                 continue
 
             agent_cli_name = _resolve_cli_name_for_dispatch(agent, app_ctx)
-            success = await tmux.send_with_rate_limit_to_pane(
+            success = await send_with_scoped_rate_limit(
+                app_ctx,
                 agent.session_name,
                 agent.window_index,
                 agent.pane_index,

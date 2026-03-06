@@ -64,7 +64,7 @@ class DashboardTasksMixin:
         Returns:
             Dashboard オブジェクト
         """
-        return self._read_dashboard()
+        return self._read_dashboard_snapshot()
 
     def _mutate_dashboard(
         self,
@@ -402,7 +402,7 @@ class DashboardTasksMixin:
         Returns:
             TaskInfo、見つからない場合はNone
         """
-        dashboard = self._read_dashboard()
+        dashboard = self._read_dashboard_snapshot()
         return self._resolve_task(dashboard, task_id)
 
     def list_tasks(
@@ -419,7 +419,7 @@ class DashboardTasksMixin:
         Returns:
             TaskInfoのリスト
         """
-        dashboard = self._read_dashboard()
+        dashboard = self._read_dashboard_snapshot()
         tasks = dashboard.tasks
 
         if status is not None:

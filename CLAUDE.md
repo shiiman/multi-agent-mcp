@@ -256,7 +256,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_EXTRA_WORKER_COLS` | Columns in each extra worker window | 5 |
 | `MCP_WORKERS_PER_EXTRA_WINDOW` | Worker slots per extra worker window | 10 |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
-| `MCP_ESTIMATED_TOKENS_PER_CALL` | Estimated tokens per API call | 2000 |
+| `MCP_ESTIMATED_TOKENS_PER_CALL` | Estimated tokens per API call | 5000 |
 | `MCP_MODEL_COST_TABLE_JSON` | Model cost table (USD per 1K tokens, JSON) | `{"claude:opus":0.03,...}` |
 | `MCP_MODEL_COST_DEFAULT_PER_1K` | Fallback cost per 1K tokens (USD) | 0.01 |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck monitor interval (seconds) | 60 |
@@ -297,7 +297,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_WORKER_CLI_MODE` | Worker CLI mode (`uniform` / `per-worker`) | uniform |
 | `MCP_WORKER_CLI_1..16` | Per-worker CLI in `per-worker` mode | - |
 | `MCP_WORKER_MODEL_1..16` | Per-worker model in `per-worker` mode (falls back to profile worker model) | - |
-| `MCP_QUALITY_CHECK_MAX_ITERATIONS` | Max quality check iterations | 5 |
+| `MCP_QUALITY_CHECK_MAX_ITERATIONS` | Max quality check iterations | 3 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | Same issue repeat limit | 3 |
 | `MCP_QUALITY_GATE_STRICT` | Apply strict quality gate checks | true |
 | `MCP_MEMORY_MAX_ENTRIES` | Max memory entries | 1000 |

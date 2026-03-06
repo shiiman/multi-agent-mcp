@@ -421,6 +421,23 @@ class TestBuildStdinCommandWithThinkingTokens:
 class TestBuildStdinCommandWithReasoningEffort:
     """build_stdin_command の reasoning effort テスト。"""
 
+    @pytest.mark.parametrize(
+        "cli",
+        [AICli.CLAUDE, AICli.CODEX, AICli.GEMINI, AICli.CURSOR],
+    )
+    def test_invalid_effort_raises_value_error(self, ai_cli_manager, cli):
+        """無効な reasoning_effort は全 CLI で ValueError にする。"""
+        with pytest.raises(
+            ValueError,
+            match="reasoning_effort は low/medium/high/xhigh/none のいずれかを指定してください",
+        ):
+            ai_cli_manager.build_stdin_command(
+                cli,
+                "/tmp/task.md",
+                "/path/to/worktree",
+                reasoning_effort="invalid",
+            )
+
     def test_claude_ignores_high_effort(self, ai_cli_manager):
         cmd = ai_cli_manager.build_stdin_command(
             AICli.CLAUDE, "/tmp/task.md", "/path/to/worktree",

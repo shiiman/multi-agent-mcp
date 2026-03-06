@@ -19,6 +19,7 @@ from src.tools.agent_helpers import (
     _validate_agent_creation,
     build_worker_task_branch,
     resolve_worker_number_from_slot,
+    send_with_scoped_rate_limit,
 )
 from src.tools.helpers import refresh_app_settings
 
@@ -132,6 +133,78 @@ class TestResolveHelpers:
         agent.ai_cli = "AICli.CODEX"
 
         assert _resolve_agent_cli_name(agent, app_ctx) == "cursor"
+
+
+class TestScopedRateLimit:
+    """send_with_scoped_rate_limit のテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_uses_independent_cooldown_per_pane(self, app_ctx):
+        """別 pane への送信は cooldown を共有しない。"""
+        app_ctx.settings.send_cooldown_seconds = 5.0
+
+        class FakeTmux:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, int, int, str]] = []
+
+            async def send_and_confirm_to_pane(
+                self,
+                session_name: str,
+                window_index: int,
+                pane_index: int,
+                command: str,
+                **_kwargs,
+            ) -> bool:
+                self.calls.append((session_name, window_index, pane_index, command))
+                return True
+
+        app_ctx.tmux = FakeTmux()
+
+        with (
+            patch(
+                "src.tools.agent_helpers.time.monotonic",
+                side_effect=[0.0, 0.0, 1.0, 1.0],
+            ),
+            patch("src.tools.agent_helpers.asyncio.sleep", new=AsyncMock()) as sleep_mock,
+        ):
+            first = await send_with_scoped_rate_limit(app_ctx, "test", 0, 1, "first")
+            second = await send_with_scoped_rate_limit(app_ctx, "test", 0, 2, "second")
+
+        assert first is True
+        assert second is True
+        sleep_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_waits_when_same_pane_is_reused_within_cooldown(self, app_ctx):
+        """同一 pane への連続送信では cooldown を適用する。"""
+        app_ctx.settings.send_cooldown_seconds = 5.0
+
+        class FakeTmux:
+            async def send_and_confirm_to_pane(
+                self,
+                session_name: str,
+                window_index: int,
+                pane_index: int,
+                command: str,
+                **_kwargs,
+            ) -> bool:
+                return True
+
+        app_ctx.tmux = FakeTmux()
+
+        with (
+            patch(
+                "src.tools.agent_helpers.time.monotonic",
+                side_effect=[0.0, 0.0, 1.0, 1.0, 5.0, 5.0],
+            ),
+            patch("src.tools.agent_helpers.asyncio.sleep", new=AsyncMock()) as sleep_mock,
+        ):
+            first = await send_with_scoped_rate_limit(app_ctx, "test", 0, 1, "first")
+            second = await send_with_scoped_rate_limit(app_ctx, "test", 0, 1, "second")
+
+        assert first is True
+        assert second is True
+        sleep_mock.assert_awaited_once_with(4.0)
 
     def test_resolve_worker_cli_name_prefers_pinned_agent_cli(self):
         """pin 済み Worker は slot/.env より agent.ai_cli を優先する。"""
@@ -417,6 +490,78 @@ class TestSendTaskToWorker:
             caller_agent_id="admin-001",
         )
         assert result["task_sent"] is False
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_command_runtime_error_returns_dispatch_error(self, app_ctx, temp_dir):
+        """CLI コマンド生成の想定外例外を dispatch_error として返す。"""
+        now = datetime.now()
+        agent = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            worktree_path=str(temp_dir),
+            created_at=now,
+            last_activity=now,
+            ai_bootstrapped=False,
+        )
+        app_ctx.agents[agent.id] = agent
+        app_ctx.project_root = str(temp_dir)
+        app_ctx.session_id = "session-001"
+        app_ctx.ai_cli.build_stdin_command = MagicMock(side_effect=RuntimeError("boom"))
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.write_task_file.return_value = Path(temp_dir) / "task.md"
+        mock_dashboard.save_markdown_dashboard.return_value = None
+        mock_dashboard.record_api_call.return_value = None
+
+        mock_persona_manager = MagicMock()
+        mock_persona_manager.get_optimal_persona.return_value = MagicMock(
+            name="coder",
+            file_path=Path("/tmp/personas/code.md"),
+        )
+
+        with (
+            patch("src.tools.agent_helpers.search_memory_context", return_value=[]),
+            patch(
+                "src.tools.agent_helpers.ensure_persona_manager",
+                return_value=mock_persona_manager,
+            ),
+            patch(
+                "src.tools.agent_helpers.get_mcp_tool_prefix_from_config",
+                return_value="mcp__x__",
+            ),
+            patch("src.tools.agent_helpers.generate_7section_task", return_value="task body"),
+            patch("src.tools.agent_helpers.ensure_dashboard_manager", return_value=mock_dashboard),
+            patch("src.tools.agent_helpers.resolve_main_repo_root", return_value=str(temp_dir)),
+            patch("src.tools.agent_helpers.save_agent_to_file", return_value=True),
+        ):
+            result = await _send_task_to_worker(
+                app_ctx=app_ctx,
+                agent=agent,
+                task_content="do task",
+                task_id="task-001",
+                branch="feature/task-001",
+                worktree_path=str(temp_dir),
+                session_id="session-001",
+                worker_index=0,
+                enable_worktree=False,
+                profile_settings={
+                    "worker_model": "opus",
+                    "worker_thinking_tokens": 4000,
+                    "worker_reasoning_effort": "none",
+                },
+                caller_agent_id="admin-001",
+            )
+
+        assert result["task_sent"] is False
+        assert result["dispatch_mode"] == "bootstrap"
+        assert result["dispatch_error"] == "CLIコマンド生成に失敗しました: boom"
+        app_ctx.tmux.send_keys_to_pane.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_followup_failure_retries_bootstrap_once(self, app_ctx, temp_dir):

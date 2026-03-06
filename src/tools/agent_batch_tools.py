@@ -209,14 +209,20 @@ async def _setup_worker_tmux_pane(
     if not isinstance(lock, asyncio.Lock):
         lock = asyncio.Lock()
         app_ctx._worker_tmux_setup_lock = lock
+    ready_sessions = getattr(app_ctx, "_worker_tmux_main_sessions_ready", None)
+    if not isinstance(ready_sessions, set):
+        ready_sessions = set()
+        app_ctx._worker_tmux_main_sessions_ready = ready_sessions
 
     async with lock:
-        if not await tmux.create_main_session(repo_path):
-            return None, {
-                "success": False,
-                "error": f"Worker {worker_index + 1}: メインセッション作成失敗",
-                "worker_index": worker_index,
-            }
+        if project_name not in ready_sessions:
+            if not await tmux.create_main_session(repo_path):
+                return None, {
+                    "success": False,
+                    "error": f"Worker {worker_index + 1}: メインセッション作成失敗",
+                    "worker_index": worker_index,
+                }
+            ready_sessions.add(project_name)
 
         if window_index > 0:
             ok = await tmux.add_extra_worker_window(

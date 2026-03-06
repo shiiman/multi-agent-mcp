@@ -199,3 +199,26 @@ class TestSchedulerManager:
         assert by_task_id["task-ng"]["dependencies_satisfied"] is False
         dashboard.list_tasks.assert_called_once()
         dashboard.get_task.assert_not_called()
+
+    def test_dashboard_provider_uses_latest_dashboard(self):
+        """Dashboard provider 経由で差し替え後の状態を参照できることをテスト。"""
+        first_dashboard = MagicMock()
+        first_dashboard.list_tasks.return_value = []
+        second_dashboard = MagicMock()
+        second_dashboard.list_tasks.return_value = [
+            SimpleNamespace(id="dep-1", status="completed"),
+        ]
+        current_dashboard = {"value": first_dashboard}
+
+        scheduler = SchedulerManager(
+            dashboard_manager=first_dashboard,
+            agents={},
+            dashboard_provider=lambda: current_dashboard["value"],
+        )
+        scheduler.enqueue_task("task-1", TaskPriority.HIGH, dependencies=["dep-1"])
+
+        assert scheduler.get_next_task() is None
+
+        current_dashboard["value"] = second_dashboard
+
+        assert scheduler.get_next_task() == "task-1"

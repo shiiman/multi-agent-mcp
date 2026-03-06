@@ -2,6 +2,7 @@
 
 import json
 import re
+from contextlib import contextmanager
 from datetime import datetime
 
 import pytest
@@ -330,6 +331,29 @@ class TestDashboardManager:
         assert len(agent1_tasks) == 1
         assert agent1_tasks[0].assigned_agent_id == "agent-001"
 
+    def test_read_only_helpers_do_not_require_write_lock(self, dashboard_manager):
+        """参照系 API が更新ロックなしで読めることをテスト。"""
+        task = dashboard_manager.create_task(title="ReadOnly Task")
+        dashboard_manager._read_cache = None
+        dashboard_manager._read_cache_mtime = 0
+
+        @contextmanager
+        def _unexpected_lock():
+            raise AssertionError("read-only helper should not acquire write lock")
+            yield
+
+        dashboard_manager._dashboard_file_lock = _unexpected_lock
+
+        dashboard = dashboard_manager.get_dashboard()
+        listed = dashboard_manager.list_tasks()
+        fetched = dashboard_manager.get_task(task.id)
+        summary = dashboard_manager.get_summary()
+
+        assert dashboard.get_task(task.id) is not None
+        assert len(listed) == 1
+        assert fetched is not None
+        assert summary["total_tasks"] == 1
+
     def test_remove_task(self, dashboard_manager):
         """タスク削除をテスト。"""
         task = dashboard_manager.create_task(title="Test Task")
@@ -432,8 +456,10 @@ class TestTaskFileManagement:
 class TestDashboardMarkdownSync:
     """Markdown 同期処理の追加テスト。"""
 
-    def test_dashboard_lock_fails_fast_in_event_loop_context(self, dashboard_manager, monkeypatch):
-        """event loop 実行中は lock 待機を行わず即座に timeout することをテスト。"""
+    def test_dashboard_write_lock_fails_fast_in_event_loop_context(
+        self, dashboard_manager, monkeypatch
+    ):
+        """write path は event loop 実行中に lock 競合すると即座に timeout することをテスト。"""
         sleep_calls: list[float] = []
 
         def _always_blocking(*_args, **_kwargs):
@@ -451,7 +477,7 @@ class TestDashboardMarkdownSync:
         )
 
         with pytest.raises(TimeoutError, match="event loop context"):
-            dashboard_manager.get_dashboard()
+            dashboard_manager.create_task(title="lock-test")
 
         assert sleep_calls == []
 

@@ -8,11 +8,8 @@ from typing import TYPE_CHECKING
 
 from src.config.settings import TerminalApp
 from src.config.template_loader import get_template_loader
-from src.managers.tmux_shared import (
-    MAIN_SESSION,
-    MAIN_WINDOW_PANE_ADMIN,
-    MAIN_WINDOW_WORKER_PANES,
-)
+from src.managers.pane_layout_planner import PaneLayoutPlanner
+from src.managers.session_bootstrapper import SessionBootstrapper
 
 if TYPE_CHECKING:
     from src.config.settings import Settings
@@ -25,6 +22,22 @@ class TmuxWorkspaceMixin:
 
     _CURSOR_TRUST_RETRY_MAX = 3
     _CURSOR_TRUST_RETRY_INTERVAL_MS = 250
+
+    def _get_pane_layout_planner(self) -> PaneLayoutPlanner:
+        """PaneLayoutPlanner を遅延初期化する。"""
+        planner = getattr(self, "_pane_layout_planner", None)
+        if planner is None:
+            planner = PaneLayoutPlanner(self.settings)
+            self._pane_layout_planner = planner
+        return planner
+
+    def _get_session_bootstrapper(self) -> SessionBootstrapper:
+        """SessionBootstrapper を遅延初期化する。"""
+        bootstrapper = getattr(self, "_session_bootstrapper", None)
+        if bootstrapper is None:
+            bootstrapper = SessionBootstrapper(self, self._get_pane_layout_planner())
+            self._session_bootstrapper = bootstrapper
+        return bootstrapper
 
     @staticmethod
     def _pane_target(session: str, window: int, pane: int) -> str:
@@ -130,36 +143,7 @@ class TmuxWorkspaceMixin:
         Returns:
             成功した場合True
         """
-        # プロジェクト名を含むセッション名を生成
-        project_name = self._get_project_name(working_dir)
-        session_name = project_name
-
-        # セッションが既に存在する場合も、インデックスを正規化して続行する
-        if await self.session_exists(project_name):
-            await self._configure_session_options(session_name)
-            await self._normalize_window_indices(session_name)
-            logger.info(
-                "メインセッション %s は既に存在します（インデックス正規化済み）",
-                session_name,
-            )
-            return True
-
-        if not await self._create_main_session_window(session_name, working_dir):
-            return False
-        if not await self._configure_session_options(session_name):
-            return False
-        # 新規セッションでも、ユーザーの global base-index 設定に影響される可能性があるため
-        # ウィンドウ番号を必ず再採番して main=0 を保証する。
-        if not await self._normalize_window_indices(session_name):
-            return False
-        if not await self._split_main_window_layout(session_name):
-            return False
-
-        # 最終的なペイン配置: 0(Admin), 1-6(Workers)
-        # Owner の分割は不要（実行AIエージェントが Owner の役割を担う）
-
-        logger.info(f"メインセッション作成完了: {session_name}")
-        return True
+        return await self._get_session_bootstrapper().create_main_session(working_dir)
 
     async def _create_main_session_window(self, session_name: str, working_dir: str) -> bool:
         """メインウィンドウを持つセッションを作成する。"""
@@ -201,29 +185,7 @@ class TmuxWorkspaceMixin:
 
     async def _split_main_window_layout(self, session_name: str) -> bool:
         """main ウィンドウを Admin + Worker 1-6 配置へ分割する。"""
-        target = f"{session_name}:{self.settings.window_name_main}"
-        split_steps = [
-            ("左右分割エラー", "split-window", "-h", "-t", target, "-p", "60"),
-            ("右側列分割エラー(1)", "split-window", "-h", "-t", f"{target}.1", "-p", "67"),
-            ("右側列分割エラー(2)", "split-window", "-h", "-t", f"{target}.2", "-p", "50"),
-        ]
-        for error_prefix, *command in split_steps:
-            code, _, stderr = await self._run(*command)
-            if code != 0:
-                logger.error(f"{error_prefix}: {stderr}")
-                return False
-
-        for pane_idx in [3, 2, 1]:
-            code, _, stderr = await self._run(
-                "split-window",
-                "-v",
-                "-t",
-                f"{target}.{pane_idx}",
-            )
-            if code != 0:
-                logger.error(f"右側行分割エラー(pane {pane_idx}): {stderr}")
-                return False
-        return True
+        return await self._get_session_bootstrapper().split_main_window_layout(session_name)
 
     async def _split_into_grid(
         self, session: str, window: int, rows: int = 2, cols: int = 3
@@ -239,33 +201,7 @@ class TmuxWorkspaceMixin:
         Returns:
             成功した場合True
         """
-        target = f"{session}:{window}"
-
-        # 1. 水平分割で cols 列作成
-        for _ in range(cols - 1):
-            code, _, stderr = await self._run("split-window", "-h", "-t", target)
-            if code != 0:
-                logger.error(f"水平分割エラー: {stderr}")
-                return False
-
-        # 2. 列幅を均等化（これにより各列が十分な幅を持つ）
-        code, _, _ = await self._run("select-layout", "-t", target, "even-horizontal")
-        if code != 0:
-            logger.warning("列幅均等化に失敗、続行します")
-
-        # 3. 各列を垂直分割で rows 行に
-        # 重要: 逆順（cols-1 → 0）で分割することで、
-        # 分割時のペイン番号シフトを回避
-        for col in range(cols - 1, -1, -1):
-            pane_target = f"{target}.{col}"
-            for _ in range(rows - 1):
-                code, _, stderr = await self._run("split-window", "-v", "-t", pane_target)
-                if code != 0:
-                    logger.error(f"垂直分割エラー: {stderr}")
-                    return False
-
-        logger.debug(f"グリッド分割完了: {target} ({rows}×{cols})")
-        return True
+        return await self._get_session_bootstrapper().split_into_grid(session, window, rows, cols)
 
     async def add_window(
         self, session: str, window_name: str, rows: int = 2, cols: int = 3
@@ -318,39 +254,9 @@ class TmuxWorkspaceMixin:
         Returns:
             成功した場合True
         """
-        window_name = f"{self.settings.window_name_worker_prefix}{window_index + 1}"
-
-        # 同一追加ウィンドウの同時作成を防ぐ。
-        lock = getattr(self, "_extra_worker_window_lock", None)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._extra_worker_window_lock = lock
-
-        async with lock:
-            # ウィンドウが既に存在するか確認
-            windows = await self.list_windows(project_name)
-            existing_indices = {w["index"] for w in windows}
-            if window_index in existing_indices:
-                logger.info(f"ウィンドウ {window_index} は既に存在します")
-                return True
-
-            # 新しいウィンドウを追加
-            if not await self._create_named_window(
-                project_name, window_name, "追加Workerウィンドウ作成エラー"
-            ):
-                return False
-
-            # ウィンドウに pane-base-index を設定（ユーザーのグローバル設定に依存しない）
-            window_target = f"{project_name}:{window_name}"
-            await self._run("set-window-option", "-t", window_target, "pane-base-index", "0")
-
-            # グリッドに分割（6×2 = 12ペイン）
-            success = await self._split_into_grid(project_name, window_index, rows, cols)
-            if not success:
-                return False
-
-            logger.info(f"追加Workerウィンドウ作成完了: {project_name}:{window_name}")
-            return True
+        return await self._get_session_bootstrapper().add_extra_worker_window(
+            project_name, window_index, rows, cols
+        )
 
     async def _create_named_window(self, session: str, window_name: str, error_prefix: str) -> bool:
         """指定セッションに名前付きウィンドウを作成する。"""
@@ -375,28 +281,8 @@ class TmuxWorkspaceMixin:
         Returns:
             (session_name, window_index, pane_index) のタプル、または None（ownerの場合）
         """
-        if role == "owner":
-            # Owner は tmux ペインに配置しない（実行AIエージェントが担う）
-            return None
-        elif role == "admin":
-            return MAIN_SESSION, 0, MAIN_WINDOW_PANE_ADMIN
-        elif role == "worker":
-            # Worker 1-6 はメインウィンドウ
-            if worker_index < 6:
-                # ペイン番号: 1, 2, 3, 4, 5, 6
-                pane_index = MAIN_WINDOW_WORKER_PANES[worker_index]
-                return MAIN_SESSION, 0, pane_index
-            else:
-                # Worker 7以降は追加ウィンドウ
-                # 追加ウィンドウは settings.workers_per_extra_window ペイン/ウィンドウ
-                extra_worker_index = worker_index - 6
-                workers_per_extra = self.settings.workers_per_extra_window
-
-                window_index = 1 + (extra_worker_index // workers_per_extra)
-                pane_index = extra_worker_index % workers_per_extra
-                return MAIN_SESSION, window_index, pane_index
-        else:
-            raise ValueError(f"不明なロール: {role}")
+        _ = settings
+        return self._get_pane_layout_planner().get_pane_for_role(role, worker_index)
 
     async def send_keys_to_pane(
         self,

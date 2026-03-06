@@ -277,6 +277,36 @@ class AiCliManager:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
+    def build_stdin_command_or_error(
+        self,
+        cli: AICli | str,
+        task_file_path: str,
+        worktree_path: str | None = None,
+        project_root: str | None = None,
+        model: str | None = None,
+        role: str = "worker",
+        role_template_path: str | None = None,
+        thinking_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        """AI CLI コマンド生成を安全に試行し、失敗をエラー文字列へ変換する。"""
+        try:
+            command = self.build_stdin_command(
+                cli=cli,
+                task_file_path=task_file_path,
+                worktree_path=worktree_path,
+                project_root=project_root,
+                model=model,
+                role=role,
+                role_template_path=role_template_path,
+                thinking_tokens=thinking_tokens,
+                reasoning_effort=reasoning_effort,
+            )
+        except Exception as e:
+            logger.warning("CLIコマンド生成に失敗: %s", e)
+            return None, f"CLIコマンド生成に失敗しました: {e}"
+        return command, None
+
     def _build_cli_args(
         self,
         cli: AICli,

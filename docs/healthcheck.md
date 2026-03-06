@@ -101,6 +101,7 @@ Healthcheck は以下を担当します。
 | ---- | ---------- | ---- |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 60 | 監視ループ間隔（秒） |
 | `MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS` | 600 | 無応答判定閾値（秒） |
+| `MCP_HEALTHCHECK_IN_PROGRESS_NO_IPC_TIMEOUT_SECONDS` | 120 | `in_progress` タスクの無通信判定閾値（秒） |
 | `MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS` | 3 | 同一 worker/task の復旧上限 |
 | `MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE` | 3 | 自動停止までの連続 idle 検知回数 |
 

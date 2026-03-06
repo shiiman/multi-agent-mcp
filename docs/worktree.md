@@ -264,8 +264,10 @@ brew install coderabbitai/tap/git-worktree-runner
 `MCP_ENABLE_GIT=true` のまま非gitディレクトリで `init_tmux_workspace` を実行すると失敗します。
 
 解決:
-```bash
-# 明示的に no-git モードで初期化
+MCP クライアントから、次のように `enable_git=false` を明示して実行します。
+
+```python
+# MCP ツール呼び出し例
 init_tmux_workspace("/path/to/non-git-dir", session_id="task-1", enable_git=false)
 ```
 

@@ -58,12 +58,17 @@ class DashboardReaderMixin:
                             msg = "invalid_legacy_dashboard_format: "
                             raise ValueError(msg + "description/task_file_path mismatch")
                     return Dashboard(**data)
-            except ValueError as e:
-                if "invalid_legacy_dashboard_format" in str(e):
-                    raise
-                logger.warning(f"ダッシュボード読み込みエラー: {e}")
-            except (yaml.YAMLError, OSError) as e:
-                logger.warning(f"ダッシュボード読み込みエラー: {e}")
+                # YAML Front Matter が空または見つからなかった場合、
+                # ファイルが存在するため空 Dashboard へのフォールバックは危険
+                logger.warning(
+                    "ダッシュボードファイルが存在するが YAML Front Matter が空です: %s",
+                    dashboard_path,
+                )
+            except (ValueError, yaml.YAMLError, OSError) as e:
+                # ファイルが存在するのにパースに失敗した場合は re-raise する。
+                # 空 Dashboard で上書きするとタスク等の既存データが消失するため。
+                logger.error("ダッシュボード読み込みエラー（データ保護のため再送出）: %s", e)
+                raise
 
         return Dashboard(
             workspace_id=self.workspace_id,

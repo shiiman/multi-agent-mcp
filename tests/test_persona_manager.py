@@ -161,6 +161,12 @@ class TestPersonaManager:
         result = PersonaManager._parse_front_matter(content)
         assert result is None
 
+    def test_parse_front_matter_non_mapping_yaml(self) -> None:
+        """YAML が mapping 以外なら None を返す。"""
+        content = "---\n- item1\n- item2\n---\n# 本文"
+        result = PersonaManager._parse_front_matter(content)
+        assert result is None
+
     def test_fallback_to_unknown(self, manager: PersonaManager) -> None:
         """存在しない TaskType で unknown にフォールバックすることをテスト。"""
         persona = manager.get_persona(TaskType.UNKNOWN)
@@ -208,6 +214,19 @@ class TestPersonaManager:
         result = manager._parse_persona_file(bad_file)
         assert result is None
 
+    def test_parse_persona_file_non_mapping_front_matter(self, tmp_path: Path) -> None:
+        """Front Matter が mapping 以外なら None を返す。"""
+        personas_dir = tmp_path / "personas"
+        personas_dir.mkdir()
+        bad_file = personas_dir / "bad.md"
+        bad_file.write_text(
+            "---\n- item1\n- item2\n---\n# 本文\n",
+            encoding="utf-8",
+        )
+        manager = PersonaManager(personas_dir=personas_dir)
+        result = manager._parse_persona_file(bad_file)
+        assert result is None
+
     def test_parse_front_matter_single_delimiter(self) -> None:
         """閉じ --- がない場合 None を返す。"""
         content = "---\nname: テスト\n"
@@ -240,3 +259,23 @@ class TestPersonaManager:
         manager = PersonaManager(personas_dir=personas_dir)
         result = manager._parse_persona_file(bad_path)
         assert result is None
+
+    def test_load_personas_skips_non_mapping_front_matter_file(
+        self, tmp_path: Path
+    ) -> None:
+        """破損した persona ファイルがあっても有効なファイルだけをロードする。"""
+        personas_dir = tmp_path / "personas"
+        personas_dir.mkdir()
+        (personas_dir / "bad.md").write_text(
+            "---\n- item1\n- item2\n---\n# 本文\n",
+            encoding="utf-8",
+        )
+        (personas_dir / "unknown.md").write_text(
+            "---\nname: 汎用\ndescription: fallback\ntask_type: unknown\n---\n# 本文\n",
+            encoding="utf-8",
+        )
+        manager = PersonaManager(personas_dir=personas_dir)
+
+        personas = manager._load_personas()
+
+        assert list(personas) == ["unknown"]

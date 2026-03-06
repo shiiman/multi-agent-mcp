@@ -373,6 +373,33 @@ class DashboardSyncMixin:
                         )
                         dashboard.agents.append(summary)
 
+                    # タスクリカバリ: agents.json に current_task があるが
+                    # dashboard.tasks に対応タスクが存在しない場合、スタブを復元する
+                    existing_task_ids = {t.id for t in dashboard.tasks}
+                    for agent_summary in dashboard.agents:
+                        task_id = agent_summary.current_task_id
+                        if task_id and task_id not in existing_task_ids:
+                            from src.models.dashboard import TaskInfo
+
+                            stub_task = TaskInfo(
+                                id=task_id,
+                                title=f"(復元) タスク {task_id[:8]}",
+                                description="",
+                                task_file_path=None,
+                                status=TaskStatus.IN_PROGRESS,
+                                assigned_agent_id=agent_summary.agent_id,
+                                metadata={"recovered_from": "agents.json"},
+                                created_at=datetime.now(),
+                                started_at=datetime.now(),
+                            )
+                            dashboard.tasks.append(stub_task)
+                            existing_task_ids.add(task_id)
+                            logger.warning(
+                                "タスク %s を agents.json から復元しました（担当: %s）",
+                                task_id,
+                                agent_summary.agent_id,
+                            )
+
                     dashboard.calculate_stats()
                     logger.debug(
                         "agents.json から %d 件のエージェントを同期",
@@ -418,7 +445,14 @@ class DashboardSyncMixin:
                 and sync_report["messages_write"]["success"]
             )
 
-        self.run_dashboard_transaction(_sync)
+        try:
+            self.run_dashboard_transaction(_sync)
+        except (ValueError, OSError, Exception) as e:
+            # ダッシュボードファイルの読み込みに失敗した場合、
+            # 空の Dashboard で上書きしないようにスキップする
+            sync_report["success"] = False
+            sync_report["read_error"] = self._format_sync_error(e)
+            logger.warning("Dashboard 同期をスキップ（読み込みエラー）: %s", e)
         self._last_sync_report = copy.deepcopy(sync_report)
         if not sync_report["success"]:
             logger.warning("Dashboard 同期の部分失敗を検知: %s", sync_report)

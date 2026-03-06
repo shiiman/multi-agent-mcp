@@ -4,12 +4,16 @@
 エージェント状態リセットなどの関数を提供する。
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.context import AppContext
+if TYPE_CHECKING:
+    from src.context import AppContext
+
 from src.models.agent import AgentRole
 from src.tools.helpers_persistence import save_agent_to_file, sync_agents_from_file
 from src.tools.helpers_registry import get_project_root_from_registry, get_session_id_from_registry

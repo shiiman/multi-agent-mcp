@@ -7,6 +7,7 @@ import pytest
 
 from src.context import AppContext
 from src.managers.ai_cli_manager import AiCliManager
+from src.managers.persona_manager import PersonaManager
 from src.managers.tmux_manager import TmuxManager
 from src.models.agent import Agent, AgentRole, AgentStatus
 
@@ -252,3 +253,35 @@ class TestListPersonas:
 
         assert result["success"] is False
         assert "使用禁止" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_list_personas_skips_non_mapping_front_matter(
+        self, persona_mock_ctx, git_repo, tmp_path
+    ):
+        """破損した persona ファイルがあっても一覧取得が成功することをテスト。"""
+        personas_dir = tmp_path / "personas"
+        personas_dir.mkdir()
+        (personas_dir / "bad.md").write_text(
+            "---\n- item1\n- item2\n---\n# 本文\n",
+            encoding="utf-8",
+        )
+        (personas_dir / "unknown.md").write_text(
+            "---\nname: 汎用\ndescription: fallback\ntask_type: unknown\n---\n# 本文\n",
+            encoding="utf-8",
+        )
+
+        app_ctx = persona_mock_ctx.request_context.lifespan_context
+        app_ctx.persona_manager = PersonaManager(personas_dir=personas_dir)
+
+        mcp = _register_tools()
+        list_personas = _get_tool_fn(mcp, "list_personas")
+        _add_agent(persona_mock_ctx, "admin-001", AgentRole.ADMIN, str(git_repo))
+
+        result = await list_personas(
+            caller_agent_id="admin-001",
+            ctx=persona_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["personas"][0]["task_type"] == "unknown"

@@ -2,6 +2,7 @@
 
 import hashlib
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -175,6 +176,76 @@ class TestHealthcheckMonitoring:
         mock_collect.assert_called_once_with(app_ctx, fake_dashboard)
         assert result["recovered"] == []
         assert result["escalated"] == []
+
+    @pytest.mark.asyncio
+    async def test_monitor_builds_active_task_index_once_for_multiple_workers(self, settings):
+        """複数 Worker でも active task の全表走査を 1 回に抑える。"""
+        now = datetime.now()
+        worker_1 = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+        worker_2 = Agent(
+            id="worker-002",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.2",
+            session_name="test",
+            window_index=0,
+            pane_index=2,
+            current_task=None,
+            created_at=now,
+            last_activity=now,
+        )
+        agents = {worker_1.id: worker_1, worker_2.id: worker_2}
+
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=True)
+        tmux.get_pane_current_command = AsyncMock(return_value="codex")
+        tmux.capture_pane_by_index = AsyncMock(return_value="steady")
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=agents,
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=10,
+            max_recovery_attempts=1,
+        )
+
+        fake_dashboard = MagicMock()
+        fake_dashboard.list_tasks.return_value = [
+            SimpleNamespace(
+                id="task-001",
+                assigned_agent_id=worker_1.id,
+                status=TaskStatus.IN_PROGRESS,
+                metadata={},
+                logs=[],
+                started_at=now,
+            ),
+            SimpleNamespace(
+                id="task-002",
+                assigned_agent_id=worker_2.id,
+                status=TaskStatus.PENDING,
+                metadata={},
+                logs=[],
+                started_at=now,
+            ),
+        ]
+
+        with patch.object(healthcheck, "_resolve_dashboard_manager", return_value=fake_dashboard):
+            result = await healthcheck.monitor_and_recover_workers()
+
+        assert result["recovered"] == []
+        assert result["escalated"] == []
+        fake_dashboard.list_tasks.assert_called_once_with()
 
     @pytest.mark.asyncio
     async def test_execute_full_recovery_resolves_dashboard_manager_when_missing(
@@ -510,6 +581,77 @@ class TestHealthcheckMonitoring:
         assert "dispatch failed" in result["detail"]["auto_resume_error"]
 
     @pytest.mark.asyncio
+    async def test_resume_single_task_runtime_error_returns_structured_error(
+        self, temp_dir, settings
+    ):
+        """CLI コマンド生成の想定外例外を structured error へ変換する。"""
+        tmux = MagicMock()
+        tmux.send_with_rate_limit_to_pane = AsyncMock(return_value=True)
+
+        ai_cli = AiCliManager(settings)
+        ai_cli.build_stdin_command = MagicMock(side_effect=RuntimeError("boom"))
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.IDLE,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            working_dir=str(temp_dir),
+            worktree_path=str(temp_dir),
+            created_at=now,
+            last_activity=now,
+        )
+        app_ctx = AppContext(
+            settings=settings,
+            tmux=tmux,
+            ai_cli=ai_cli,
+            agents={worker.id: worker},
+            project_root=str(temp_dir),
+            session_id="test-session",
+        )
+
+        dashboard = MagicMock()
+        dashboard.get_task.return_value = SimpleNamespace(
+            metadata={"requested_description": "resume task"},
+            task_file_path=None,
+            description="resume task",
+            title="resume task",
+            worktree_path=str(temp_dir),
+        )
+        dashboard.get_agent_label.return_value = "codex1"
+        dashboard.write_task_file.return_value = Path(temp_dir) / "task.md"
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents=app_ctx.agents,
+            max_recovery_attempts=2,
+        )
+
+        error = await healthcheck._resume_single_task(
+            app_ctx=app_ctx,
+            dashboard=dashboard,
+            agent=worker,
+            task_id="task-001",
+            session_id="test-session",
+            enable_worktree=False,
+            profile_settings={
+                "worker_model": "gpt-5.4",
+                "worker_thinking_tokens": 4000,
+                "worker_reasoning_effort": "none",
+            },
+        )
+
+        assert error == {
+            "task_id": "task-001",
+            "error": "CLIコマンド生成に失敗しました: boom",
+        }
+        tmux.send_with_rate_limit_to_pane.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_monitor_recovers_in_progress_no_ipc_timeout(self, temp_dir, settings):
         tmux = MagicMock()
         tmux.session_exists = AsyncMock(return_value=True)
@@ -610,6 +752,77 @@ class TestHealthcheckMonitoring:
         summary = dashboard.get_summary()
         assert summary["process_crash_count"] == 1
         assert summary["process_recovery_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_monitor_reuses_pane_capture_within_single_cycle(self, temp_dir, settings):
+        """同一監視サイクル内では pane capture を再利用する。"""
+        tmux = MagicMock()
+        tmux.session_exists = AsyncMock(return_value=True)
+        tmux.get_pane_current_command = AsyncMock(return_value="codex")
+        tmux.capture_pane_by_index = AsyncMock(return_value="stable-pane-output")
+
+        now = datetime.now()
+        worker = Agent(
+            id="worker-001",
+            role=AgentRole.WORKER,
+            status=AgentStatus.BUSY,
+            tmux_session="test:0.1",
+            session_name="test",
+            window_index=0,
+            pane_index=1,
+            current_task="task-001",
+            created_at=now,
+            last_activity=now - timedelta(seconds=700),
+        )
+
+        active_task = SimpleNamespace(
+            status=TaskStatus.IN_PROGRESS,
+            metadata={
+                "last_in_progress_update_at": (
+                    now - timedelta(seconds=180)
+                ).isoformat()
+            },
+            logs=[],
+            started_at=now - timedelta(seconds=700),
+        )
+
+        healthcheck = HealthcheckManager(
+            tmux_manager=tmux,
+            agents={worker.id: worker},
+            healthcheck_interval_seconds=1,
+            stall_timeout_seconds=30,
+            in_progress_no_ipc_timeout_seconds=30,
+            max_recovery_attempts=1,
+        )
+        pane_hash = hashlib.sha1(b"stable-pane-output").hexdigest()
+        healthcheck._pane_hash[worker.id] = pane_hash
+        healthcheck._pane_last_changed_at[worker.id] = now - timedelta(seconds=180)
+
+        with patch.object(
+            healthcheck,
+            "_collect_workers_to_diagnose",
+            return_value=(
+                [
+                    (
+                        worker.id,
+                        worker,
+                        active_task,
+                        worker.current_task,
+                        "worker-001:task-001",
+                    )
+                ],
+                [],
+            ),
+        ), patch.object(
+            healthcheck,
+            "_process_recovery_results",
+            new=AsyncMock(return_value=([], [], [])),
+        ):
+            result = await healthcheck.monitor_and_recover_workers()
+
+        assert result["recovered"] == []
+        assert result["escalated"] == []
+        assert tmux.capture_pane_by_index.await_count == 1
 
     @pytest.mark.asyncio
     async def test_monitor_skips_terminal_worker(self, temp_dir, settings):

@@ -9,6 +9,9 @@
 後方互換性のため、全フィールドは AppContext から直接アクセス可能。
 グループ経由のアクセスも可能（例: app_ctx.core.settings）。
 
+グループ API は AppContext 本体を参照する live view として実装し、
+トップレベル属性とグループ属性が乖離しないようにする。
+
 設計メモ: マネージャーの遅延初期化は ensure_*_manager() 関数で行う。
 __getattr__ による自動初期化は dataclass の None デフォルト値と
 互換性がないため不採用（詳細は helpers_managers.py 参照）。
@@ -33,42 +36,144 @@ from src.managers.worktree_manager import WorktreeManager
 from src.models.agent import Agent
 
 
-@dataclass
 class CoreManagers:
-    """コアマネージャーグループ: サーバー起動に必須のマネージャー。"""
+    """コアマネージャーグループの live view。"""
 
-    settings: Settings
-    tmux: TmuxManager
-    ai_cli: AiCliManager
-    agents: dict[str, Agent] = field(default_factory=dict)
+    def __init__(self, ctx: "AppContext") -> None:
+        self._ctx = ctx
+
+    @property
+    def settings(self) -> Settings:
+        return self._ctx.settings
+
+    @settings.setter
+    def settings(self, value: Settings) -> None:
+        self._ctx.settings = value
+
+    @property
+    def tmux(self) -> TmuxManager:
+        return self._ctx.tmux
+
+    @tmux.setter
+    def tmux(self, value: TmuxManager) -> None:
+        self._ctx.tmux = value
+
+    @property
+    def ai_cli(self) -> AiCliManager:
+        return self._ctx.ai_cli
+
+    @ai_cli.setter
+    def ai_cli(self, value: AiCliManager) -> None:
+        self._ctx.ai_cli = value
+
+    @property
+    def agents(self) -> dict[str, Agent]:
+        return self._ctx.agents
+
+    @agents.setter
+    def agents(self, value: dict[str, Agent]) -> None:
+        self._ctx.agents = value
 
 
-@dataclass
 class WorkflowManagers:
-    """ワークフローマネージャーグループ: タスク実行・通信・ダッシュボード。"""
+    """ワークフローマネージャーグループの live view。"""
 
-    ipc_manager: IPCManager | None = None
-    dashboard_manager: DashboardManager | None = None
-    scheduler_manager: SchedulerManager | None = None
+    def __init__(self, ctx: "AppContext") -> None:
+        self._ctx = ctx
+
+    @property
+    def ipc_manager(self) -> IPCManager | None:
+        return self._ctx.ipc_manager
+
+    @ipc_manager.setter
+    def ipc_manager(self, value: IPCManager | None) -> None:
+        self._ctx.ipc_manager = value
+
+    @property
+    def dashboard_manager(self) -> DashboardManager | None:
+        return self._ctx.dashboard_manager
+
+    @dashboard_manager.setter
+    def dashboard_manager(self, value: DashboardManager | None) -> None:
+        self._ctx.dashboard_manager = value
+
+    @property
+    def scheduler_manager(self) -> SchedulerManager | None:
+        return self._ctx.scheduler_manager
+
+    @scheduler_manager.setter
+    def scheduler_manager(self, value: SchedulerManager | None) -> None:
+        self._ctx.scheduler_manager = value
 
 
-@dataclass
 class MonitoringManagers:
-    """監視マネージャーグループ: ヘルスチェック・デーモン関連。"""
+    """監視マネージャーグループの live view。"""
 
-    healthcheck_manager: HealthcheckManager | None = None
-    healthcheck_daemon_task: asyncio.Task | None = None
-    healthcheck_daemon_stop_event: asyncio.Event | None = None
-    healthcheck_daemon_lock: asyncio.Lock | None = None
-    healthcheck_idle_cycles: int = 0
+    def __init__(self, ctx: "AppContext") -> None:
+        self._ctx = ctx
+
+    @property
+    def healthcheck_manager(self) -> HealthcheckManager | None:
+        return self._ctx.healthcheck_manager
+
+    @healthcheck_manager.setter
+    def healthcheck_manager(self, value: HealthcheckManager | None) -> None:
+        self._ctx.healthcheck_manager = value
+
+    @property
+    def healthcheck_daemon_task(self) -> asyncio.Task | None:
+        return self._ctx.healthcheck_daemon_task
+
+    @healthcheck_daemon_task.setter
+    def healthcheck_daemon_task(self, value: asyncio.Task | None) -> None:
+        self._ctx.healthcheck_daemon_task = value
+
+    @property
+    def healthcheck_daemon_stop_event(self) -> asyncio.Event | None:
+        return self._ctx.healthcheck_daemon_stop_event
+
+    @healthcheck_daemon_stop_event.setter
+    def healthcheck_daemon_stop_event(self, value: asyncio.Event | None) -> None:
+        self._ctx.healthcheck_daemon_stop_event = value
+
+    @property
+    def healthcheck_daemon_lock(self) -> asyncio.Lock | None:
+        return self._ctx.healthcheck_daemon_lock
+
+    @healthcheck_daemon_lock.setter
+    def healthcheck_daemon_lock(self, value: asyncio.Lock | None) -> None:
+        self._ctx.healthcheck_daemon_lock = value
+
+    @property
+    def healthcheck_idle_cycles(self) -> int:
+        return self._ctx.healthcheck_idle_cycles
+
+    @healthcheck_idle_cycles.setter
+    def healthcheck_idle_cycles(self, value: int) -> None:
+        self._ctx.healthcheck_idle_cycles = value
 
 
-@dataclass
 class OptionalManagers:
-    """オプショナルマネージャーグループ: ペルソナ・メモリ。"""
+    """オプショナルマネージャーグループの live view。"""
 
-    persona_manager: PersonaManager | None = None
-    memory_manager: MemoryManager | None = None
+    def __init__(self, ctx: "AppContext") -> None:
+        self._ctx = ctx
+
+    @property
+    def persona_manager(self) -> PersonaManager | None:
+        return self._ctx.persona_manager
+
+    @persona_manager.setter
+    def persona_manager(self, value: PersonaManager | None) -> None:
+        self._ctx.persona_manager = value
+
+    @property
+    def memory_manager(self) -> MemoryManager | None:
+        return self._ctx.memory_manager
+
+    @memory_manager.setter
+    def memory_manager(self, value: MemoryManager | None) -> None:
+        self._ctx.memory_manager = value
 
 
 @dataclass
@@ -126,48 +231,14 @@ class AppContext:
     def __post_init__(self) -> None:
         """マネージャーグループを初期化する。
 
-        各グループは AppContext のフィールドへの参照を保持する。
-        ミュータブルオブジェクト（dict 等）は同一参照を共有するため、
-        AppContext 側の変更がグループ経由でも反映される。
+        各グループは AppContext 本体を参照する live view を保持する。
+        これによりトップレベル属性の差し替え後も、
+        グループ経由の参照が stale にならない。
         """
-        object.__setattr__(
-            self,
-            "_core",
-            CoreManagers(
-                settings=self.settings,
-                tmux=self.tmux,
-                ai_cli=self.ai_cli,
-                agents=self.agents,
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_workflow",
-            WorkflowManagers(
-                ipc_manager=self.ipc_manager,
-                dashboard_manager=self.dashboard_manager,
-                scheduler_manager=self.scheduler_manager,
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_monitoring",
-            MonitoringManagers(
-                healthcheck_manager=self.healthcheck_manager,
-                healthcheck_daemon_task=self.healthcheck_daemon_task,
-                healthcheck_daemon_stop_event=self.healthcheck_daemon_stop_event,
-                healthcheck_daemon_lock=self.healthcheck_daemon_lock,
-                healthcheck_idle_cycles=self.healthcheck_idle_cycles,
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_optional",
-            OptionalManagers(
-                persona_manager=self.persona_manager,
-                memory_manager=self.memory_manager,
-            ),
-        )
+        object.__setattr__(self, "_core", CoreManagers(self))
+        object.__setattr__(self, "_workflow", WorkflowManagers(self))
+        object.__setattr__(self, "_monitoring", MonitoringManagers(self))
+        object.__setattr__(self, "_optional", OptionalManagers(self))
 
     @property
     def core(self) -> CoreManagers:

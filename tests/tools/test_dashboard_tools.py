@@ -968,6 +968,118 @@ class TestGetDashboard:
         assert "dashboard" in result
 
     @pytest.mark.asyncio
+    async def test_get_dashboard_syncs_agents_once_without_markdown_regeneration(
+        self, dashboard_mock_ctx, git_repo, monkeypatch
+    ):
+        """Admin/Owner の参照系取得で不要な Markdown 再生成をしないことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_dashboard = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_dashboard":
+                get_dashboard = tool.fn
+                break
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        sync_calls: list[list[str]] = []
+
+        def _capture_sync(agents):
+            sync_calls.append([agent.id for agent in agents])
+
+        monkeypatch.setattr(
+            app_ctx.dashboard_manager,
+            "sync_agent_summaries",
+            _capture_sync,
+        )
+        monkeypatch.setattr(
+            app_ctx.dashboard_manager,
+            "save_markdown_dashboard",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("get_dashboard should not regenerate markdown")
+            ),
+        )
+
+        result = await get_dashboard(
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert sync_calls == [["owner-001"]]
+
+    @pytest.mark.asyncio
+    async def test_get_dashboard_summary_syncs_agents_once_without_markdown_regeneration(
+        self, dashboard_mock_ctx, git_repo, monkeypatch
+    ):
+        """get_dashboard_summary でも不要な Markdown 再生成をしないことをテスト。"""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.tools.dashboard import register_tools
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        get_dashboard_summary = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "get_dashboard_summary":
+                get_dashboard_summary = tool.fn
+                break
+
+        app_ctx = dashboard_mock_ctx.request_context.lifespan_context
+        now = datetime.now()
+        app_ctx.agents["owner-001"] = Agent(
+            id="owner-001",
+            role=AgentRole.OWNER,
+            status=AgentStatus.IDLE,
+            tmux_session=None,
+            working_dir=str(git_repo),
+            created_at=now,
+            last_activity=now,
+        )
+
+        sync_calls: list[list[str]] = []
+
+        def _capture_sync(agents):
+            sync_calls.append([agent.id for agent in agents])
+
+        monkeypatch.setattr(
+            app_ctx.dashboard_manager,
+            "sync_agent_summaries",
+            _capture_sync,
+        )
+        monkeypatch.setattr(
+            app_ctx.dashboard_manager,
+            "save_markdown_dashboard",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("get_dashboard_summary should not regenerate markdown")
+            ),
+        )
+
+        result = await get_dashboard_summary(
+            caller_agent_id="owner-001",
+            ctx=dashboard_mock_ctx,
+        )
+
+        assert result["success"] is True
+        assert sync_calls == [["owner-001"]]
+
+    @pytest.mark.asyncio
     async def test_get_dashboard_blocks_admin_polling_while_waiting(
         self, dashboard_mock_ctx, git_repo
     ):

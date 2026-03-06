@@ -39,6 +39,15 @@ AI CLI（Claude Code / Codex / Gemini / Cursor）+ tmux + git worktree
 - tmux
 - uv（推奨）または pip
 
+## 最短セットアップ
+
+1. MCP クライアントに `multi-agent-mcp` を登録します。
+   Claude / Codex は次の CLI 例を使い、Gemini / Cursor などで CLI サブコマンドが異なる場合は
+   この後の JSON 設定例と同じ `command=uvx` / `args=[...]` を登録してください。
+2. クライアントを再起動し、MCP サーバーへ再接続します。
+3. クライアント上で `init_tmux_workspace("/path/to/project", session_id="issue-123")` を実行して
+   ワークスペースを初期化します。非 git ディレクトリでは `enable_git=false` を指定します。
+
 ## インストール
 
 GitHub から直接インストールできます（リポジトリの clone は不要）。
@@ -69,6 +78,11 @@ codex mcp add multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi
 # 削除
 codex mcp remove multi-agent-mcp
 ```
+
+**Gemini / Cursor など**
+
+CLI からの追加コマンドが未提供、または実装差分があるクライアントでは、
+次の「設定ファイルに直接記述」の JSON 例と同じ内容を登録してください。
 
 ### 設定ファイルに直接記述
 
@@ -132,10 +146,16 @@ codex mcp get multi-agent-mcp
 uv cache clean multi-agent-mcp
 ```
 
+上記の JSON 例は、`mcpServers` 形式を採用しているクライアントであれば
+Claude / Codex 以外でも同様の考え方で利用できます。
+
 ### 設定の確認
 
 ```bash
+# Claude
 claude mcp list
+
+# Codex
 codex mcp list
 ```
 
@@ -145,7 +165,7 @@ codex mcp list
 
 | Tool | 説明 |
 |------|------|
-| `init_tmux_workspace` | ターミナルを開いてtmuxワークスペースを構築（8ペイングリッド） |
+| `init_tmux_workspace` | ターミナルを開いてtmuxワークスペースを構築（Admin 1 + Worker 1-6 の7ペイン） |
 | `cleanup_workspace` | 全エージェントを終了しリソースを解放 |
 | `check_all_tasks_completed` | 全タスクの完了状態をチェック |
 | `cleanup_on_completion` | 全タスク完了時にワークスペースをクリーンアップ |
@@ -444,13 +464,17 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_EXTRA_WORKER_COLS` | 5 | 追加ウィンドウの列数 |
 | `MCP_WORKERS_PER_EXTRA_WINDOW` | 10 | 追加ウィンドウのWorker数 |
 | `MCP_COST_WARNING_THRESHOLD_USD` | 10.0 | コスト警告の閾値（USD） |
-| `MCP_ESTIMATED_TOKENS_PER_CALL` | 2000 | 1回のAPI呼び出しあたりの推定トークン数 |
+| `MCP_ESTIMATED_TOKENS_PER_CALL` | 5000 | 1回のAPI呼び出しあたりの推定トークン数 |
 | `MCP_MODEL_COST_TABLE_JSON` | `{"claude:opus":0.03,...}` | モデル別1000トークン単価テーブル（JSON） |
 | `MCP_MODEL_COST_DEFAULT_PER_1K` | 0.01 | 未定義モデル向けの汎用単価（USD/1K） |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | 60 | ヘルスチェック監視ループの実行間隔（秒） |
 | `MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS` | 600 | 無応答判定の閾値（秒） |
+| `MCP_HEALTHCHECK_IN_PROGRESS_NO_IPC_TIMEOUT_SECONDS` | 120 | `in_progress` タスクの無通信判定閾値（秒） |
 | `MCP_HEALTHCHECK_MAX_RECOVERY_ATTEMPTS` | 3 | 同一worker/taskに対する復旧試行回数の上限 |
 | `MCP_HEALTHCHECK_IDLE_STOP_CONSECUTIVE` | 3 | 実作業なし検知が連続したとき daemon を自動停止する閾値 |
+| `MCP_CODEX_ENTER_RETRY_MAX` | 3 | Codex への Enter 再送回数の上限 |
+| `MCP_CODEX_ENTER_RETRY_INTERVAL_MS` | 250 | Codex への Enter 再送間隔（ミリ秒） |
+| `MCP_SEND_COOLDOWN_SECONDS` | 2.0 | tmux への連続送信時に挟む最小待機秒数 |
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | codex | standardプロファイルのAI CLI |
@@ -481,8 +505,9 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
 | `MCP_WORKER_CLI_1..16` | (empty) | per-workerモードでのWorker別CLI設定（未設定時はアクティブプロファイルCLIを利用） |
 | `MCP_WORKER_MODEL_1..16` | (empty) | per-workerモードでのWorker別モデル設定（未設定時はプロファイルのWORKER_MODEL） |
-| `MCP_QUALITY_CHECK_MAX_ITERATIONS` | 5 | 品質チェックの最大イテレーション回数 |
+| `MCP_QUALITY_CHECK_MAX_ITERATIONS` | 3 | 品質チェックの最大イテレーション回数 |
 | `MCP_QUALITY_CHECK_SAME_ISSUE_LIMIT` | 3 | 同一問題の繰り返し上限 |
+| `MCP_QUALITY_GATE_STRICT` | true | 品質ゲートを厳格に適用するか |
 | `MCP_MEMORY_MAX_ENTRIES` | 1000 | メモリの最大エントリ数 |
 | `MCP_MEMORY_TTL_DAYS` | 90 | メモリエントリの保持期間（日） |
 | `MCP_SCREENSHOT_EXTENSIONS` | [".png",".jpg",...] | スクリーンショットとして認識する拡張子 |

@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 
 from src.config.constants import PRIVATE_FILE_MODE
 from src.config.settings import get_mcp_dir
-from src.context import AppContext
 from src.models.agent import AgentRole
 from src.tools.helpers_git import resolve_main_repo_root
 from src.tools.helpers_registry import (
@@ -25,6 +24,7 @@ from src.tools.helpers_registry import (
 )
 
 if TYPE_CHECKING:
+    from src.context import AppContext
     from src.models.agent import Agent
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ _VALID_ROLES = {role.value for role in AgentRole}
 _SYNC_CACHE_TTL_SECONDS = 5.0
 # scope（session/path）ごとの最終同期時刻を保持する
 _last_sync_times: dict[str, float] = {}
+_last_sync_mtimes: dict[str, int | None] = {}
 
 
 def _normalize_project_root_for_persistence(
@@ -54,6 +55,7 @@ def _normalize_project_root_for_persistence(
 def reset_sync_cache() -> None:
     """sync_agents_from_file のキャッシュをリセットする（テスト用）。"""
     _last_sync_times.clear()
+    _last_sync_mtimes.clear()
 
 
 def _get_agents_file_path(project_root: str | None, session_id: str | None = None) -> Path | None:
@@ -109,6 +111,16 @@ def _get_agents_lock_path(agents_file: Path) -> Path:
     return agents_file.with_name(f"{agents_file.stem}.lock")
 
 
+def _get_agents_file_mtime_ns(agents_file: Path | None) -> int | None:
+    """agents.json の mtime_ns を返す。"""
+    if agents_file is None:
+        return None
+    try:
+        return agents_file.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
 @contextmanager
 def _agents_file_lock(agents_file: Path) -> Iterator[None]:
     """agents.json の更新時に排他ロックを取得する。"""
@@ -146,6 +158,16 @@ def _atomic_write_json(file_path: Path, payload: dict[str, Any]) -> None:
         raise
 
 
+def _build_agents_payload(app_ctx: AppContext, updated_agent: Agent) -> dict[str, Any]:
+    """AppContext 上のエージェント状態から agents.json 用 payload を組み立てる。"""
+    payload = {
+        existing_agent.id: existing_agent.model_dump(mode="json")
+        for existing_agent in app_ctx.agents.values()
+    }
+    payload[updated_agent.id] = updated_agent.model_dump(mode="json")
+    return payload
+
+
 def save_agent_to_file(app_ctx: AppContext, agent: Agent) -> bool:
     """エージェント情報をファイルに保存する。
 
@@ -168,22 +190,13 @@ def save_agent_to_file(app_ctx: AppContext, agent: Agent) -> bool:
 
     try:
         with _agents_file_lock(agents_file):
-            # 既存のエージェント情報を読み込み
-            agents_data: dict[str, Any] = {}
-            if agents_file.exists():
-                with open(agents_file, encoding="utf-8") as f:
-                    agents_data = json.load(f)
-
-            # エージェント情報を追加/更新
-            agents_data[agent.id] = agent.model_dump(mode="json")
-
-            # アトミック書き込み（tmpfile + os.replace）
+            agents_data = _build_agents_payload(app_ctx, agent)
             _atomic_write_json(agents_file, agents_data)
 
         logger.debug(f"エージェント {agent.id} を {agents_file} に保存しました")
         return True
 
-    except (OSError, json.JSONDecodeError, ValueError) as e:
+    except (OSError, ValueError) as e:
         logger.warning(f"エージェント情報の保存に失敗: {e}")
         return False
 
@@ -254,11 +267,16 @@ def sync_agents_from_file(app_ctx: AppContext, force: bool = False) -> int:
     """
     agents_file = _resolve_agents_file_path(app_ctx)
     cache_key = _get_sync_cache_key(agents_file)
+    current_mtime_ns = _get_agents_file_mtime_ns(agents_file)
 
     if not force:
         now = time.monotonic()
         last_sync_time = _last_sync_times.get(cache_key, 0.0)
-        if (now - last_sync_time) < _SYNC_CACHE_TTL_SECONDS:
+        last_sync_mtime_ns = _last_sync_mtimes.get(cache_key)
+        if (
+            current_mtime_ns == last_sync_mtime_ns
+            and (now - last_sync_time) < _SYNC_CACHE_TTL_SECONDS
+        ):
             return 0
 
     file_agents = load_agents_from_file(app_ctx, agents_file=agents_file)
@@ -275,6 +293,7 @@ def sync_agents_from_file(app_ctx: AppContext, force: bool = False) -> int:
             synced += 1
 
     _last_sync_times[cache_key] = time.monotonic()
+    _last_sync_mtimes[cache_key] = current_mtime_ns
 
     if synced > 0:
         logger.info(f"ファイルから {synced} 件のエージェント情報を同期しました")

@@ -208,9 +208,9 @@ class PersonaManager:
             return None
 
         metadata = self._parse_front_matter(content)
-        if not metadata:
+        if metadata is None:
             logger.warning(
-                "ペルソナファイルの Front Matter が見つかりません: %s", file_path
+                "ペルソナファイルの Front Matter が存在しないか不正です: %s", file_path
             )
             return None
 
@@ -234,7 +234,7 @@ class PersonaManager:
         )
 
     @staticmethod
-    def _parse_front_matter(content: str) -> dict | None:
+    def _parse_front_matter(content: str) -> dict[str, object] | None:
         """YAML Front Matter をパースする。
 
         Args:
@@ -249,9 +249,12 @@ class PersonaManager:
         if len(parts) < 3:
             return None
         try:
-            return yaml.safe_load(parts[1])
+            metadata = yaml.safe_load(parts[1])
         except yaml.YAMLError:
             return None
+        if not isinstance(metadata, dict):
+            return None
+        return metadata
 
     def detect_task_type(self, task_description: str) -> TaskType:
         """タスクの説明からタスクタイプを検出する。

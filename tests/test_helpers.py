@@ -1001,6 +1001,36 @@ class TestEnsureIpcManager:
             ensure_ipc_manager(app_ctx)
 
 
+class TestEnsureSchedulerManager:
+    """ensure_scheduler_manager の Dashboard 追従テスト。"""
+
+    def test_scheduler_tracks_latest_dashboard_on_session_switch(self, app_ctx, git_repo):
+        from src.managers.dashboard_manager import DashboardManager
+        from src.tools.helpers_managers import ensure_scheduler_manager
+
+        app_ctx.project_root = str(git_repo)
+        app_ctx.session_id = "old-session"
+        app_ctx.workspace_id = "old-session"
+        old_dir = git_repo / ".multi-agent-mcp" / "old-session" / "dashboard"
+        app_ctx.dashboard_manager = DashboardManager(
+            workspace_id="old-session",
+            workspace_path=str(git_repo),
+            dashboard_dir=str(old_dir),
+        )
+
+        scheduler = ensure_scheduler_manager(app_ctx)
+        assert scheduler.dashboard_manager.workspace_id == "old-session"
+
+        app_ctx.session_id = "new-session"
+        latest_dashboard = scheduler.dashboard_manager
+
+        assert latest_dashboard.workspace_id == "new-session"
+        assert latest_dashboard is app_ctx.dashboard_manager
+        assert str(latest_dashboard.dashboard_dir).endswith(
+            ".multi-agent-mcp/new-session/dashboard"
+        )
+
+
 class TestCodexPromptDetection:
     """Codex 入力残留判定のテスト。"""
 

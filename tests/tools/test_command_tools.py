@@ -26,6 +26,7 @@ def command_test_ctx(git_repo, settings):
     mock_tmux.create_main_session = AsyncMock(return_value=True)
     mock_tmux.send_keys = AsyncMock(return_value=True)
     mock_tmux.send_keys_to_pane = AsyncMock(return_value=True)
+    mock_tmux.send_and_confirm_to_pane = AsyncMock(return_value=True)
     mock_tmux.capture_pane_by_index = AsyncMock(
         return_value="mock output line 1\nmock output line 2"
     )
@@ -2199,7 +2200,7 @@ class TestDangerousCommandPatterns:
 
 
 class TestSendCommandAlwaysBlocked:
-    """send_command で _ALWAYS_BLOCKED_PATTERNS が allow_dangerous=True でもブロックされるテスト。"""
+    """send_command で絶対禁止パターンが常にブロックされることを確認する。"""
 
     @pytest.mark.asyncio
     async def test_fork_bomb_blocked_even_with_allow_dangerous(

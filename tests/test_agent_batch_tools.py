@@ -264,6 +264,48 @@ class TestPreferredCliNewWorker:
         mock_settings.get_worker_cli.assert_called_once_with(1)
 
     @pytest.mark.asyncio
+    async def test_main_session_is_created_once_per_project(self):
+        """同一プロジェクトの main session 初期化を 1 回に抑える。"""
+        mock_tmux = AsyncMock()
+        mock_tmux.create_main_session.return_value = True
+        mock_ctx = MagicMock()
+        mock_ctx.tmux = mock_tmux
+
+        mock_settings = MagicMock()
+        mock_settings.get_worker_cli.return_value = AICli.CLAUDE
+
+        first_agent, first_error = await _setup_worker_tmux_pane(
+            app_ctx=mock_ctx,
+            settings=mock_settings,
+            project_name="test",
+            repo_path="/tmp/repo",
+            window_index=0,
+            pane_index=1,
+            worker_no=1,
+            worktree_path="/tmp/repo",
+            enable_worktree=False,
+            worker_index=0,
+        )
+        second_agent, second_error = await _setup_worker_tmux_pane(
+            app_ctx=mock_ctx,
+            settings=mock_settings,
+            project_name="test",
+            repo_path="/tmp/repo",
+            window_index=0,
+            pane_index=2,
+            worker_no=2,
+            worktree_path="/tmp/repo",
+            enable_worktree=False,
+            worker_index=1,
+        )
+
+        assert first_error is None
+        assert second_error is None
+        assert first_agent is not None
+        assert second_agent is not None
+        mock_tmux.create_main_session.assert_awaited_once_with("/tmp/repo")
+
+    @pytest.mark.asyncio
     async def test_invalid_preferred_cli_falls_back_to_default(self):
         """無効な preferred_cli はデフォルト CLI にフォールバックする。"""
         mock_tmux = AsyncMock()
