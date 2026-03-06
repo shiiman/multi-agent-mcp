@@ -223,14 +223,14 @@ class TestLoadSettingsForProject:
         env_file = mcp_dir / ".env"
         env_file.write_text(
             "MCP_MODEL_PROFILE_STANDARD_CLI=codex\n"
-            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.3-codex\n",
+            "MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL=gpt-5.4\n",
             encoding="utf-8",
         )
 
         settings = load_settings_for_project(str(temp_dir))
 
         assert settings.model_profile_standard_cli == AICli.CODEX
-        assert settings.model_profile_standard_admin_model == "gpt-5.3-codex"
+        assert settings.model_profile_standard_admin_model == "gpt-5.4"
 
     def test_falls_back_to_default_when_env_file_not_exists(self, temp_dir, monkeypatch):
         """.env がない場合はデフォルト設定を使用する。"""
@@ -302,7 +302,7 @@ class TestWorkerCliAndModelResolution:
     def test_get_worker_model_follows_worker_cli_mode(self):
         settings = load_settings_for_project(None)
         settings.worker_cli_mode = WorkerCliMode.UNIFORM
-        settings.worker_model_1 = "gpt-5.3-codex"
+        settings.worker_model_1 = "gpt-5.4"
         assert settings.get_worker_model(1, "opus") == "opus"
 
         settings.worker_cli_mode = WorkerCliMode.PER_WORKER
