@@ -117,7 +117,7 @@ class ModelDefaults:
     """Claude Sonnet モデル（Claude CLI が最新バージョンに自動解決）"""
 
     # Codex CLI
-    CODEX_DEFAULT = "gpt-5.4"
+    CODEX_DEFAULT = "gpt-5.5"
     """Codex デフォルトモデル"""
 
     # Cursor CLI
@@ -515,12 +515,14 @@ class Settings(BaseSettings):
     )
     """1回のAPI呼び出しあたりの推定トークン数（デフォルト: 5000）"""
 
-    # 短縮キー(claude:opus等)は後方互換のため維持。正式キー(claude:claude-opus-4-6等)を併記
+    # 短縮キー(claude:opus等)は後方互換のため維持。正式キー(claude:claude-opus-4-7等)を併記
     model_cost_table_json: str = Field(
         default='{"claude:opus":0.03,"claude:sonnet":0.015,'
-        '"claude:claude-opus-4-6":0.03,"claude:claude-sonnet-4-6":0.015,'
+        '"claude:claude-opus-4-7":0.03,"claude:claude-opus-4-6":0.03,'
+        '"claude:claude-sonnet-4-6":0.015,'
         '"claude:claude-haiku-4-5-20251001":0.003,'
-        '"codex:gpt-5.4":0.01,"codex:gpt-5.3-codex":0.01,"gemini:gemini-3-pro-preview":0.012,'
+        '"codex:gpt-5.5":0.01,"codex:gpt-5.4":0.01,"codex:gpt-5.3-codex":0.01,'
+        '"gemini:gemini-3-pro-preview":0.012,'
         '"gemini:gemini-3-flash-preview":0.003,'
         '"gemini:gemini-3-pro":0.005,"gemini:gemini-3-flash":0.0025,'
         '"cursor:composer-1.5":0.01}',

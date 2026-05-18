@@ -257,7 +257,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_WORKERS_PER_EXTRA_WINDOW` | Worker slots per extra worker window | 10 |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
 | `MCP_ESTIMATED_TOKENS_PER_CALL` | Estimated tokens per API call | 5000 |
-| `MCP_MODEL_COST_TABLE_JSON` | Model cost table (USD per 1K tokens, JSON) | `{"claude:opus":0.03,...}` |
+| `MCP_MODEL_COST_TABLE_JSON` | Model cost table (USD per 1K tokens, JSON) | `{"claude:opus":0.03,"claude:claude-opus-4-7":0.03,"codex:gpt-5.5":0.01,...}` |
 | `MCP_MODEL_COST_DEFAULT_PER_1K` | Fallback cost per 1K tokens (USD) | 0.01 |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck monitor interval (seconds) | 60 |
 | `MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS` | Stall detection timeout (seconds) | 600 |
@@ -270,16 +270,16 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_DEFAULT_TERMINAL` | Default terminal app (auto: cmux → ghostty → iterm2 → terminal) | auto |
 | `MCP_MODEL_PROFILE_ACTIVE` | Current model profile | standard |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | Standard profile AI CLI | codex |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | gpt-5.4 |
-| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | gpt-5.4 |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | Standard profile Admin model | gpt-5.5 |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | Standard profile Worker model | gpt-5.5 |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | Standard profile max workers | 6 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | Standard Admin thinking tokens | 4000 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | Standard Worker thinking tokens | 4000 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT` | Standard Admin reasoning effort | medium |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT` | Standard Worker reasoning effort | medium |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | Performance profile AI CLI | codex |
-| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | gpt-5.4 |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | gpt-5.4 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | Performance profile Admin model | gpt-5.5 |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | Performance profile Worker model | gpt-5.5 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | Performance profile max workers | 16 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | Performance Admin thinking tokens | 30000 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | Performance Worker thinking tokens | 4000 |
@@ -288,8 +288,8 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_PROJECT_ROOT` | Project root for .env loading | - |
 | `MCP_CLI_DEFAULT_CLAUDE_ADMIN_MODEL` | Claude CLI Admin default model | opus |
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | Claude CLI Worker default model | sonnet |
-| `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | Codex CLI Admin default model | gpt-5.4 |
-| `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | Codex CLI Worker default model | gpt-5.4 |
+| `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | Codex CLI Admin default model | gpt-5.5 |
+| `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | Codex CLI Worker default model | gpt-5.5 |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | Gemini CLI Admin default model | gemini-3-pro-preview |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | Gemini CLI Worker default model | gemini-3-flash-preview |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | Cursor CLI Admin default model | composer-1.5 |
