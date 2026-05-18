@@ -292,12 +292,12 @@ class TestResolveModelForCli:
         assert resolve_model_for_cli("claude", "sonnet", "worker") == "sonnet"
 
     def test_codex_fallback_admin(self):
-        """Codex で opus → gpt-5.4 に解決されることをテスト。"""
+        """Codex で opus → Codex デフォルトモデルに解決されることをテスト。"""
         result = resolve_model_for_cli("codex", "opus", "admin")
         assert result == ModelDefaults.CODEX_DEFAULT
 
     def test_codex_fallback_worker(self):
-        """Codex で sonnet → gpt-5.4 に解決されることをテスト。"""
+        """Codex で sonnet → Codex デフォルトモデルに解決されることをテスト。"""
         result = resolve_model_for_cli("codex", "sonnet", "worker")
         assert result == ModelDefaults.CODEX_DEFAULT
 

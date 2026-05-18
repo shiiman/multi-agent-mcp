@@ -478,16 +478,16 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | codex | standardプロファイルのAI CLI |
-| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | gpt-5.4 | standardプロファイルのAdminモデル |
-| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | gpt-5.4 | standardプロファイルのWorkerモデル |
+| `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | gpt-5.5 | standardプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_STANDARD_WORKER_MODEL` | gpt-5.5 | standardプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` | 6 | standardプロファイルのWorker上限 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_THINKING_TOKENS` | 4000 | standardプロファイルのAdmin思考トークン数 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_THINKING_TOKENS` | 4000 | standardプロファイルのWorker思考トークン数 |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_REASONING_EFFORT` | medium | standardプロファイルのAdmin推論強度 |
 | `MCP_MODEL_PROFILE_STANDARD_WORKER_REASONING_EFFORT` | medium | standardプロファイルのWorker推論強度 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_CLI` | codex | performanceプロファイルのAI CLI |
-| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | gpt-5.4 | performanceプロファイルのAdminモデル |
-| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | gpt-5.4 | performanceプロファイルのWorkerモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_MODEL` | gpt-5.5 | performanceプロファイルのAdminモデル |
+| `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_MODEL` | gpt-5.5 | performanceプロファイルのWorkerモデル |
 | `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS` | 16 | performanceプロファイルのWorker上限 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_ADMIN_THINKING_TOKENS` | 30000 | performanceプロファイルのAdmin思考トークン数 |
 | `MCP_MODEL_PROFILE_PERFORMANCE_WORKER_THINKING_TOKENS` | 4000 | performanceプロファイルのWorker思考トークン数 |
@@ -496,8 +496,8 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_PROJECT_ROOT` | - | プロジェクトルート（.env読み込み用） |
 | `MCP_CLI_DEFAULT_CLAUDE_ADMIN_MODEL` | opus | Claude CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | sonnet | Claude CLIのWorkerデフォルトモデル |
-| `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.4 | Codex CLIのAdminデフォルトモデル |
-| `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.4 | Codex CLIのWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.5 | Codex CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.5 | Codex CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro-preview | Gemini CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash-preview | Gemini CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer-1.5 | Cursor CLIのAdminデフォルトモデル |
