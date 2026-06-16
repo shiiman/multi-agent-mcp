@@ -176,7 +176,7 @@ return "not_found"
             await asyncio.sleep(0.3)
 
             # ③ cmux を最前面にして Cmd+W で workspace を閉じる
-            close_script = f'''
+            close_script = '''
 tell application "cmux"
     activate
 end tell

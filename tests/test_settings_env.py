@@ -375,3 +375,15 @@ class TestSetupMcpDirectories:
 
         assert result["created_dirs"] == []
         assert result["env_created"] is False
+
+
+class TestCostTable:
+    """コストテーブル関連のテスト。"""
+
+    def test_cost_table_includes_opus_4_8(self):
+        """デフォルトのコストテーブルに claude-opus-4-8 が含まれること。"""
+        from src.config.settings import Settings
+
+        # _env_file=None でプロジェクト .env の上書きを排除し、フィールド default を検証
+        table = Settings(_env_file=None).get_model_cost_table()
+        assert table.get("claude:claude-opus-4-8") == 0.03

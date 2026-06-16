@@ -24,6 +24,16 @@ from src.models.agent import Agent, AgentRole, AgentStatus
 
 
 @pytest.fixture(autouse=True)
+def _clear_main_repo_root_cache():
+    """各テスト前後で resolve_main_repo_root のプロセス内キャッシュをクリアする。"""
+    from src.tools import helpers_git
+
+    helpers_git.clear_main_repo_root_cache()
+    yield
+    helpers_git.clear_main_repo_root_cache()
+
+
+@pytest.fixture(autouse=True)
 def disable_macos_notifications(monkeypatch):
     """テスト中の macOS 通知送信を無効化する。"""
 
