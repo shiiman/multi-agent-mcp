@@ -16,12 +16,17 @@ if TYPE_CHECKING:
     from src.context import AppContext
     from src.managers.tmux_manager import TmuxManager
 
-from src.config.settings import AICli, Settings, normalize_cli_name, resolve_model_for_cli
+from src.config.settings import AICli, Settings
 from src.config.workflow_guides import get_role_template_path_for_workspace
 from src.managers.tmux_manager import (
     MAIN_WINDOW_PANE_ADMIN,
     MAIN_WINDOW_WORKER_PANES,
     get_project_name,
+)
+from src.managers.worker_resolution import (
+    resolve_agent_cli_name,
+    resolve_worker_model_for_cli,
+    resolve_worker_number_from_slot,  # noqa: F401  後方互換 re-export（他モジュールが本名で import）
 )
 from src.models.agent import Agent, AgentRole, AgentStatus
 from src.tools.helpers import (
@@ -37,6 +42,12 @@ from src.tools.helpers import (
 from src.tools.task_templates import generate_7section_task
 
 logger = logging.getLogger(__name__)
+
+# 後方互換: Worker 解決ロジックは src.managers.worker_resolution へ移動した。
+# 旧名（先頭アンダースコア）を alias として維持し、既存の import/呼び出しを保つ。
+# 新版は引数順が旧版と同一のため薄いラッパーは不要。
+_resolve_agent_cli_name = resolve_agent_cli_name
+_resolve_worker_model_for_cli = resolve_worker_model_for_cli
 
 _SHELL_COMMANDS = {"zsh", "bash", "sh", "fish"}
 
@@ -223,29 +234,6 @@ def _resolve_tmux_session_name(agent: Agent) -> str | None:
     return None
 
 
-def _resolve_agent_cli_name(agent: Agent, app_ctx: AppContext) -> str:
-    """Agent の CLI 名を文字列で返す。"""
-    if agent.role == AgentRole.WORKER:
-        # preferred_cli / 明示指定で pin された Worker は agent 側設定を優先する。
-        if getattr(agent, "ai_cli_pinned", False) and agent.ai_cli:
-            return normalize_cli_name(agent.ai_cli)
-
-        if agent.window_index is not None and agent.pane_index is not None:
-            try:
-                worker_no = resolve_worker_number_from_slot(
-                    app_ctx.settings,
-                    agent.window_index,
-                    agent.pane_index,
-                )
-                return app_ctx.settings.get_worker_cli(worker_no).value
-            except Exception as e:
-                logger.debug("Worker CLI の再解決に失敗したため agent.ai_cli を使用: %s", e)
-
-    if agent.ai_cli:
-        return normalize_cli_name(agent.ai_cli)
-    return normalize_cli_name(app_ctx.ai_cli.get_default_cli())
-
-
 def _resolve_agent_enable_git(
     app_ctx: AppContext,
     agent: Agent,
@@ -259,31 +247,6 @@ def _resolve_agent_enable_git(
     if resolved is None:
         return app_ctx.settings.enable_git
     return resolved
-
-
-def _resolve_worker_model_for_cli(
-    app_ctx: AppContext,
-    agent: Agent,
-    profile_settings: dict,
-    agent_cli_name: str | None = None,
-) -> str | None:
-    """Worker の実行 CLI に整合するモデル名を解決する。"""
-    cli_name = (agent_cli_name or _resolve_agent_cli_name(agent, app_ctx)).lower()
-    worker_no = resolve_worker_number_from_slot(
-        app_ctx.settings,
-        agent.window_index,
-        agent.pane_index,
-    )
-    configured_model = app_ctx.settings.get_worker_model(
-        worker_no,
-        profile_settings.get("worker_model"),
-    )
-    return resolve_model_for_cli(
-        cli_name,
-        configured_model,
-        role="worker",
-        cli_defaults=app_ctx.settings.get_cli_default_models(),
-    )
 
 
 def _build_change_directory_command(cli_name: str, worktree_path: str) -> str:
@@ -320,14 +283,6 @@ def build_worker_task_branch(base_branch: str, worker_no: int, task_id: str) -> 
     """task 単位 worktree 用のブランチ名を生成する。"""
     base = _normalize_worker_base_branch(base_branch)
     return f"feature/{base}-worker-{worker_no}-{_short_task_id(task_id)}"
-
-
-def resolve_worker_number_from_slot(settings: Settings, window_index: int, pane_index: int) -> int:
-    """tmux slot から Worker 番号（1..16）を計算する。"""
-    if window_index == 0:
-        return pane_index
-    workers_per_extra = settings.workers_per_extra_window
-    return 6 + ((window_index - 1) * workers_per_extra) + pane_index + 1
 
 
 def _validate_agent_creation(

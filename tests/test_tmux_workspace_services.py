@@ -8,6 +8,7 @@ import pytest
 from src.config.settings import Settings
 from src.managers.pane_layout_planner import PaneLayoutPlanner
 from src.managers.session_bootstrapper import SessionBootstrapper
+from src.managers.tmux_manager import TmuxManager
 from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
 
 
@@ -73,3 +74,18 @@ def test_generate_workspace_script_escapes_malicious_working_dir():
     assert f"WD={shlex.quote(malicious_wd)}" in script
     # 未エスケープの危険な行 `WD="/tmp/foo"; touch ...` が生成されていない
     assert 'WD="/tmp/foo";' not in script
+
+
+@pytest.mark.asyncio
+async def test_send_interrupt_to_pane_sends_ctrl_c():
+    """send_interrupt_to_pane が対象ペインに C-c を送ること。"""
+    mgr = TmuxManager(Settings())
+    mgr._run = AsyncMock(return_value=(0, "", ""))
+
+    ok = await mgr.send_interrupt_to_pane("sess", 0, 1)
+
+    assert ok is True
+    args = mgr._run.await_args.args
+    assert args[0] == "send-keys"
+    assert "-t" in args
+    assert args[-1] == "C-c"

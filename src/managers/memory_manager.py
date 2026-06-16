@@ -18,15 +18,14 @@ import logging
 import os
 import re
 import shutil
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import yaml
 
-from src.config.constants import PRIVATE_FILE_MODE
 from src.config.settings import Settings, get_mcp_dir
+from src.managers.atomic_io import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -234,23 +233,7 @@ class MemoryManager:
     @staticmethod
     def _atomic_write_private_file(file_path: Path, content: str) -> None:
         """0600 権限でファイルを原子的に保存する。"""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(tmp_path, PRIVATE_FILE_MODE)
-            os.replace(tmp_path, str(file_path))
-            # 防御的再設定: umask やファイルシステム差異で権限が変わる場合に備える
-            os.chmod(file_path, PRIVATE_FILE_MODE)
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        atomic_write_text(file_path, content)
 
     def _get_load_limit(self) -> int | None:
         """起動時ロード件数の上限を取得する。"""

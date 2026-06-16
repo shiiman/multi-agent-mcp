@@ -4,13 +4,13 @@ import json
 import logging
 import os
 import shutil
-import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from src.config.settings import get_mcp_dir
 from src.context import AppContext
+from src.managers.atomic_io import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -145,19 +145,8 @@ def _clear_config_session_id(app_ctx: AppContext) -> bool:
         if "session_id" not in config:
             return False
         del config["session_id"]
-        # アトミック書き込み
-        content = json.dumps(config, ensure_ascii=False, indent=2)
-        fd, tmp_path = tempfile.mkstemp(dir=str(config_file.parent), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-            os.replace(tmp_path, str(config_file))
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        # アトミック書き込み（既存挙動を維持: chmod なし・fsync なし）
+        atomic_write_json(config_file, config, mode=None, fsync=False)
         logger.info(f"config.json から session_id をクリアしました: {config_file}")
         return True
     except (OSError, json.JSONDecodeError) as e:

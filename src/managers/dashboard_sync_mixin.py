@@ -86,12 +86,18 @@ class DashboardSyncMixin:
         self._ipc_sync_cache_ipc_dir = str(ipc_dir.resolve())
         self._ipc_sync_cache_messages = [msg.model_copy(deep=True) for msg in messages]
         self._ipc_sync_cache_cursors = dict(cursors)
+        state_path = self._get_ipc_sync_state_path()
+        try:
+            self._ipc_sync_cache_mtime = state_path.stat().st_mtime_ns
+        except OSError:
+            self._ipc_sync_cache_mtime = 0
 
     def _clear_ipc_sync_cache(self) -> None:
         """IPC 同期状態のインメモリキャッシュをクリアする。"""
         self._ipc_sync_cache_ipc_dir = None
         self._ipc_sync_cache_messages = None
         self._ipc_sync_cache_cursors = None
+        self._ipc_sync_cache_mtime = 0
 
     def _load_ipc_sync_state(
         self,
@@ -102,10 +108,17 @@ class DashboardSyncMixin:
         cached_ipc_dir = self._ipc_sync_cache_ipc_dir
         cached_messages = self._ipc_sync_cache_messages
         cached_cursors = self._ipc_sync_cache_cursors
+        state_path = self._get_ipc_sync_state_path()
+        try:
+            current_mtime_ns = state_path.stat().st_mtime_ns
+        except OSError:
+            current_mtime_ns = 0
         if (
             cached_ipc_dir == resolved_ipc_dir
             and isinstance(cached_messages, list)
             and isinstance(cached_cursors, dict)
+            and current_mtime_ns != 0
+            and current_mtime_ns == self._ipc_sync_cache_mtime
         ):
             return (
                 [msg.model_copy(deep=True) for msg in cached_messages],

@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.config.constants import PRIVATE_FILE_MODE
 from src.config.settings import get_mcp_dir
+from src.managers.atomic_io import atomic_write_json
 from src.tools.helpers_git import resolve_main_repo_root
 
 if TYPE_CHECKING:
@@ -61,33 +61,17 @@ def save_agent_to_registry(
     if session_id:
         data["session_id"] = session_id
 
-    # アトミック書き込み: 共通ロックファイルで排他 → tempfile → os.replace
+    # アトミック書き込み: 共通ロックファイルで排他 → atomic_write_json
     lock_file_path = registry_dir / f"{agent_id}.lock"
-    fd, tmp_path = tempfile.mkstemp(dir=str(registry_dir), suffix=".tmp")
-    try:
-        with open(lock_file_path, "a+", encoding="utf-8") as lock_fh:
-            os.chmod(lock_file_path, PRIVATE_FILE_MODE)
-            try:
-                import fcntl
-
-                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-            except ImportError:
-                pass  # 非 POSIX 環境ではロックなしで続行
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(tmp_path, PRIVATE_FILE_MODE)
-            os.replace(tmp_path, str(agent_file))
-            # 防御的再設定: umask やファイルシステム差異で権限が変わる場合に備える
-            os.chmod(agent_file, PRIVATE_FILE_MODE)
-    except BaseException:
-        # 書き込み失敗時は一時ファイルを削除
+    with open(lock_file_path, "a+", encoding="utf-8") as lock_fh:
+        os.chmod(lock_file_path, PRIVATE_FILE_MODE)
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+            import fcntl
+
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        except ImportError:
+            pass  # 非 POSIX 環境ではロックなしで続行
+        atomic_write_json(agent_file, data)
 
     logger.debug(
         f"エージェントをレジストリに保存: {agent_id} -> {project_root} (session: {session_id})"

@@ -188,6 +188,92 @@ class DashboardTasksMixin:
             f"状態遷移が許可されていません: {old_status.value} -> {new_status.value}",
         )
 
+    def _apply_status_to_dashboard(
+        self,
+        dashboard: Dashboard,
+        task_id: str,
+        status: TaskStatus,
+        progress: int | None = None,
+        error_message: str | None = None,
+    ) -> tuple[bool, str]:
+        """Dashboard オブジェクトに直接タスクステータスを適用する（ファイルI/Oなし）。
+
+        ロック取得済みのトランザクション内で呼ぶこと（dashboard を直接変更する）。
+        dashboard.calculate_stats() の呼び出しまで含む。
+
+        Args:
+            dashboard: 更新対象の Dashboard オブジェクト
+            task_id: タスクID
+            status: 新しいステータス
+            progress: 進捗率
+            error_message: エラーメッセージ
+
+        Returns:
+            (成功フラグ, メッセージ) のタプル
+        """
+        task = self._resolve_task(dashboard, task_id)
+        if not task:
+            return False, f"タスク {task_id} が見つかりません"
+
+        old_status = task.status
+        is_valid, error = self._validate_task_transition(old_status, status)
+        if not is_valid:
+            return False, error or "状態遷移が許可されていません"
+
+        now = datetime.now()
+        task.status = status
+
+        if progress is not None:
+            task.progress = progress
+
+        if error_message is not None:
+            task.error_message = error_message
+        elif status != TaskStatus.FAILED:
+            task.error_message = None
+
+        if status == TaskStatus.IN_PROGRESS:
+            if (
+                old_status in (TaskStatus.PENDING, TaskStatus.BLOCKED)
+                and task.started_at is None
+            ):
+                task.started_at = now
+            if dashboard.session_started_at is None:
+                dashboard.session_started_at = task.started_at or now
+            task.completed_at = None
+            task.metadata["last_in_progress_update_at"] = now.isoformat()
+            if task.assigned_agent_id:
+                for agent_summary in dashboard.agents:
+                    if agent_summary.agent_id == task.assigned_agent_id:
+                        agent_summary.current_task_id = task.id
+                        if agent_summary.role == "worker":
+                            agent_summary.status = "busy"
+                        break
+        elif status in self._TERMINAL_TASK_STATUSES:
+            if task.started_at is None:
+                # pending -> completed/failed の直遷移でも開始時刻を欠損させない。
+                task.started_at = now
+            if dashboard.session_started_at is None:
+                dashboard.session_started_at = task.started_at or now
+            task.completed_at = now
+            if status == TaskStatus.COMPLETED:
+                task.progress = 100
+            self._release_agent_from_task(dashboard, task.id)
+        elif status == TaskStatus.PENDING:
+            task.completed_at = None
+
+        has_active_tasks = any(
+            t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
+            for t in dashboard.tasks
+        )
+        if dashboard.tasks and not has_active_tasks:
+            dashboard.session_finished_at = now
+        else:
+            dashboard.session_finished_at = None
+
+        dashboard.calculate_stats()
+        logger.info(f"タスク {task.id} のステータスを更新: {old_status} -> {status}")
+        return True, f"ステータスを更新しました: {status.value}"
+
     def update_task_status(
         self,
         task_id: str,
@@ -208,68 +294,9 @@ class DashboardTasksMixin:
         """
 
         def _update(dashboard: Dashboard) -> tuple[bool, str]:
-            task = self._resolve_task(dashboard, task_id)
-            if not task:
-                return False, f"タスク {task_id} が見つかりません"
-
-            old_status = task.status
-            is_valid, error = self._validate_task_transition(old_status, status)
-            if not is_valid:
-                return False, error or "状態遷移が許可されていません"
-
-            now = datetime.now()
-            task.status = status
-
-            if progress is not None:
-                task.progress = progress
-
-            if error_message is not None:
-                task.error_message = error_message
-            elif status != TaskStatus.FAILED:
-                task.error_message = None
-
-            if status == TaskStatus.IN_PROGRESS:
-                if (
-                    old_status in (TaskStatus.PENDING, TaskStatus.BLOCKED)
-                    and task.started_at is None
-                ):
-                    task.started_at = now
-                if dashboard.session_started_at is None:
-                    dashboard.session_started_at = task.started_at or now
-                task.completed_at = None
-                task.metadata["last_in_progress_update_at"] = now.isoformat()
-                if task.assigned_agent_id:
-                    for agent_summary in dashboard.agents:
-                        if agent_summary.agent_id == task.assigned_agent_id:
-                            agent_summary.current_task_id = task.id
-                            if agent_summary.role == "worker":
-                                agent_summary.status = "busy"
-                            break
-            elif status in self._TERMINAL_TASK_STATUSES:
-                if task.started_at is None:
-                    # pending -> completed/failed の直遷移でも開始時刻を欠損させない。
-                    task.started_at = now
-                if dashboard.session_started_at is None:
-                    dashboard.session_started_at = task.started_at or now
-                task.completed_at = now
-                if status == TaskStatus.COMPLETED:
-                    task.progress = 100
-                self._release_agent_from_task(dashboard, task.id)
-            elif status == TaskStatus.PENDING:
-                task.completed_at = None
-
-            has_active_tasks = any(
-                t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED)
-                for t in dashboard.tasks
+            return self._apply_status_to_dashboard(
+                dashboard, task_id, status, progress, error_message
             )
-            if dashboard.tasks and not has_active_tasks:
-                dashboard.session_finished_at = now
-            else:
-                dashboard.session_finished_at = None
-
-            dashboard.calculate_stats()
-            logger.info(f"タスク {task.id} のステータスを更新: {old_status} -> {status}")
-            return True, f"ステータスを更新しました: {status.value}"
 
         return self._mutate_dashboard(_update)
 
@@ -430,6 +457,52 @@ class DashboardTasksMixin:
 
         return tasks
 
+    def _apply_checklist_to_dashboard(
+        self,
+        dashboard: Dashboard,
+        task_id: str,
+        checklist: list[dict[str, bool | str]] | None = None,
+        log_message: str | None = None,
+    ) -> tuple[bool, str]:
+        """Dashboard オブジェクトに直接チェックリストを適用する（ファイルI/Oなし）。
+
+        ロック取得済みのトランザクション内で呼ぶこと（dashboard を直接変更する）。
+        dashboard.calculate_stats() の呼び出しまで含む。
+
+        Args:
+            dashboard: 更新対象の Dashboard オブジェクト
+            task_id: タスクID
+            checklist: チェックリストアイテムのリスト
+                [{"text": "...", "completed": True/False}, ...]
+            log_message: 追加するログメッセージ
+
+        Returns:
+            (成功フラグ, メッセージ) のタプル
+        """
+        task = self._resolve_task(dashboard, task_id)
+        if not task:
+            return False, f"タスク {task_id} が見つかりません"
+
+        # チェックリストを更新
+        if checklist is not None:
+            task.checklist = [
+                ChecklistItem(text=item["text"], completed=item.get("completed", False))
+                for item in checklist
+            ]
+            # チェックリストから進捗を計算
+            if task.checklist:
+                completed_count = sum(1 for item in task.checklist if item.completed)
+                task.progress = int((completed_count / len(task.checklist)) * 100)
+
+        # ログを追加（最新5件を保持）
+        if log_message:
+            task.logs.append(TaskLog(message=log_message))
+            task.logs = task.logs[-5:]  # 最新5件のみ保持
+
+        dashboard.calculate_stats()
+        logger.info(f"タスク {task.id} のチェックリスト/ログを更新しました")
+        return True, "チェックリスト/ログを更新しました"
+
     def update_task_checklist(
         self,
         task_id: str,
@@ -449,29 +522,7 @@ class DashboardTasksMixin:
         """
 
         def _update_checklist(dashboard: Dashboard) -> tuple[bool, str]:
-            task = self._resolve_task(dashboard, task_id)
-            if not task:
-                return False, f"タスク {task_id} が見つかりません"
-
-            # チェックリストを更新
-            if checklist is not None:
-                task.checklist = [
-                    ChecklistItem(text=item["text"], completed=item.get("completed", False))
-                    for item in checklist
-                ]
-                # チェックリストから進捗を計算
-                if task.checklist:
-                    completed_count = sum(1 for item in task.checklist if item.completed)
-                    task.progress = int((completed_count / len(task.checklist)) * 100)
-
-            # ログを追加（最新5件を保持）
-            if log_message:
-                task.logs.append(TaskLog(message=log_message))
-                task.logs = task.logs[-5:]  # 最新5件のみ保持
-
-            dashboard.calculate_stats()
-            logger.info(f"タスク {task.id} のチェックリスト/ログを更新しました")
-            return True, "チェックリスト/ログを更新しました"
+            return self._apply_checklist_to_dashboard(dashboard, task_id, checklist, log_message)
 
         return self._mutate_dashboard(_update_checklist)
 

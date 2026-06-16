@@ -2,13 +2,16 @@
 
 import json
 import re
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
 from src.managers.dashboard_manager import DashboardManager
 from src.models.dashboard import AgentSummary, MessageSummary, TaskStatus
+from src.models.message import Message, MessagePriority, MessageType
 
 
 class TestDashboardManagerInitialize:
@@ -776,6 +779,98 @@ class TestDashboardMarkdownSync:
         assert "message-1" in messages_content
         assert "message-2" in messages_content
 
+    def test_ipc_sync_cache_invalidated_when_state_file_mtime_changes(
+        self, dashboard_manager
+    ):
+        """別プロセスによる ipc_sync_state.json 更新時にキャッシュが無効化されることをテスト。
+
+        mtime が変化した後に _load_ipc_sync_state を呼ぶと古いキャッシュではなく
+        ファイルを再読込して新しい内容を返すことを確認する。
+        """
+        import json
+        import os
+
+        session_dir = dashboard_manager.dashboard_dir.parent
+        ipc_dir = session_dir / "ipc" / "admin-001"
+        ipc_dir.mkdir(parents=True, exist_ok=True)
+
+        def _write_message(filename: str, body: str) -> None:
+            (ipc_dir / filename).write_text(
+                (
+                    "---\n"
+                    "id: test-msg-id\n"
+                    "sender_id: worker-001\n"
+                    "receiver_id: admin-001\n"
+                    "message_type: request\n"
+                    "priority: high\n"
+                    "subject: mtime無効化テスト\n"
+                    f"created_at: '{filename[:4]}-{filename[4:6]}-{filename[6:8]}T"
+                    f"{filename[9:11]}:{filename[11:13]}:{filename[13:15]}'\n"
+                    "read_at: null\n"
+                    "---\n\n"
+                    f"{body}\n"
+                ),
+                encoding="utf-8",
+            )
+
+        _write_message("20260206_170000_000000_a.md", "message-mtime-1")
+
+        project_root = session_dir / "project"
+        project_root.mkdir(exist_ok=True)
+        # 1回目: キャッシュを温める
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+
+        # キャッシュが温まっていることを確認（同一プロセス内ならヒットするはず）
+        messages_before, _, _ = dashboard_manager._load_ipc_sync_state(session_dir / "ipc")
+        assert len(messages_before) == 1, "初回保存後はメッセージが1件のはず"
+        assert "message-mtime-1" in messages_before[0].content
+
+        # 別プロセス更新を模擬: state ファイルを別プロセスが書き換えた想定で
+        # 内容を変更し mtime を進める
+        state_path = dashboard_manager._get_ipc_sync_state_path()
+        assert state_path.exists(), "ipc_sync_state.json が存在するはず"
+        original_mtime_ns = state_path.stat().st_mtime_ns
+
+        # state ファイルを直接書き換えて別メッセージを含む状態にする
+        with open(state_path, encoding="utf-8") as f:
+            state_data = json.load(f)
+        # 別プロセスがメッセージを追加した状態を模擬
+        state_data["messages"].append(
+            {
+                "sender_id": "worker-002",
+                "receiver_id": "admin-001",
+                "message_type": "request",
+                "subject": "別プロセス追加",
+                "content": "message-from-other-process",
+                "created_at": "2026-02-06T18:00:00",
+            }
+        )
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, ensure_ascii=False, indent=2)
+        # mtime を確実に変更（nanosecond で +10秒）
+        current_ns = state_path.stat().st_mtime_ns
+        future_ns = current_ns + 10_000_000_000  # 10秒先
+        os.utime(state_path, ns=(future_ns, future_ns))
+
+        # キャッシュの mtime が古い値を保持しているため、mtime ミスマッチでキャッシュ無効化
+        assert dashboard_manager._ipc_sync_cache_mtime == original_mtime_ns, (
+            "キャッシュ側の mtime は書き換え前の値を保持しているはず"
+        )
+        new_file_mtime = state_path.stat().st_mtime_ns
+        assert new_file_mtime != original_mtime_ns, "ファイルの mtime が変わっているはず"
+
+        # mtime が変わったのでキャッシュが無効化され、ファイルから再読込するはず
+        messages_after, _, _ = dashboard_manager._load_ipc_sync_state(session_dir / "ipc")
+        # 再読込後は別プロセスが追加したメッセージが含まれるはず
+        contents_after = [m.content for m in messages_after]
+        assert "message-from-other-process" in contents_after, (
+            "mtime 変化後は別プロセスが追加したメッセージがキャッシュから反映されるはず"
+        )
+        # mtime キャッシュが新しいファイルの mtime に更新されているはず
+        assert dashboard_manager._ipc_sync_cache_mtime == future_ns, (
+            "_load_ipc_sync_state による再読込後はキャッシュの mtime が新しい値に更新されるはず"
+        )
+
     def test_read_task_file_not_exists(self, dashboard_manager, temp_dir):
         """存在しないタスクファイル読み取りをテスト。"""
         project_root = temp_dir / "project"
@@ -1442,3 +1537,171 @@ class TestDashboardCost:
         assert summary["actual_cost_usd"] == pytest.approx(2.5, rel=1e-6)
         assert summary["total_cost_usd"] == pytest.approx(2.5, rel=1e-6)
         assert dashboard_manager.get_cost_by_agent("agent-001") == pytest.approx(2.5, rel=1e-6)
+
+
+def _make_task_progress_message(
+    task_id: str,
+    progress: int = 50,
+    checklist: list[dict] | None = None,
+    message_text: str | None = None,
+    reporter: str | None = None,
+) -> Message:
+    """テスト用 TASK_PROGRESS メッセージを生成するヘルパー。"""
+    metadata: dict = {"task_id": task_id, "progress": progress}
+    if checklist is not None:
+        metadata["checklist"] = checklist
+    if message_text is not None:
+        metadata["message"] = message_text
+    if reporter is not None:
+        metadata["reporter"] = reporter
+    return Message(
+        id=str(uuid.uuid4()),
+        sender_id="worker-001",
+        receiver_id="admin-001",
+        message_type=MessageType.TASK_PROGRESS,
+        priority=MessagePriority.NORMAL,
+        subject="progress",
+        content="進捗報告",
+        metadata=metadata,
+    )
+
+
+def _make_task_complete_message(task_id: str, reporter: str | None = None) -> Message:
+    """テスト用 TASK_COMPLETE メッセージを生成するヘルパー。"""
+    metadata: dict = {"task_id": task_id}
+    if reporter is not None:
+        metadata["reporter"] = reporter
+    return Message(
+        id=str(uuid.uuid4()),
+        sender_id="worker-001",
+        receiver_id="admin-001",
+        message_type=MessageType.TASK_COMPLETE,
+        priority=MessagePriority.NORMAL,
+        subject="complete",
+        content="タスク完了",
+        metadata=metadata,
+    )
+
+
+class TestApplyTaskMessages:
+    """apply_task_messages のテスト。"""
+
+    def _make_app_ctx(self, dashboard_manager, temp_dir):
+        """apply_task_messages に渡す最小限の AppContext モックを生成する。"""
+        from unittest.mock import MagicMock
+
+        ctx = MagicMock()
+        ctx.agents = {}
+        ctx.session_id = "test-session"
+        ctx.project_root = str(temp_dir)
+        ctx.dashboard_manager = dashboard_manager
+        return ctx
+
+    def test_apply_task_messages_state_is_correct(self, dashboard_manager, temp_dir):
+        """(a) 複数 TASK_PROGRESS メッセージ適用後に Dashboard タスク状態が期待どおりになること。"""
+        task1 = dashboard_manager.create_task(title="タスク1")
+        task2 = dashboard_manager.create_task(title="タスク2")
+
+        checklist = [
+            {"text": "ステップ1", "completed": True},
+            {"text": "ステップ2", "completed": False},
+        ]
+        messages = [
+            _make_task_progress_message(task1.id, progress=30, checklist=checklist),
+            _make_task_progress_message(task2.id, progress=60),
+        ]
+
+        app_ctx = self._make_app_ctx(dashboard_manager, temp_dir)
+        result = dashboard_manager.apply_task_messages(app_ctx, messages)
+
+        dashboard_updated, applied, skipped, acked, deferred = result
+
+        assert dashboard_updated is True
+        assert applied == 2
+        assert len(skipped) == 0
+        assert len(acked) == 2
+        assert len(deferred) == 0
+
+        updated_task1 = dashboard_manager.get_task(task1.id)
+        assert updated_task1.status == TaskStatus.IN_PROGRESS
+        # チェックリストから進捗計算: 1/2 = 50%
+        assert updated_task1.progress == 50
+        assert len(updated_task1.checklist) == 2
+
+        updated_task2 = dashboard_manager.get_task(task2.id)
+        assert updated_task2.status == TaskStatus.IN_PROGRESS
+        assert updated_task2.progress == 60
+
+    def test_apply_task_messages_transaction_count(self, dashboard_manager, temp_dir):
+        """(b) N件適用時のトランザクション回数が集約後に削減されること。"""
+        n = 3
+        tasks = [dashboard_manager.create_task(title=f"タスク{i}") for i in range(n)]
+        messages = [_make_task_progress_message(t.id, progress=50) for t in tasks]
+
+        app_ctx = self._make_app_ctx(dashboard_manager, temp_dir)
+
+        with patch.object(
+            dashboard_manager,
+            "_write_dashboard_unlocked",
+            wraps=dashboard_manager._write_dashboard_unlocked,
+        ) as mock_write:
+            dashboard_manager.apply_task_messages(app_ctx, messages)
+            write_count = mock_write.call_count
+
+        # 集約後は status+checklist 適用が1トランザクション → 書き込み1回
+        # save_markdown_dashboard が追加で1回 (OSError で skip の場合は0回)
+        # 合計: 最大 2 回（集約前は 2N+1 = 7 回）
+        assert write_count <= 2, (
+            f"トランザクション数 {write_count} は集約後の上限 2 を超えています"
+        )
+
+    def test_apply_task_messages_deferred_behavior(self, dashboard_manager, temp_dir):
+        """(c) 存在しない task_id は defer され、有効メッセージは applied に計上されること。"""
+        valid_task = dashboard_manager.create_task(title="有効タスク")
+
+        valid_msg = _make_task_progress_message(valid_task.id, progress=40)
+        invalid_msg = _make_task_progress_message("nonexistent-task-id", progress=10)
+
+        messages = [valid_msg, invalid_msg]
+
+        app_ctx = self._make_app_ctx(dashboard_manager, temp_dir)
+        result = dashboard_manager.apply_task_messages(app_ctx, messages)
+
+        dashboard_updated, applied, skipped_reasons, ack_message_ids, deferred_message_ids = result
+
+        assert dashboard_updated is True
+        assert applied == 1
+        assert valid_msg.id in ack_message_ids
+        assert invalid_msg.id in deferred_message_ids
+        assert any("task_not_found" in r for r in skipped_reasons)
+
+        updated = dashboard_manager.get_task(valid_task.id)
+        assert updated.status == TaskStatus.IN_PROGRESS
+        assert updated.progress == 40
+
+    def test_apply_task_messages_defers_all_on_write_failure(self, dashboard_manager, temp_dir):
+        """(d) 書き込み失敗時は例外を伝播させず解決済みメッセージを全て defer すること。"""
+        task1 = dashboard_manager.create_task(title="タスク1")
+        task2 = dashboard_manager.create_task(title="タスク2")
+        messages = [
+            _make_task_progress_message(task1.id, progress=30),
+            _make_task_progress_message(task2.id, progress=60),
+        ]
+        app_ctx = self._make_app_ctx(dashboard_manager, temp_dir)
+
+        # 適用トランザクションの書き込みで OSError を発生させる
+        with patch.object(
+            dashboard_manager,
+            "_write_dashboard_unlocked",
+            side_effect=OSError("disk full"),
+        ):
+            # 例外が呼び出し元へ伝播しないこと
+            result = dashboard_manager.apply_task_messages(app_ctx, messages)
+
+        dashboard_updated, applied, skipped_reasons, ack_message_ids, deferred_message_ids = result
+
+        assert applied == 0
+        assert ack_message_ids == []
+        assert messages[0].id in deferred_message_ids
+        assert messages[1].id in deferred_message_ids
+        assert any("transaction_write_failed" in r for r in skipped_reasons)
