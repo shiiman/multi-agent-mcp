@@ -16,8 +16,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.config.settings import normalize_cli_name, resolve_model_for_cli
 from src.config.workflow_guides import get_role_template_path_for_workspace
+from src.managers.worker_resolution import (
+    resolve_agent_cli_name,
+    resolve_worker_model_for_cli,
+)
 
 if TYPE_CHECKING:
     from src.context import AppContext
@@ -1187,10 +1190,8 @@ class HealthcheckManager:
         if agent.session_name is None or agent.window_index is None or agent.pane_index is None:
             return {"task_id": task_id, "error": "worker pane is not configured"}
 
-        worker_model = self._resolve_worker_model_for_cli(
-            app_ctx, agent, profile_settings
-        )
-        agent_cli_name = self._resolve_agent_cli_name(app_ctx, agent)
+        worker_model = resolve_worker_model_for_cli(app_ctx, agent, profile_settings)
+        agent_cli_name = resolve_agent_cli_name(agent, app_ctx)
         thinking_tokens = int(profile_settings.get("worker_thinking_tokens", 4000))
         reasoning_effort = str(profile_settings.get("worker_reasoning_effort", "none"))
         role_template_path = get_role_template_path_for_workspace(
@@ -1241,18 +1242,6 @@ class HealthcheckManager:
         }
 
     @staticmethod
-    def _resolve_worker_number_from_slot(
-        app_settings: Any,
-        window_index: int,
-        pane_index: int,
-    ) -> int:
-        """tmux slot から Worker 番号を算出する。"""
-        if window_index == 0:
-            return pane_index
-        workers_per_extra = int(getattr(app_settings, "workers_per_extra_window", 10))
-        return 6 + ((window_index - 1) * workers_per_extra) + pane_index + 1
-
-    @staticmethod
     def _get_current_profile_settings(app_ctx: AppContext) -> dict[str, Any]:
         """現在アクティブなプロファイル設定を取得する。"""
         from src.config.settings import ModelProfile
@@ -1275,49 +1264,6 @@ class HealthcheckManager:
                 settings.model_profile_performance_worker_reasoning_effort.value
             ),
         }
-
-    @staticmethod
-    def _resolve_agent_cli_name(app_ctx: AppContext, agent: Agent) -> str:
-        """Agent の CLI 名を文字列で返す。"""
-        from src.models.agent import AgentRole
-
-        if agent.role == AgentRole.WORKER.value:
-            if getattr(agent, "ai_cli_pinned", False) and agent.ai_cli:
-                return normalize_cli_name(agent.ai_cli)
-            if agent.window_index is not None and agent.pane_index is not None:
-                try:
-                    worker_no = HealthcheckManager._resolve_worker_number_from_slot(
-                        app_ctx.settings, agent.window_index, agent.pane_index
-                    )
-                    return app_ctx.settings.get_worker_cli(worker_no).value
-                except (ValueError, TypeError) as e:
-                    logger.debug("Worker CLI の再解決に失敗したため agent.ai_cli を使用: %s", e)
-
-        if agent.ai_cli:
-            return normalize_cli_name(agent.ai_cli)
-        return normalize_cli_name(app_ctx.ai_cli.get_default_cli())
-
-    @staticmethod
-    def _resolve_worker_model_for_cli(
-        app_ctx: AppContext,
-        agent: Agent,
-        profile_settings: dict[str, Any],
-    ) -> str | None:
-        """Worker の実行 CLI に整合するモデル名を解決する。"""
-        if agent.window_index is None or agent.pane_index is None:
-            return None
-        worker_no = HealthcheckManager._resolve_worker_number_from_slot(
-            app_ctx.settings, agent.window_index, agent.pane_index
-        )
-        profile_worker_model = str(profile_settings.get("worker_model", "") or "")
-        configured_model = app_ctx.settings.get_worker_model(worker_no, profile_worker_model)
-        cli_name = HealthcheckManager._resolve_agent_cli_name(app_ctx, agent)
-        return resolve_model_for_cli(
-            cli_name,
-            configured_model,
-            role="worker",
-            cli_defaults=app_ctx.settings.get_cli_default_models(),
-        )
 
     @staticmethod
     def _resolve_worker_dispatch_params(
