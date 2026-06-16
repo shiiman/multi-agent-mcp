@@ -518,6 +518,7 @@ class Settings(BaseSettings):
     # 短縮キー(claude:opus等)は後方互換のため維持。正式キー(claude:claude-opus-4-7等)を併記
     model_cost_table_json: str = Field(
         default='{"claude:opus":0.03,"claude:sonnet":0.015,'
+        '"claude:claude-opus-4-8":0.03,'
         '"claude:claude-opus-4-7":0.03,"claude:claude-opus-4-6":0.03,'
         '"claude:claude-sonnet-4-6":0.015,'
         '"claude:claude-haiku-4-5-20251001":0.003,'
