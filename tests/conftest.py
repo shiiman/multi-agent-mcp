@@ -108,6 +108,7 @@ async def tmux_manager(settings):
     manager._run = AsyncMock(return_value=(0, "", ""))
     manager._run_exec = AsyncMock(return_value=(0, "", ""))
     manager._get_window_name = MagicMock(return_value=settings.window_name_main)
+    manager.send_interrupt_to_pane = AsyncMock(return_value=True)
     yield manager
 
 
@@ -335,6 +336,7 @@ def mock_tmux_manager():
     mock.cleanup_all_sessions = AsyncMock()
     mock._get_window_name = MagicMock(return_value="main")
     mock._run = AsyncMock(return_value="")
+    mock.send_interrupt_to_pane = AsyncMock(return_value=True)
     return mock
 
 

@@ -317,10 +317,9 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             await tmux.send_keys_to_pane(
                 agent.session_name, agent.window_index, agent.pane_index, "", literal=False
             )
-            session_name = agent.session_name
-            window_name = tmux._get_window_name(agent.window_index)
-            target = f"{session_name}:{window_name}.{agent.pane_index}"
-            await tmux._run("send-keys", "-t", target, "C-c")
+            await tmux.send_interrupt_to_pane(
+                agent.session_name, agent.window_index, agent.pane_index
+            )
             # ペインタイトルをクリア
             await tmux.set_pane_title(
                 agent.session_name, agent.window_index, agent.pane_index, "(empty)"

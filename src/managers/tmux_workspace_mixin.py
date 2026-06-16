@@ -44,6 +44,24 @@ class TmuxWorkspaceMixin:
         """tmux target 文字列を構築する。"""
         return f"{session}:{window}.{pane}"
 
+    async def send_interrupt_to_pane(self, session: str, window: int, pane: int) -> bool:
+        """指定ペインに C-c を送信してプロセスを中断する。
+
+        Args:
+            session: tmux セッション名
+            window: ウィンドウインデックス
+            pane: ペインインデックス
+
+        Returns:
+            送信に成功したかどうか
+        """
+        target = self._pane_target(session, window, pane)
+        code, _, stderr = await self._run("send-keys", "-t", target, "C-c")
+        if code != 0:
+            logger.error(f"C-c 送信エラー: {stderr}")
+            return False
+        return True
+
     async def _send_enter_key(self, target: str) -> bool:
         """Enter キーを送信する（C-m 優先、失敗時は Enter をフォールバック）。"""
         code, _, stderr = await self._run("send-keys", "-t", target, "C-m")
