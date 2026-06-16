@@ -290,7 +290,8 @@ async def _deliver_notification(
         )
         if tmux_ok:
             return True, "tmux"
-        # 仕様: macOS通知は admin→owner の task_complete のみに限定。tmux失敗時のフォールバックは行わない
+        # 仕様: macOS通知は admin→owner の task_complete のみに限定。
+        # tmux失敗時のフォールバックは行わない
     elif is_admin_task_complete_to_owner:
         from src.tools.helpers import _send_macos_notification
 
