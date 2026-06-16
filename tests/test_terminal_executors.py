@@ -211,6 +211,26 @@ class TestITerm2Executor:
         executor._run_osascript.assert_awaited_once()
         executor._run_shell.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_execute_script_keeps_single_quote_in_path(self):
+        """シングルクォートを含むパスでも AppleScript が壊れない。"""
+        executor = ITerm2Executor()
+        executor.is_available = AsyncMock(return_value=True)
+        executor._run_osascript = AsyncMock(return_value=(0, "tab", ""))
+
+        success, _ = await executor.execute_script(
+            "/tmp/it's test",
+            "dummy",
+            "echo ok && cd '/tmp/it's test'",
+        )
+
+        assert success is True
+        script = executor._run_osascript.await_args.args[0]
+        # AppleScript 文字列内ではシングルクォートはそのまま保持される
+        assert "it's test" in script
+        # shell 風の壊れたクォート連結 ("'"'"...) が混入していない
+        assert '"\'"\'"' not in script
+
 
 class TestTerminalAppExecutor:
     """Terminal.app 実装のテスト。"""
@@ -233,6 +253,25 @@ class TestTerminalAppExecutor:
         assert "タブ" in message
         executor._run_osascript.assert_awaited_once()
         executor._run_shell.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_script_keeps_single_quote_in_path(self):
+        """シングルクォートを含むパスでも AppleScript が壊れない。"""
+        executor = TerminalAppExecutor()
+        executor._run_osascript = AsyncMock(return_value=(0, "tab", ""))
+
+        success, _ = await executor.execute_script(
+            "/tmp/it's test",
+            "dummy",
+            "echo ok && cd '/tmp/it's test'",
+        )
+
+        assert success is True
+        script = executor._run_osascript.await_args.args[0]
+        # AppleScript 文字列内ではシングルクォートはそのまま保持される
+        assert "it's test" in script
+        # shell 風の壊れたクォート連結 ("'"'"...) が混入していない
+        assert '"\'"\'"' not in script
 
 
 class TestCmuxExecutor:
@@ -363,7 +402,7 @@ class TestCmuxExecutor:
         assert result is False
         # osascript は呼ばれない
         assert not hasattr(executor, "_run_osascript") or not isinstance(
-            getattr(executor, "_run_osascript"), AsyncMock
+            executor._run_osascript, AsyncMock
         )
 
     @pytest.mark.asyncio

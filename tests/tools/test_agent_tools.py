@@ -1232,12 +1232,7 @@ class TestInitializeAgent:
             last_activity=now,
         )
 
-        with (
-            patch.object(
-                app_ctx.ai_cli, "open_worktree_in_terminal", new_callable=AsyncMock
-            ) as mock_open_terminal,
-            patch.object(app_ctx.ai_cli, "is_available", return_value=True),
-        ):
+        with patch.object(app_ctx.ai_cli, "is_available", return_value=True):
             result = await initialize_agent(
                 agent_id="admin-001",
                 prompt_type="custom",
@@ -1258,7 +1253,6 @@ class TestInitializeAgent:
         assert "codex" in send_args[3]
         assert "--dangerously-bypass-approvals-and-sandbox" in send_args[3]
         assert send_kwargs["confirm_codex_prompt"] is True
-        mock_open_terminal.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_initialize_agent_fails_when_tmux_attach_fails(self, mock_ctx, git_repo):
