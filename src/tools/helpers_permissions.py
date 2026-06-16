@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.context import AppContext
 
+from src.managers.agent_persistence import find_agents_by_role  # noqa: F401  後方互換 re-export
 from src.models.agent import AgentRole
 from src.tools.helpers_persistence import save_agent_to_file, sync_agents_from_file
 from src.tools.helpers_registry import get_project_root_from_registry, get_session_id_from_registry
@@ -225,19 +226,6 @@ def check_tool_permission(
             }
 
     return None
-
-
-def find_agents_by_role(app_ctx: AppContext, role: str) -> list[str]:
-    """指定されたロールのエージェントIDを取得する。
-
-    Args:
-        app_ctx: アプリケーションコンテキスト
-        role: 検索するロール（"owner", "admin", "worker"）
-
-    Returns:
-        該当するエージェントIDのリスト
-    """
-    return [agent_id for agent_id, agent in app_ctx.agents.items() if agent.role == role]
 
 
 def get_owner_wait_state(app_ctx: AppContext, owner_id: str) -> dict[str, Any]:

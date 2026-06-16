@@ -200,9 +200,9 @@ class DashboardManager(
     def _persist_agent_state(app_ctx: "AppContext", agent: Any) -> bool:
         """タスク反映に伴う agent 状態変更を永続化する。
 
-        helpers_persistence.save_agent_to_file() に委譲する。
+        agent_persistence.save_agent_to_file() に委譲する。
         """
-        from src.tools.helpers_persistence import save_agent_to_file
+        from src.managers.agent_persistence import save_agent_to_file
 
         return save_agent_to_file(app_ctx, agent)
 

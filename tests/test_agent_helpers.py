@@ -162,10 +162,12 @@ class TestScopedRateLimit:
 
         with (
             patch(
-                "src.tools.agent_helpers.time.monotonic",
+                "src.managers.dispatch_rate_limit.time.monotonic",
                 side_effect=[0.0, 0.0, 1.0, 1.0],
             ),
-            patch("src.tools.agent_helpers.asyncio.sleep", new=AsyncMock()) as sleep_mock,
+            patch(
+                "src.managers.dispatch_rate_limit.asyncio.sleep", new=AsyncMock()
+            ) as sleep_mock,
         ):
             first = await send_with_scoped_rate_limit(app_ctx, "test", 0, 1, "first")
             second = await send_with_scoped_rate_limit(app_ctx, "test", 0, 2, "second")
@@ -194,10 +196,12 @@ class TestScopedRateLimit:
 
         with (
             patch(
-                "src.tools.agent_helpers.time.monotonic",
+                "src.managers.dispatch_rate_limit.time.monotonic",
                 side_effect=[0.0, 0.0, 1.0, 1.0, 5.0, 5.0],
             ),
-            patch("src.tools.agent_helpers.asyncio.sleep", new=AsyncMock()) as sleep_mock,
+            patch(
+                "src.managers.dispatch_rate_limit.asyncio.sleep", new=AsyncMock()
+            ) as sleep_mock,
         ):
             first = await send_with_scoped_rate_limit(app_ctx, "test", 0, 1, "first")
             second = await send_with_scoped_rate_limit(app_ctx, "test", 0, 1, "second")

@@ -66,41 +66,6 @@ class TerminalExecutor(ABC):
         self.last_subprocess_error = error_info
         return json_str
 
-    async def _run_shell(self, command: str) -> tuple[int, str, str]:
-        """シェルコマンドを実行する。
-
-        Args:
-            command: 実行するシェルコマンド
-
-        Returns:
-            (リターンコード, stdout, stderr) のタプル
-        """
-        self.last_subprocess_error = None
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=SUBPROCESS_TIMEOUT_SECONDS,
-            )
-            return proc.returncode or 0, stdout.decode(), stderr.decode()
-        except asyncio.TimeoutError:
-            await cleanup_timed_out_process(proc, KILL_WAIT_TIMEOUT_SECONDS)
-            return 124, "", self._set_subprocess_error(
-                kind="timeout",
-                message="サブプロセス実行がタイムアウトしました",
-                timeout_seconds=SUBPROCESS_TIMEOUT_SECONDS,
-            )
-        except Exception as e:
-            logger.error(f"シェルコマンド実行エラー: {e}")
-            return 1, "", self._set_subprocess_error(
-                kind="spawn_error",
-                message=str(e),
-            )
-
     async def _run_exec(self, *args: str) -> tuple[int, str, str]:
         """コマンドを引数分離で実行する。
 

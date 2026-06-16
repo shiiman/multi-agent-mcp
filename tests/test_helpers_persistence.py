@@ -29,7 +29,7 @@ class TestDeleteAgentsFile:
         app_ctx.session_id = "test-session"
 
         with patch(
-            "src.tools.helpers_persistence.resolve_main_repo_root",
+            "src.managers.agent_persistence.resolve_main_repo_root",
             return_value=str(temp_dir),
         ):
             result = delete_agents_file(app_ctx)
@@ -43,7 +43,7 @@ class TestDeleteAgentsFile:
         app_ctx.session_id = "nonexistent-session"
 
         with patch(
-            "src.tools.helpers_persistence.resolve_main_repo_root",
+            "src.managers.agent_persistence.resolve_main_repo_root",
             return_value=str(temp_dir),
         ):
             result = delete_agents_file(app_ctx)
@@ -75,9 +75,9 @@ class TestSaveAndSyncAgentsFile:
         def _unexpected_json_load(*_args, **_kwargs):
             raise AssertionError("save_agent_to_file should not read agents.json")
 
-        monkeypatch.setattr("src.tools.helpers_persistence.json.load", _unexpected_json_load)
+        monkeypatch.setattr("src.managers.agent_persistence.json.load", _unexpected_json_load)
         with patch(
-            "src.tools.helpers_persistence.resolve_main_repo_root",
+            "src.managers.agent_persistence.resolve_main_repo_root",
             return_value=str(temp_dir),
         ):
             assert save_agent_to_file(app_ctx, new_agent) is True
@@ -94,7 +94,7 @@ class TestSaveAndSyncAgentsFile:
         agent = app_ctx.agents["agent-001"]
 
         with patch(
-            "src.tools.helpers_persistence.resolve_main_repo_root",
+            "src.managers.agent_persistence.resolve_main_repo_root",
             return_value=str(temp_dir),
         ):
             assert save_agent_to_file(app_ctx, agent) is True
@@ -113,7 +113,7 @@ class TestSaveAndSyncAgentsFile:
         agent = app_ctx.agents["agent-001"]
 
         with patch(
-            "src.tools.helpers_persistence.resolve_main_repo_root",
+            "src.managers.agent_persistence.resolve_main_repo_root",
             return_value=str(temp_dir),
         ):
             assert save_agent_to_file(app_ctx, agent) is True
@@ -135,7 +135,7 @@ class TestSaveAndSyncAgentsFile:
         app_ctx.project_root = None
 
         with patch(
-            "src.tools.helpers_persistence.get_project_root_from_config",
+            "src.managers.agent_persistence.get_project_root_from_config",
             return_value=None,
         ):
             result = delete_agents_file(app_ctx)

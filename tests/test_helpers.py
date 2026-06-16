@@ -590,7 +590,7 @@ class TestAgentFilePersistence:
 
     def test_save_agent_to_file_uses_agents_file_lock(self, persistence_ctx, sample_agent):
         """save 時に agents.json 更新ロックを取得することをテスト。"""
-        with patch("src.tools.helpers_persistence.fcntl.flock") as mock_flock:
+        with patch("src.managers.agent_persistence.fcntl.flock") as mock_flock:
             result = save_agent_to_file(persistence_ctx, sample_agent)
 
         assert result is True
@@ -617,7 +617,7 @@ class TestAgentFilePersistence:
         """remove 時に agents.json 更新ロックを取得することをテスト。"""
         save_agent_to_file(persistence_ctx, sample_agent)
 
-        with patch("src.tools.helpers_persistence.fcntl.flock") as mock_flock:
+        with patch("src.managers.agent_persistence.fcntl.flock") as mock_flock:
             result = remove_agent_from_file(persistence_ctx, "persist-agent-001")
 
         assert result is True
@@ -740,12 +740,12 @@ class TestRegistryPersistence:
 
     def test_save_agent_to_registry_sets_0600_permissions(self, temp_dir, monkeypatch):
         """registry JSON と lock ファイルが 0600 権限になることをテスト。"""
-        from src.tools import helpers_registry
+        from src.managers import project_registry
 
         global_mcp_dir = temp_dir / "global-mcp"
-        monkeypatch.setattr(helpers_registry, "_get_global_mcp_dir", lambda: global_mcp_dir)
+        monkeypatch.setattr(project_registry, "_get_global_mcp_dir", lambda: global_mcp_dir)
 
-        helpers_registry.save_agent_to_registry(
+        project_registry.save_agent_to_registry(
             agent_id="agent-reg-001",
             owner_id="owner-reg-001",
             project_root="/tmp/project",

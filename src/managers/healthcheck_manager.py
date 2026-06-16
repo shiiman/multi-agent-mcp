@@ -110,12 +110,10 @@ class HealthcheckManager:
         """エージェント状態をファイルに永続化する。
 
         循環参照回避のため遅延 import を1箇所に集約している。
-        （src.tools.__init__ が src.context を再帰 import するため
-        トップレベル import は不可）
         """
         if app_ctx is None:
             return False
-        from src.tools.helpers_persistence import save_agent_to_file
+        from src.managers.agent_persistence import save_agent_to_file
 
         return save_agent_to_file(app_ctx, agent)
 
@@ -127,6 +125,9 @@ class HealthcheckManager:
         if app_ctx.dashboard_manager is not None:
             return app_ctx.dashboard_manager
         try:
+            # 合成層（runtime_bootstrap）のマネージャ生成参照はサービスロケータ的結合であり、
+            # 依存方向（managers→tools）の逆転とモジュールレベル循環の誘発を避けるため、
+            # 遅延 import する（Phase 3 §6.2 の意図的例外）。
             from src.tools.helpers_managers import ensure_dashboard_manager
 
             return ensure_dashboard_manager(app_ctx)
@@ -1215,7 +1216,7 @@ class HealthcheckManager:
                 "task_id": task_id,
                 "error": build_error or "CLIコマンド生成に失敗しました",
             }
-        from src.tools.agent_helpers import send_with_scoped_rate_limit
+        from src.managers.dispatch_rate_limit import send_with_scoped_rate_limit
 
         task_sent = await send_with_scoped_rate_limit(
             app_ctx,

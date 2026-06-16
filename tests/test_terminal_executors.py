@@ -96,58 +96,6 @@ class TestTerminalExecutorBase:
         # SEC-001: command はエラーレスポンスに含めない
         assert "command" not in error_payload
 
-    @pytest.mark.asyncio
-    async def test_run_shell_timeout_kills_process_and_returns_structured_error(self, monkeypatch):
-        """_run_shell はタイムアウト時に kill し、構造化エラーを返す。"""
-        executor = DummyExecutor()
-
-        class _FakeProc:
-            def __init__(self) -> None:
-                self.returncode = None
-                self.kill_called = False
-
-            async def communicate(self):
-                return b"", b""
-
-            async def wait(self):
-                self.returncode = -9
-                return -9
-
-            def kill(self) -> None:
-                self.kill_called = True
-                self.returncode = -9
-
-            def terminate(self) -> None:
-                self.returncode = -15
-
-        fake_proc = _FakeProc()
-
-        async def _fake_wait_for(awaitable, timeout):
-            _fake_wait_for.calls += 1
-            if _fake_wait_for.calls == 1:
-                awaitable.close()
-                raise asyncio.TimeoutError
-            return await awaitable
-
-        _fake_wait_for.calls = 0
-
-        async def _fake_create_subprocess_shell(*args, **kwargs):
-            return fake_proc
-
-        monkeypatch.setattr(asyncio, "create_subprocess_shell", _fake_create_subprocess_shell)
-        monkeypatch.setattr(asyncio, "wait_for", _fake_wait_for)
-
-        code, stdout, stderr = await executor._run_shell("echo hello")
-
-        assert code == 124
-        assert stdout == ""
-        assert fake_proc.kill_called is True
-        assert executor.last_subprocess_error is not None
-        error_payload = json.loads(stderr)
-        assert error_payload["kind"] == "timeout"
-        # SEC-001: command はエラーレスポンスに含めない
-        assert "command" not in error_payload
-
 
 class TestGhosttyExecutor:
     """Ghostty 実装のテスト。"""
@@ -155,16 +103,13 @@ class TestGhosttyExecutor:
     @pytest.mark.asyncio
     async def test_open_in_tab_with_single_quote_command(self):
         """シングルクォートを含むコマンドでもタブ実行できる。"""
-        error_message = "_run_shell should not be called"
         executor = GhosttyExecutor()
         executor._run_osascript = AsyncMock(return_value=(0, "", ""))
-        executor._run_shell = AsyncMock(side_effect=AssertionError(error_message))
 
         success = await executor._open_in_tab("exec bash '/tmp/it\\'s-script.sh'")
 
         assert success is True
         executor._run_osascript.assert_awaited_once()
-        executor._run_shell.assert_not_called()
         script = executor._run_osascript.await_args.args[0]
         assert 'exists process "Ghostty"' in script
         assert 'exists process "ghostty"' in script
@@ -194,11 +139,9 @@ class TestITerm2Executor:
     @pytest.mark.asyncio
     async def test_execute_script_uses_osascript_exec(self):
         """iTerm2 実装は shell 文字列経由ではなく osascript 実行を使う。"""
-        error_message = "_run_shell should not be called"
         executor = ITerm2Executor()
         executor.is_available = AsyncMock(return_value=True)
         executor._run_osascript = AsyncMock(return_value=(0, "tab", ""))
-        executor._run_shell = AsyncMock(side_effect=AssertionError(error_message))
 
         success, message = await executor.execute_script(
             "/tmp",
@@ -209,7 +152,26 @@ class TestITerm2Executor:
         assert success is True
         assert "タブ" in message
         executor._run_osascript.assert_awaited_once()
-        executor._run_shell.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_script_keeps_single_quote_in_path(self):
+        """シングルクォートを含むパスでも AppleScript が壊れない。"""
+        executor = ITerm2Executor()
+        executor.is_available = AsyncMock(return_value=True)
+        executor._run_osascript = AsyncMock(return_value=(0, "tab", ""))
+
+        success, _ = await executor.execute_script(
+            "/tmp/it's test",
+            "dummy",
+            "echo ok && cd '/tmp/it's test'",
+        )
+
+        assert success is True
+        script = executor._run_osascript.await_args.args[0]
+        # AppleScript 文字列内ではシングルクォートはそのまま保持される
+        assert "it's test" in script
+        # shell 風の壊れたクォート連結 ("'"'"...) が混入していない
+        assert '"\'"\'"' not in script
 
 
 class TestTerminalAppExecutor:
@@ -218,10 +180,8 @@ class TestTerminalAppExecutor:
     @pytest.mark.asyncio
     async def test_execute_script_uses_osascript_exec(self):
         """Terminal.app 実装は shell 文字列経由ではなく osascript 実行を使う。"""
-        error_message = "_run_shell should not be called"
         executor = TerminalAppExecutor()
         executor._run_osascript = AsyncMock(return_value=(0, "tab", ""))
-        executor._run_shell = AsyncMock(side_effect=AssertionError(error_message))
 
         success, message = await executor.execute_script(
             "/tmp",
@@ -232,7 +192,25 @@ class TestTerminalAppExecutor:
         assert success is True
         assert "タブ" in message
         executor._run_osascript.assert_awaited_once()
-        executor._run_shell.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_script_keeps_single_quote_in_path(self):
+        """シングルクォートを含むパスでも AppleScript が壊れない。"""
+        executor = TerminalAppExecutor()
+        executor._run_osascript = AsyncMock(return_value=(0, "tab", ""))
+
+        success, _ = await executor.execute_script(
+            "/tmp/it's test",
+            "dummy",
+            "echo ok && cd '/tmp/it's test'",
+        )
+
+        assert success is True
+        script = executor._run_osascript.await_args.args[0]
+        # AppleScript 文字列内ではシングルクォートはそのまま保持される
+        assert "it's test" in script
+        # shell 風の壊れたクォート連結 ("'"'"...) が混入していない
+        assert '"\'"\'"' not in script
 
 
 class TestCmuxExecutor:
@@ -247,10 +225,8 @@ class TestCmuxExecutor:
     @pytest.mark.asyncio
     async def test_open_workspace_with_single_quote_command(self):
         """シングルクォートを含むコマンドでも workspace 実行できる。"""
-        error_message = "_run_shell should not be called"
         executor = CmuxExecutor()
         executor._run_osascript = AsyncMock(return_value=(0, "", ""))
-        executor._run_shell = AsyncMock(side_effect=AssertionError(error_message))
 
         success = await executor._open_workspace(
             "exec bash '/tmp/it\\'s-script.sh'"
@@ -258,7 +234,6 @@ class TestCmuxExecutor:
 
         assert success is True
         executor._run_osascript.assert_awaited_once()
-        executor._run_shell.assert_not_called()
         script = executor._run_osascript.await_args.args[0]
         assert 'exists process "cmux"' in script
         # Cmd+N で workspace を開く（タブではなく）
@@ -363,7 +338,7 @@ class TestCmuxExecutor:
         assert result is False
         # osascript は呼ばれない
         assert not hasattr(executor, "_run_osascript") or not isinstance(
-            getattr(executor, "_run_osascript"), AsyncMock
+            executor._run_osascript, AsyncMock
         )
 
     @pytest.mark.asyncio

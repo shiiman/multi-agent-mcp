@@ -17,7 +17,7 @@ def test_resolve_main_repo_root_caches_result():
             result.stdout = "/repo/.git\n"
         return result
 
-    with patch("src.tools.helpers_git.subprocess.run", side_effect=fake_run) as mock_run:
+    with patch("src.managers.git_utils.subprocess.run", side_effect=fake_run) as mock_run:
         first = helpers_git.resolve_main_repo_root("/repo/sub")
         second = helpers_git.resolve_main_repo_root("/repo/sub")
 
@@ -36,7 +36,7 @@ def test_clear_main_repo_root_cache_forces_recompute():
         result.stdout = "/repo\n" if "--show-toplevel" in cmd else "/repo/.git\n"
         return result
 
-    with patch("src.tools.helpers_git.subprocess.run", side_effect=fake_run) as mock_run:
+    with patch("src.managers.git_utils.subprocess.run", side_effect=fake_run) as mock_run:
         helpers_git.resolve_main_repo_root("/repo/sub")
         helpers_git.clear_main_repo_root_cache()
         helpers_git.resolve_main_repo_root("/repo/sub")
