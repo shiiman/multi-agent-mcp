@@ -11,7 +11,6 @@ import pytest
 
 from src.config.settings import Settings, TerminalApp
 from src.context import AppContext
-from src.managers.agent_manager import AgentManager
 from src.managers.ai_cli_manager import AiCliManager
 from src.managers.dashboard_manager import DashboardManager
 from src.managers.ipc_manager import IPCManager

@@ -29,6 +29,7 @@ multi-agent-mcp/
 │   ├── context.py               # AppContext definition
 │   ├── config/
 │   │   ├── settings.py          # Pydantic Settings configuration
+│   │   ├── constants.py         # Shared project constants
 │   │   ├── templates.py         # Workspace templates
 │   │   ├── template_loader.py   # Template loading with caching
 │   │   ├── workflow_guides.py   # Role-based workflow guides
@@ -42,7 +43,10 @@ multi-agent-mcp/
 │   │   ├── tmux_manager.py      # Tmux session management
 │   │   ├── tmux_workspace_mixin.py # Tmux workspace layout helpers
 │   │   ├── tmux_shared.py       # Shared tmux utilities
+│   │   ├── pane_layout_planner.py # Tmux pane layout planning
+│   │   ├── session_bootstrapper.py # Tmux session bootstrap orchestration
 │   │   ├── agent_manager.py     # Agent lifecycle management
+│   │   ├── agent_persistence.py # Agent file persistence + memory sync
 │   │   ├── worktree_manager.py  # Git worktree management
 │   │   ├── ai_cli_manager.py    # AI CLI selection and execution
 │   │   ├── gtrconfig_manager.py # .gtrconfig detection/generation
@@ -50,14 +54,23 @@ multi-agent-mcp/
 │   │   ├── healthcheck_manager.py # Agent health monitoring
 │   │   ├── healthcheck_daemon.py # Background monitor loop
 │   │   ├── ipc_manager.py       # Inter-process communication
-│   │   ├── dashboard_manager.py  # Dashboard state management
+│   │   ├── dispatch_rate_limit.py # Scoped pane-send rate limiting
+│   │   ├── dashboard_manager.py  # Dashboard manager (Reader/Writer/Rendering/Cost mixins)
+│   │   ├── dashboard_reader_mixin.py # Dashboard read (mtime-based cache)
+│   │   ├── dashboard_writer_mixin.py # Dashboard write + transactions
+│   │   ├── dashboard_rendering_mixin.py # Aggregates Markdown/Agent/Tasks/Sync mixins
 │   │   ├── dashboard_markdown_mixin.py # Dashboard Markdown rendering
-│   │   ├── dashboard_rendering_mixin.py # Dashboard output rendering
-│   │   ├── dashboard_sync_mixin.py # Dashboard sync/message helpers
+│   │   ├── dashboard_agent_mixin.py # Dashboard agent aggregation/status
 │   │   ├── dashboard_tasks_mixin.py # Dashboard task file management
-│   │   ├── dashboard_cost.py    # Cost calculation helpers
+│   │   ├── dashboard_sync_mixin.py # Dashboard sync/message helpers
+│   │   ├── dashboard_cost.py    # DashboardCostMixin: cost calculation
 │   │   ├── memory_manager.py    # Persistent knowledge management
 │   │   ├── persona_manager.py   # Task-based persona optimization
+│   │   ├── atomic_io.py         # Atomic file/JSON write utilities
+│   │   ├── subprocess_utils.py  # Shared subprocess utilities
+│   │   ├── worker_resolution.py # Shared worker resolution logic
+│   │   ├── git_utils.py         # Git worktree root resolution helpers
+│   │   ├── project_registry.py  # Registry/config JSON helpers
 │   │   └── terminal/            # Terminal app implementations
 │   │       ├── base.py          # Abstract base class
 │   │       ├── cmux.py          # cmux terminal support
@@ -67,10 +80,12 @@ multi-agent-mcp/
 │   └── tools/                   # MCP tool definitions (90 tools)
 │       ├── __init__.py          # register_all_tools()
 │       ├── helpers.py           # Compatibility exports + permission helpers
-│       ├── helpers_git.py        # Git worktree root resolution helpers
+│       ├── helpers_git.py        # Re-export shim -> managers/git_utils.py (Phase 3)
 │       ├── helpers_managers.py  # Manager initialization helpers
-│       ├── helpers_registry.py  # Registry/config JSON helpers
-│       ├── helpers_persistence.py # Agent persistence helpers
+│       ├── helpers_registry.py  # Re-export shim -> managers/project_registry.py (Phase 3)
+│       ├── helpers_persistence.py # Re-export shim -> managers/agent_persistence.py (Phase 3)
+│       ├── helpers_notifications.py # tmux/macOS notification helpers
+│       ├── helpers_permissions.py # Permission check + role helpers
 │       ├── session.py           # Session entry module (re-export)
 │       ├── session_tools.py     # Session tools (4)
 │       ├── session_env.py       # Session .env/template helpers
@@ -96,6 +111,7 @@ multi-agent-mcp/
 │       ├── memory_global.py     # Global memory + archive (9)
 │       ├── screenshot.py        # Screenshot management (4)
 │       ├── model_profile.py     # Model profile (3)
+│       ├── quality_gate.py      # Quality gate verification (helper module)
 │       └── task_templates.py    # Task template generation (helper module)
 ├── templates/                   # Templates for agents and scripts
 │   ├── roles/                   # Role-based workflow guides
@@ -226,7 +242,10 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 ### Dashboard Persistence
 
 - Dashboard uses YAML Front Matter + Markdown format (`dashboard.md`).
-- NO in-memory caching — reads/writes file on every operation for multi-process safety.
+- Multi-process safe: reads/writes go through the file as the source of truth. Caches are
+  guarded by `st_mtime_ns` so a write from another process always triggers a reload:
+  - A short-lived read cache (`_read_cache` / `_read_cache_mtime`) invalidated when the file mtime changes.
+  - An IPC sync cache (`_ipc_sync_cache_*`) also validated against the IPC sync state file mtime (Phase 2.3).
 - `src/managers/dashboard_manager.py` handles all Dashboard I/O.
 
 ### Testing Rules
@@ -257,7 +276,7 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_WORKERS_PER_EXTRA_WINDOW` | Worker slots per extra worker window | 10 |
 | `MCP_COST_WARNING_THRESHOLD_USD` | Cost warning threshold | 10.0 |
 | `MCP_ESTIMATED_TOKENS_PER_CALL` | Estimated tokens per API call | 5000 |
-| `MCP_MODEL_COST_TABLE_JSON` | Model cost table (USD per 1K tokens, JSON) | `{"claude:opus":0.03,"claude:claude-opus-4-7":0.03,"codex:gpt-5.5":0.01,...}` |
+| `MCP_MODEL_COST_TABLE_JSON` | Model cost table (USD per 1K tokens, JSON) | `{"claude:opus":0.03,"claude:claude-opus-4-8":0.03,"claude:claude-opus-4-7":0.03,"codex:gpt-5.5":0.01,...}` |
 | `MCP_MODEL_COST_DEFAULT_PER_1K` | Fallback cost per 1K tokens (USD) | 0.01 |
 | `MCP_HEALTHCHECK_INTERVAL_SECONDS` | Healthcheck monitor interval (seconds) | 60 |
 | `MCP_HEALTHCHECK_STALL_TIMEOUT_SECONDS` | Stall detection timeout (seconds) | 600 |

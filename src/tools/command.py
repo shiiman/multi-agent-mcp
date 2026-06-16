@@ -48,6 +48,10 @@ from src.tools.task_templates import generate_admin_task
 
 logger = logging.getLogger(__name__)
 
+# 危険コマンド検出パターン（多層防御の一層）。
+# このブロックはペイン側 CLI（Claude/Codex 等）のサンドボックスや
+# 承認フローに依存しない独立した防御線。CLI 側の保護が無効・未設定でも
+# MCP サーバ自身が危険コマンドをここで遮断する設計とする。
 _DANGEROUS_COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(^|\s)rm\s+-rf\b", re.IGNORECASE), "rm -rf"),
     (re.compile(r"(^|\s)(shutdown|reboot|poweroff|halt)\b", re.IGNORECASE), "power operation"),

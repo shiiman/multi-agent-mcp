@@ -475,7 +475,7 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CODEX_ENTER_RETRY_MAX` | 3 | Codex への Enter 再送回数の上限 |
 | `MCP_CODEX_ENTER_RETRY_INTERVAL_MS` | 250 | Codex への Enter 再送間隔（ミリ秒） |
 | `MCP_SEND_COOLDOWN_SECONDS` | 2.0 | tmux への連続送信時に挟む最小待機秒数 |
-| `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto/ghostty/iterm2/terminal） |
+| `MCP_DEFAULT_TERMINAL` | auto | ターミナルアプリ（auto: cmux→ghostty→iterm2→terminal） |
 | `MCP_MODEL_PROFILE_ACTIVE` | standard | モデルプロファイル（standard/performance） |
 | `MCP_MODEL_PROFILE_STANDARD_CLI` | codex | standardプロファイルのAI CLI |
 | `MCP_MODEL_PROFILE_STANDARD_ADMIN_MODEL` | gpt-5.5 | standardプロファイルのAdminモデル |

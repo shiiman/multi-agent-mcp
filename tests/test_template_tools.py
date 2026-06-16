@@ -1,7 +1,6 @@
 """レポートテンプレートツールのテスト。"""
 
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -407,7 +406,10 @@ class TestReportTemplateInjection:
         app_ctx, agent = self._make_app_ctx(git_repo, settings)
 
         # shutil.copyfile が OSError を発生させる
-        with patch("src.tools.agent_helpers.shutil.copyfile", side_effect=OSError("ディスク容量不足")):
+        with patch(
+            "src.tools.agent_helpers.shutil.copyfile",
+            side_effect=OSError("ディスク容量不足"),
+        ):
             project_root, task_file = _prepare_worker_task_content(
                 app_ctx=app_ctx,
                 agent=agent,
