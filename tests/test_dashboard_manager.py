@@ -776,6 +776,98 @@ class TestDashboardMarkdownSync:
         assert "message-1" in messages_content
         assert "message-2" in messages_content
 
+    def test_ipc_sync_cache_invalidated_when_state_file_mtime_changes(
+        self, dashboard_manager
+    ):
+        """別プロセスによる ipc_sync_state.json 更新時にキャッシュが無効化されることをテスト。
+
+        mtime が変化した後に _load_ipc_sync_state を呼ぶと古いキャッシュではなく
+        ファイルを再読込して新しい内容を返すことを確認する。
+        """
+        import json
+        import os
+
+        session_dir = dashboard_manager.dashboard_dir.parent
+        ipc_dir = session_dir / "ipc" / "admin-001"
+        ipc_dir.mkdir(parents=True, exist_ok=True)
+
+        def _write_message(filename: str, body: str) -> None:
+            (ipc_dir / filename).write_text(
+                (
+                    "---\n"
+                    "id: test-msg-id\n"
+                    "sender_id: worker-001\n"
+                    "receiver_id: admin-001\n"
+                    "message_type: request\n"
+                    "priority: high\n"
+                    "subject: mtime無効化テスト\n"
+                    f"created_at: '{filename[:4]}-{filename[4:6]}-{filename[6:8]}T"
+                    f"{filename[9:11]}:{filename[11:13]}:{filename[13:15]}'\n"
+                    "read_at: null\n"
+                    "---\n\n"
+                    f"{body}\n"
+                ),
+                encoding="utf-8",
+            )
+
+        _write_message("20260206_170000_000000_a.md", "message-mtime-1")
+
+        project_root = session_dir / "project"
+        project_root.mkdir(exist_ok=True)
+        # 1回目: キャッシュを温める
+        dashboard_manager.save_markdown_dashboard(project_root, "test-session")
+
+        # キャッシュが温まっていることを確認（同一プロセス内ならヒットするはず）
+        messages_before, _, _ = dashboard_manager._load_ipc_sync_state(session_dir / "ipc")
+        assert len(messages_before) == 1, "初回保存後はメッセージが1件のはず"
+        assert "message-mtime-1" in messages_before[0].content
+
+        # 別プロセス更新を模擬: state ファイルを別プロセスが書き換えた想定で
+        # 内容を変更し mtime を進める
+        state_path = dashboard_manager._get_ipc_sync_state_path()
+        assert state_path.exists(), "ipc_sync_state.json が存在するはず"
+        original_mtime_ns = state_path.stat().st_mtime_ns
+
+        # state ファイルを直接書き換えて別メッセージを含む状態にする
+        with open(state_path, encoding="utf-8") as f:
+            state_data = json.load(f)
+        # 別プロセスがメッセージを追加した状態を模擬
+        state_data["messages"].append(
+            {
+                "sender_id": "worker-002",
+                "receiver_id": "admin-001",
+                "message_type": "request",
+                "subject": "別プロセス追加",
+                "content": "message-from-other-process",
+                "created_at": "2026-02-06T18:00:00",
+            }
+        )
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, ensure_ascii=False, indent=2)
+        # mtime を確実に変更（nanosecond で +10秒）
+        current_ns = state_path.stat().st_mtime_ns
+        future_ns = current_ns + 10_000_000_000  # 10秒先
+        os.utime(state_path, ns=(future_ns, future_ns))
+
+        # キャッシュの mtime が古い値を保持しているため、mtime ミスマッチでキャッシュ無効化
+        assert dashboard_manager._ipc_sync_cache_mtime == original_mtime_ns, (
+            "キャッシュ側の mtime は書き換え前の値を保持しているはず"
+        )
+        new_file_mtime = state_path.stat().st_mtime_ns
+        assert new_file_mtime != original_mtime_ns, "ファイルの mtime が変わっているはず"
+
+        # mtime が変わったのでキャッシュが無効化され、ファイルから再読込するはず
+        messages_after, _, _ = dashboard_manager._load_ipc_sync_state(session_dir / "ipc")
+        # 再読込後は別プロセスが追加したメッセージが含まれるはず
+        contents_after = [m.content for m in messages_after]
+        assert "message-from-other-process" in contents_after, (
+            "mtime 変化後は別プロセスが追加したメッセージがキャッシュから反映されるはず"
+        )
+        # mtime キャッシュが新しいファイルの mtime に更新されているはず
+        assert dashboard_manager._ipc_sync_cache_mtime == future_ns, (
+            "_load_ipc_sync_state による再読込後はキャッシュの mtime が新しい値に更新されるはず"
+        )
+
     def test_read_task_file_not_exists(self, dashboard_manager, temp_dir):
         """存在しないタスクファイル読み取りをテスト。"""
         project_root = temp_dir / "project"

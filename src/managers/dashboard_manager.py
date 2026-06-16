@@ -58,6 +58,7 @@ class DashboardManager(
         self._ipc_sync_cache_ipc_dir: str | None = None
         self._ipc_sync_cache_messages: list | None = None
         self._ipc_sync_cache_cursors: dict[str, str] | None = None
+        self._ipc_sync_cache_mtime: int = 0
 
     @staticmethod
     def _is_event_loop_running() -> bool:
