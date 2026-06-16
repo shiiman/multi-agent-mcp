@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import re
-import tempfile
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -20,6 +19,7 @@ from typing import Any
 import yaml
 
 from src.config.constants import PRIVATE_FILE_MODE
+from src.managers.atomic_io import atomic_write_text as _atomic_write_text
 from src.models.message import (
     Message,
     MessagePriority,
@@ -351,24 +351,7 @@ class IPCManager:
 
     def _atomic_write(self, file_path: Path, content: str) -> None:
         """アトミック書き込み（tmpfile + os.replace）でファイルを安全に保存する。"""
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(tmp_path, PRIVATE_FILE_MODE)
-            os.replace(tmp_path, str(file_path))
-            # 防御的再設定: umask やファイルシステム差異で権限が変わる場合に備える
-            os.chmod(file_path, PRIVATE_FILE_MODE)
-        except BaseException:
-            # 書き込み失敗時に一時ファイルを削除
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        _atomic_write_text(file_path, content)
 
     def _write_message_file(self, agent_id: str, message: Message) -> Path:
         """メッセージを Markdown ファイルとしてアトミックに保存する。"""

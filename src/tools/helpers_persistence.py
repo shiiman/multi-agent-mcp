@@ -6,7 +6,6 @@ import fcntl
 import json
 import logging
 import os
-import tempfile
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -16,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.config.constants import PRIVATE_FILE_MODE
 from src.config.settings import get_mcp_dir
+from src.managers.atomic_io import atomic_write_json as _atomic_write_json_impl
 from src.models.agent import AgentRole
 from src.tools.helpers_git import resolve_main_repo_root
 from src.tools.helpers_registry import (
@@ -138,24 +138,7 @@ def _agents_file_lock(agents_file: Path) -> Iterator[None]:
 
 def _atomic_write_json(file_path: Path, payload: dict[str, Any]) -> None:
     """JSON payload をアトミックに書き込む。"""
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    content = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
-    fd, tmp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp_path, PRIVATE_FILE_MODE)
-        os.replace(tmp_path, str(file_path))
-        # 防御的再設定: umask やファイルシステム差異で権限が変わる場合に備える
-        os.chmod(file_path, PRIVATE_FILE_MODE)
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    _atomic_write_json_impl(file_path, payload)
 
 
 def _build_agents_payload(app_ctx: AppContext, updated_agent: Agent) -> dict[str, Any]:
