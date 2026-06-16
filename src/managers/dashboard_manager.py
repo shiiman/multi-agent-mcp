@@ -306,11 +306,6 @@ class DashboardManager(
 
             resolved.append((task_id, msg))
 
-        if not resolved:
-            # 解決できるメッセージが1件もない場合でも dashboard_updated=True を返す
-            # (元の挙動: task_messages が存在すれば True)
-            return True, 0, skipped_reasons, ack_message_ids, deferred_message_ids
-
         # --- 単一トランザクションで全メッセージを適用 ---
         def _apply_all(dashboard: Dashboard) -> None:
             nonlocal applied
@@ -393,12 +388,29 @@ class DashboardManager(
                     skipped_reasons.append(f"update_error:{task_id}")
                     deferred_message_ids.append(msg.id)
 
-        self.run_dashboard_transaction(_apply_all)
+        # 解決済みメッセージがある場合のみ書き込みトランザクションを実行する。
+        # 書き込みフェーズで OSError が発生した場合は何も永続化されていないため、
+        # 解決済みメッセージを全て defer し直す（旧実装の per-message defer 挙動を維持し、
+        # 例外を呼び出し元へ伝播させない）。
+        if resolved:
+            try:
+                self.run_dashboard_transaction(_apply_all)
+            except OSError as e:
+                logger.debug("Dashboard トランザクション書き込みに失敗、全件 defer: %s", e)
+                applied = 0
+                reporter_updates.clear()
+                for _task_id, failed_msg in resolved:
+                    if failed_msg.id in ack_message_ids:
+                        ack_message_ids.remove(failed_msg.id)
+                    if failed_msg.id not in deferred_message_ids:
+                        deferred_message_ids.append(failed_msg.id)
+                skipped_reasons.append("transaction_write_failed")
 
         # reporter エージェント状態の永続化（ファイルI/O・トランザクション外）
         for reporter, task_id, assign_task in reporter_updates:
             self._update_reporter_agent(app_ctx, reporter, task_id, assign_task=assign_task)
 
+        # task_messages が存在する場合は（全件 defer でも）旧実装どおり Markdown を同期する。
         try:
             if app_ctx.session_id and app_ctx.project_root:
                 self.save_markdown_dashboard(Path(app_ctx.project_root), app_ctx.session_id)
