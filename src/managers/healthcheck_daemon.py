@@ -28,8 +28,8 @@ async def _notify_daemon_stopped(
     try:
         from pathlib import Path
 
+        from src.managers.agent_persistence import find_agents_by_role, sync_agents_from_file
         from src.models.message import MessagePriority, MessageType
-        from src.tools.helpers import find_agents_by_role, sync_agents_from_file
         from src.tools.helpers_managers import ensure_dashboard_manager, ensure_ipc_manager
 
         sync_agents_from_file(app_ctx)
@@ -137,7 +137,7 @@ async def _run_healthcheck_loop(app_ctx) -> None:
                 break
 
             try:
-                from src.tools.helpers import sync_agents_from_file
+                from src.managers.agent_persistence import sync_agents_from_file
                 from src.tools.helpers_managers import ensure_healthcheck_manager
 
                 sync_agents_from_file(app_ctx)

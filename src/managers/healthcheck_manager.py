@@ -110,12 +110,10 @@ class HealthcheckManager:
         """エージェント状態をファイルに永続化する。
 
         循環参照回避のため遅延 import を1箇所に集約している。
-        （src.tools.__init__ が src.context を再帰 import するため
-        トップレベル import は不可）
         """
         if app_ctx is None:
             return False
-        from src.tools.helpers_persistence import save_agent_to_file
+        from src.managers.agent_persistence import save_agent_to_file
 
         return save_agent_to_file(app_ctx, agent)
 
