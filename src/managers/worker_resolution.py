@@ -115,9 +115,10 @@ def resolve_worker_model_for_cli(
         agent.window_index,
         agent.pane_index,
     )
+    profile_worker_model = str(profile_settings.get("worker_model", "") or "")
     configured_model = app_ctx.settings.get_worker_model(
         worker_no,
-        profile_settings.get("worker_model"),
+        profile_worker_model,
     )
     return resolve_model_for_cli(
         cli_name,
