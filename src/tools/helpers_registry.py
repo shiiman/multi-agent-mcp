@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from src.config.constants import PRIVATE_FILE_MODE
 from src.config.settings import get_mcp_dir
-from src.managers.atomic_io import atomic_write_json as _atomic_write_json
+from src.managers.atomic_io import atomic_write_json
 from src.tools.helpers_git import resolve_main_repo_root
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ def save_agent_to_registry(
             fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
         except ImportError:
             pass  # 非 POSIX 環境ではロックなしで続行
-        _atomic_write_json(agent_file, data)
+        atomic_write_json(agent_file, data)
 
     logger.debug(
         f"エージェントをレジストリに保存: {agent_id} -> {project_root} (session: {session_id})"

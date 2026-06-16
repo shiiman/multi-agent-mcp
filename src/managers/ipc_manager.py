@@ -19,7 +19,7 @@ from typing import Any
 import yaml
 
 from src.config.constants import PRIVATE_FILE_MODE
-from src.managers.atomic_io import atomic_write_text as _atomic_write_text
+from src.managers.atomic_io import atomic_write_text
 from src.models.message import (
     Message,
     MessagePriority,
@@ -351,7 +351,7 @@ class IPCManager:
 
     def _atomic_write(self, file_path: Path, content: str) -> None:
         """アトミック書き込み（tmpfile + os.replace）でファイルを安全に保存する。"""
-        _atomic_write_text(file_path, content)
+        atomic_write_text(file_path, content)
 
     def _write_message_file(self, agent_id: str, message: Message) -> Path:
         """メッセージを Markdown ファイルとしてアトミックに保存する。"""

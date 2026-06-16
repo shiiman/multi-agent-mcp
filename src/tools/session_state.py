@@ -10,7 +10,7 @@ from typing import Any
 
 from src.config.settings import get_mcp_dir
 from src.context import AppContext
-from src.managers.atomic_io import atomic_write_json as _atomic_write_json
+from src.managers.atomic_io import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -145,8 +145,8 @@ def _clear_config_session_id(app_ctx: AppContext) -> bool:
         if "session_id" not in config:
             return False
         del config["session_id"]
-        # アトミック書き込み（config.jsonはプライベートモード・fsync不要）
-        _atomic_write_json(config_file, config, mode=None, fsync=False)
+        # アトミック書き込み（既存挙動を維持: chmod なし・fsync なし）
+        atomic_write_json(config_file, config, mode=None, fsync=False)
         logger.info(f"config.json から session_id をクリアしました: {config_file}")
         return True
     except (OSError, json.JSONDecodeError) as e:

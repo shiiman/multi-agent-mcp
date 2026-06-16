@@ -25,7 +25,7 @@ from pathlib import Path
 import yaml
 
 from src.config.settings import Settings, get_mcp_dir
-from src.managers.atomic_io import atomic_write_text as _atomic_write_text
+from src.managers.atomic_io import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ class MemoryManager:
     @staticmethod
     def _atomic_write_private_file(file_path: Path, content: str) -> None:
         """0600 権限でファイルを原子的に保存する。"""
-        _atomic_write_text(file_path, content)
+        atomic_write_text(file_path, content)
 
     def _get_load_limit(self) -> int | None:
         """起動時ロード件数の上限を取得する。"""

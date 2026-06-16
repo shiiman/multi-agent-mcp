@@ -10,7 +10,7 @@ from typing import TypeVar
 
 import yaml
 
-from src.managers.atomic_io import atomic_write_text as _atomic_write_text_impl
+from src.managers.atomic_io import atomic_write_text
 from src.models.dashboard import Dashboard
 
 logger = logging.getLogger(__name__)
@@ -86,4 +86,4 @@ class DashboardWriterMixin:
 
     def _atomic_write_text(self, file_path: Path, content: str) -> None:
         """テキストを原子的に書き込む。"""
-        _atomic_write_text_impl(file_path, content)
+        atomic_write_text(file_path, content)

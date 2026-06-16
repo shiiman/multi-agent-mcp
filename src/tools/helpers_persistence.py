@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.config.constants import PRIVATE_FILE_MODE
 from src.config.settings import get_mcp_dir
-from src.managers.atomic_io import atomic_write_json as _atomic_write_json_impl
+from src.managers.atomic_io import atomic_write_json
 from src.models.agent import AgentRole
 from src.tools.helpers_git import resolve_main_repo_root
 from src.tools.helpers_registry import (
@@ -138,7 +138,7 @@ def _agents_file_lock(agents_file: Path) -> Iterator[None]:
 
 def _atomic_write_json(file_path: Path, payload: dict[str, Any]) -> None:
     """JSON payload をアトミックに書き込む。"""
-    _atomic_write_json_impl(file_path, payload)
+    atomic_write_json(file_path, payload)
 
 
 def _build_agents_payload(app_ctx: AppContext, updated_agent: Agent) -> dict[str, Any]:
