@@ -30,6 +30,10 @@ async def _notify_daemon_stopped(
 
         from src.managers.agent_persistence import find_agents_by_role, sync_agents_from_file
         from src.models.message import MessagePriority, MessageType
+
+        # 合成層（runtime_bootstrap）のマネージャ生成参照はサービスロケータ的結合であり、
+        # 依存方向（managers→tools）の逆転とモジュールレベル循環の誘発を避けるため、
+        # 遅延 import する（Phase 3 §6.2 の意図的例外）。
         from src.tools.helpers_managers import ensure_dashboard_manager, ensure_ipc_manager
 
         sync_agents_from_file(app_ctx)
@@ -101,6 +105,9 @@ def _should_auto_stop(app_ctx) -> bool:
     in_progress_tasks = 0
     pending_tasks = 0
     try:
+        # 合成層（runtime_bootstrap）のマネージャ生成参照はサービスロケータ的結合であり、
+        # 依存方向（managers→tools）の逆転とモジュールレベル循環の誘発を避けるため、
+        # 遅延 import する（Phase 3 §6.2 の意図的例外）。
         from src.tools.helpers_managers import ensure_dashboard_manager
 
         dashboard = ensure_dashboard_manager(app_ctx)
@@ -138,6 +145,10 @@ async def _run_healthcheck_loop(app_ctx) -> None:
 
             try:
                 from src.managers.agent_persistence import sync_agents_from_file
+
+                # 合成層（runtime_bootstrap）のマネージャ生成参照はサービスロケータ的結合であり、
+                # 依存方向（managers→tools）の逆転とモジュールレベル循環の誘発を避けるため、
+                # 遅延 import する（Phase 3 §6.2 の意図的例外）。
                 from src.tools.helpers_managers import ensure_healthcheck_manager
 
                 sync_agents_from_file(app_ctx)

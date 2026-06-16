@@ -125,6 +125,9 @@ class HealthcheckManager:
         if app_ctx.dashboard_manager is not None:
             return app_ctx.dashboard_manager
         try:
+            # 合成層（runtime_bootstrap）のマネージャ生成参照はサービスロケータ的結合であり、
+            # 依存方向（managers→tools）の逆転とモジュールレベル循環の誘発を避けるため、
+            # 遅延 import する（Phase 3 §6.2 の意図的例外）。
             from src.tools.helpers_managers import ensure_dashboard_manager
 
             return ensure_dashboard_manager(app_ctx)
