@@ -1213,7 +1213,7 @@ class HealthcheckManager:
                 "task_id": task_id,
                 "error": build_error or "CLIコマンド生成に失敗しました",
             }
-        from src.tools.agent_helpers import send_with_scoped_rate_limit
+        from src.managers.dispatch_rate_limit import send_with_scoped_rate_limit
 
         task_sent = await send_with_scoped_rate_limit(
             app_ctx,
