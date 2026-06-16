@@ -196,9 +196,9 @@ class DashboardTasksMixin:
         progress: int | None = None,
         error_message: str | None = None,
     ) -> tuple[bool, str]:
-        """Dashboard オブジェクトに直接タスクステータスを適用する純粋メソッド。
+        """Dashboard オブジェクトに直接タスクステータスを適用する（ファイルI/Oなし）。
 
-        run_dashboard_transaction の外部から呼ぶ場合はロック取得済みであること。
+        ロック取得済みのトランザクション内で呼ぶこと（dashboard を直接変更する）。
         dashboard.calculate_stats() の呼び出しまで含む。
 
         Args:
@@ -464,9 +464,9 @@ class DashboardTasksMixin:
         checklist: list[dict[str, bool | str]] | None = None,
         log_message: str | None = None,
     ) -> tuple[bool, str]:
-        """Dashboard オブジェクトに直接チェックリストを適用する純粋メソッド。
+        """Dashboard オブジェクトに直接チェックリストを適用する（ファイルI/Oなし）。
 
-        run_dashboard_transaction の外部から呼ぶ場合はロック取得済みであること。
+        ロック取得済みのトランザクション内で呼ぶこと（dashboard を直接変更する）。
         dashboard.calculate_stats() の呼び出しまで含む。
 
         Args:

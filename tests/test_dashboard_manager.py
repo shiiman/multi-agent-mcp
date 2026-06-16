@@ -1678,3 +1678,30 @@ class TestApplyTaskMessages:
         updated = dashboard_manager.get_task(valid_task.id)
         assert updated.status == TaskStatus.IN_PROGRESS
         assert updated.progress == 40
+
+    def test_apply_task_messages_defers_all_on_write_failure(self, dashboard_manager, temp_dir):
+        """(d) 書き込み失敗時は例外を伝播させず解決済みメッセージを全て defer すること。"""
+        task1 = dashboard_manager.create_task(title="タスク1")
+        task2 = dashboard_manager.create_task(title="タスク2")
+        messages = [
+            _make_task_progress_message(task1.id, progress=30),
+            _make_task_progress_message(task2.id, progress=60),
+        ]
+        app_ctx = self._make_app_ctx(dashboard_manager, temp_dir)
+
+        # 適用トランザクションの書き込みで OSError を発生させる
+        with patch.object(
+            dashboard_manager,
+            "_write_dashboard_unlocked",
+            side_effect=OSError("disk full"),
+        ):
+            # 例外が呼び出し元へ伝播しないこと
+            result = dashboard_manager.apply_task_messages(app_ctx, messages)
+
+        dashboard_updated, applied, skipped_reasons, ack_message_ids, deferred_message_ids = result
+
+        assert applied == 0
+        assert ack_message_ids == []
+        assert messages[0].id in deferred_message_ids
+        assert messages[1].id in deferred_message_ids
+        assert any("transaction_write_failed" in r for r in skipped_reasons)

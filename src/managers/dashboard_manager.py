@@ -389,14 +389,15 @@ class DashboardManager(
                     deferred_message_ids.append(msg.id)
 
         # 解決済みメッセージがある場合のみ書き込みトランザクションを実行する。
-        # 書き込みフェーズで OSError が発生した場合は何も永続化されていないため、
+        # 読み込み/書き込みフェーズで例外が発生した場合は何も永続化されていないため、
         # 解決済みメッセージを全て defer し直す（旧実装の per-message defer 挙動を維持し、
-        # 例外を呼び出し元へ伝播させない）。
+        # 例外を呼び出し元へ伝播させない）。捕捉する例外型は旧実装の per-message
+        # try/except と同じ (OSError, ValueError, KeyError, TypeError) に揃える。
         if resolved:
             try:
                 self.run_dashboard_transaction(_apply_all)
-            except OSError as e:
-                logger.debug("Dashboard トランザクション書き込みに失敗、全件 defer: %s", e)
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                logger.debug("Dashboard トランザクションに失敗、全件 defer: %s", e)
                 applied = 0
                 reporter_updates.clear()
                 for _task_id, failed_msg in resolved:
