@@ -1,5 +1,6 @@
 """tmux workspace service/planner のテスト。"""
 
+import shlex
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from src.config.settings import Settings
 from src.managers.pane_layout_planner import PaneLayoutPlanner
 from src.managers.session_bootstrapper import SessionBootstrapper
+from src.managers.tmux_workspace_mixin import TmuxWorkspaceMixin
 
 
 def test_pane_layout_planner_returns_expected_worker_slots():
@@ -58,3 +60,16 @@ async def test_session_bootstrapper_reuses_existing_extra_worker_window():
 
     assert success is True
     manager._create_named_window.assert_not_awaited()
+
+
+def test_generate_workspace_script_escapes_malicious_working_dir():
+    """working_dir に含まれるシェルメタ文字が安全に引用符化されること。"""
+    malicious_wd = '/tmp/foo"; touch /tmp/pwned #'
+    script = TmuxWorkspaceMixin._generate_workspace_script(
+        MagicMock(), "test-session", malicious_wd
+    )
+
+    # shlex.quote 済みの値がそのまま WD= 行に現れる（破壊的展開が起きない）
+    assert f"WD={shlex.quote(malicious_wd)}" in script
+    # 未エスケープの危険な行 `WD="/tmp/foo"; touch ...` が生成されていない
+    assert 'WD="/tmp/foo";' not in script

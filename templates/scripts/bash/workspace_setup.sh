@@ -2,7 +2,7 @@
 set -e
 
 SESSION="{session_name}"
-WD="{working_dir}"
+WD={working_dir}
 
 # ターミナルタブ名をセッション名に設定
 printf '\033]0;%s\007' "$SESSION"

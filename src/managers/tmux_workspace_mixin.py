@@ -656,6 +656,7 @@ class TmuxWorkspaceMixin:
 
         セッション作成・ペイン分割・attachを一度に行うスクリプトを生成。
         Owner は tmux ペインに配置しない（実行AIエージェントが担う）。
+        working_dir はシェルインジェクション防止のため shlex.quote でエスケープする。
 
         Args:
             session_name: tmuxセッション名（プレフィックス付き）
@@ -664,12 +665,14 @@ class TmuxWorkspaceMixin:
         Returns:
             シェルスクリプト文字列
         """
+        import shlex
+
         loader = get_template_loader()
         return loader.render(
             "scripts/bash",
             "workspace_setup",
             session_name=session_name,
-            working_dir=working_dir,
+            working_dir=shlex.quote(working_dir),
         )
 
     async def launch_workspace_in_terminal(
