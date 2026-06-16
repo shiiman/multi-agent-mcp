@@ -281,6 +281,7 @@ cost:
 | ---- | ---------------------- |
 | `claude:opus` | 0.03 |
 | `claude:sonnet` | 0.015 |
+| `claude:claude-opus-4-8` | 0.03 |
 | `claude:claude-opus-4-7` | 0.03 |
 | `claude:claude-opus-4-6` | 0.03 |
 | `claude:claude-sonnet-4-6` | 0.015 |
@@ -292,6 +293,7 @@ cost:
 | `gemini:gemini-3-flash-preview` | 0.003 |
 | `gemini:gemini-3-pro` (legacy) | 0.005 |
 | `gemini:gemini-3-flash` (legacy) | 0.0025 |
+| `cursor:composer-1.5` | 0.01 |
 
 未定義モデルは `MCP_MODEL_COST_DEFAULT_PER_1K`（デフォルト 0.01）を使用します。
 後方互換のため legacy キーも同じテーブルに併存させています。

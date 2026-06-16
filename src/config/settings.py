@@ -82,10 +82,10 @@ class ModelProfile(str, Enum):
     """
 
     STANDARD = "standard"
-    """標準プロファイル - Codex/GPT-5.3 を前提にコスト重視で運用。"""
+    """標準プロファイル - Codex/GPT-5.5 を前提にコスト重視で運用。"""
 
     PERFORMANCE = "performance"
-    """高性能プロファイル - Codex/GPT-5.3 を前提に高スループットで運用。"""
+    """高性能プロファイル - Codex/GPT-5.5 を前提に高スループットで運用。"""
 
 
 class ReasoningEffort(str, Enum):
