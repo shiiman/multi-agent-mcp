@@ -740,12 +740,12 @@ class TestRegistryPersistence:
 
     def test_save_agent_to_registry_sets_0600_permissions(self, temp_dir, monkeypatch):
         """registry JSON と lock ファイルが 0600 権限になることをテスト。"""
-        from src.tools import helpers_registry
+        from src.managers import project_registry
 
         global_mcp_dir = temp_dir / "global-mcp"
-        monkeypatch.setattr(helpers_registry, "_get_global_mcp_dir", lambda: global_mcp_dir)
+        monkeypatch.setattr(project_registry, "_get_global_mcp_dir", lambda: global_mcp_dir)
 
-        helpers_registry.save_agent_to_registry(
+        project_registry.save_agent_to_registry(
             agent_id="agent-reg-001",
             owner_id="owner-reg-001",
             project_root="/tmp/project",
