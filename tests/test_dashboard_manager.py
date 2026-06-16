@@ -2,13 +2,16 @@
 
 import json
 import re
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
 from src.managers.dashboard_manager import DashboardManager
 from src.models.dashboard import AgentSummary, MessageSummary, TaskStatus
+from src.models.message import Message, MessagePriority, MessageType
 
 
 class TestDashboardManagerInitialize:
@@ -1534,3 +1537,144 @@ class TestDashboardCost:
         assert summary["actual_cost_usd"] == pytest.approx(2.5, rel=1e-6)
         assert summary["total_cost_usd"] == pytest.approx(2.5, rel=1e-6)
         assert dashboard_manager.get_cost_by_agent("agent-001") == pytest.approx(2.5, rel=1e-6)
+
+
+def _make_task_progress_message(
+    task_id: str,
+    progress: int = 50,
+    checklist: list[dict] | None = None,
+    message_text: str | None = None,
+    reporter: str | None = None,
+) -> Message:
+    """テスト用 TASK_PROGRESS メッセージを生成するヘルパー。"""
+    metadata: dict = {"task_id": task_id, "progress": progress}
+    if checklist is not None:
+        metadata["checklist"] = checklist
+    if message_text is not None:
+        metadata["message"] = message_text
+    if reporter is not None:
+        metadata["reporter"] = reporter
+    return Message(
+        id=str(uuid.uuid4()),
+        sender_id="worker-001",
+        receiver_id="admin-001",
+        message_type=MessageType.TASK_PROGRESS,
+        priority=MessagePriority.NORMAL,
+        subject="progress",
+        content="進捗報告",
+        metadata=metadata,
+    )
+
+
+def _make_task_complete_message(task_id: str, reporter: str | None = None) -> Message:
+    """テスト用 TASK_COMPLETE メッセージを生成するヘルパー。"""
+    metadata: dict = {"task_id": task_id}
+    if reporter is not None:
+        metadata["reporter"] = reporter
+    return Message(
+        id=str(uuid.uuid4()),
+        sender_id="worker-001",
+        receiver_id="admin-001",
+        message_type=MessageType.TASK_COMPLETE,
+        priority=MessagePriority.NORMAL,
+        subject="complete",
+        content="タスク完了",
+        metadata=metadata,
+    )
+
+
+class TestApplyTaskMessages:
+    """apply_task_messages のテスト。"""
+
+    def _make_app_ctx(self, dashboard_manager, temp_dir):
+        """apply_task_messages に渡す最小限の AppContext モックを生成する。"""
+        from unittest.mock import MagicMock
+
+        ctx = MagicMock()
+        ctx.agents = {}
+        ctx.session_id = "test-session"
+        ctx.project_root = str(temp_dir)
+        ctx.dashboard_manager = dashboard_manager
+        return ctx
+
+    def test_apply_task_messages_state_is_correct(self, dashboard_manager, temp_dir):
+        """(a) 複数 TASK_PROGRESS メッセージ適用後に Dashboard タスク状態が期待どおりになること。"""
+        task1 = dashboard_manager.create_task(title="タスク1")
+        task2 = dashboard_manager.create_task(title="タスク2")
+
+        checklist = [
+            {"text": "ステップ1", "completed": True},
+            {"text": "ステップ2", "completed": False},
+        ]
+        messages = [
+            _make_task_progress_message(task1.id, progress=30, checklist=checklist),
+            _make_task_progress_message(task2.id, progress=60),
+        ]
+
+        app_ctx = self._make_app_ctx(dashboard_manager, temp_dir)
+        result = dashboard_manager.apply_task_messages(app_ctx, messages)
+
+        dashboard_updated, applied, skipped, acked, deferred = result
+
+        assert dashboard_updated is True
+        assert applied == 2
+        assert len(skipped) == 0
+        assert len(acked) == 2
+        assert len(deferred) == 0
+
+        updated_task1 = dashboard_manager.get_task(task1.id)
+        assert updated_task1.status == TaskStatus.IN_PROGRESS
+        # チェックリストから進捗計算: 1/2 = 50%
+        assert updated_task1.progress == 50
+        assert len(updated_task1.checklist) == 2
+
+        updated_task2 = dashboard_manager.get_task(task2.id)
+        assert updated_task2.status == TaskStatus.IN_PROGRESS
+        assert updated_task2.progress == 60
+
+    def test_apply_task_messages_transaction_count(self, dashboard_manager, temp_dir):
+        """(b) N件適用時のトランザクション回数が集約後に削減されること。"""
+        n = 3
+        tasks = [dashboard_manager.create_task(title=f"タスク{i}") for i in range(n)]
+        messages = [_make_task_progress_message(t.id, progress=50) for t in tasks]
+
+        app_ctx = self._make_app_ctx(dashboard_manager, temp_dir)
+
+        with patch.object(
+            dashboard_manager,
+            "_write_dashboard_unlocked",
+            wraps=dashboard_manager._write_dashboard_unlocked,
+        ) as mock_write:
+            dashboard_manager.apply_task_messages(app_ctx, messages)
+            write_count = mock_write.call_count
+
+        # 集約後は status+checklist 適用が1トランザクション → 書き込み1回
+        # save_markdown_dashboard が追加で1回 (OSError で skip の場合は0回)
+        # 合計: 最大 2 回（集約前は 2N+1 = 7 回）
+        assert write_count <= 2, (
+            f"トランザクション数 {write_count} は集約後の上限 2 を超えています"
+        )
+
+    def test_apply_task_messages_deferred_behavior(self, dashboard_manager, temp_dir):
+        """(c) 存在しない task_id は defer され、有効メッセージは applied に計上されること。"""
+        valid_task = dashboard_manager.create_task(title="有効タスク")
+
+        valid_msg = _make_task_progress_message(valid_task.id, progress=40)
+        invalid_msg = _make_task_progress_message("nonexistent-task-id", progress=10)
+
+        messages = [valid_msg, invalid_msg]
+
+        app_ctx = self._make_app_ctx(dashboard_manager, temp_dir)
+        result = dashboard_manager.apply_task_messages(app_ctx, messages)
+
+        dashboard_updated, applied, skipped_reasons, ack_message_ids, deferred_message_ids = result
+
+        assert dashboard_updated is True
+        assert applied == 1
+        assert valid_msg.id in ack_message_ids
+        assert invalid_msg.id in deferred_message_ids
+        assert any("task_not_found" in r for r in skipped_reasons)
+
+        updated = dashboard_manager.get_task(valid_task.id)
+        assert updated.status == TaskStatus.IN_PROGRESS
+        assert updated.progress == 40

@@ -243,6 +243,10 @@ class DashboardManager(
     ) -> tuple[bool, int, list[str], list[str], list[str]]:
         """タスク関連 IPC メッセージを Dashboard へ反映する。
 
+        全メッセージの status/checklist 適用を単一の run_dashboard_transaction 内で行い、
+        ファイルロック・読み込み・書き込みをそれぞれ1回に集約する。
+        save_markdown_dashboard は別途末尾で1回呼ぶ。
+
         Args:
             app_ctx: アプリケーションコンテキスト
             messages: read_messages で取得したメッセージ
@@ -265,17 +269,25 @@ class DashboardManager(
         if not task_messages:
             return False, 0, [], [], []
 
+        # トランザクション外で task_map を構築（_read_dashboard_snapshot はキャッシュ活用）
         task_map: dict[str, str] = {}
         for task in self.list_tasks():
             normalized = normalize_task_id(task.id)
             if normalized:
                 task_map[normalized] = task.id
 
+        # トランザクション外で収集する reporter 情報（ファイルI/O不要）
+        # (reporter, task_id, assign_task) のリスト：適用成功後に処理
+        reporter_updates: list[tuple[str | None, str, bool]] = []
+
         applied = 0
         skipped_reasons: list[str] = []
         ack_message_ids: list[str] = []
         deferred_message_ids: list[str] = []
 
+        # --- task_id 解決フェーズ（トランザクション外・ファイルアクセスなし）---
+        # メッセージを (task_id, msg) のペアに変換し、解決できないものは先に defer する
+        resolved: list[tuple[str, Message]] = []
         for msg in task_messages:
             raw_task_id = msg.metadata.get("task_id")
             normalized_task_id = msg.metadata.get("normalized_task_id") or normalize_task_id(
@@ -292,81 +304,100 @@ class DashboardManager(
                 deferred_message_ids.append(msg.id)
                 continue
 
-            try:
-                if msg.message_type == MessageType.TASK_PROGRESS:
-                    progress = msg.metadata.get("progress", 0)
-                    checklist = msg.metadata.get("checklist")
-                    message_text = msg.metadata.get("message")
-                    reporter = msg.metadata.get("reporter")
+            resolved.append((task_id, msg))
 
-                    status_ok, status_msg = self.update_task_status(
-                        task_id, TaskStatus.IN_PROGRESS, progress
-                    )
-                    if not status_ok:
-                        skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
-                        deferred_message_ids.append(msg.id)
-                        continue
+        if not resolved:
+            # 解決できるメッセージが1件もない場合でも dashboard_updated=True を返す
+            # (元の挙動: task_messages が存在すれば True)
+            return True, 0, skipped_reasons, ack_message_ids, deferred_message_ids
 
-                    # QUAL-005: checklist 更新失敗はステータス更新済みなので
-                    # warning を記録するが applied として扱う
-                    if checklist:
-                        checklist_ok, checklist_msg = self.update_task_checklist(
-                            task_id, checklist, log_message=message_text
+        # --- 単一トランザクションで全メッセージを適用 ---
+        def _apply_all(dashboard: Dashboard) -> None:
+            nonlocal applied
+            for task_id, msg in resolved:
+                try:
+                    if msg.message_type == MessageType.TASK_PROGRESS:
+                        progress = msg.metadata.get("progress", 0)
+                        checklist = msg.metadata.get("checklist")
+                        message_text = msg.metadata.get("message")
+                        reporter = msg.metadata.get("reporter")
+
+                        status_ok, status_msg = self._apply_status_to_dashboard(
+                            dashboard, task_id, TaskStatus.IN_PROGRESS, progress
                         )
-                        if not checklist_ok:
+                        if not status_ok:
                             skipped_reasons.append(
-                                f"checklist_update_error:{task_id}:{checklist_msg}"
+                                f"status_update_rejected:{task_id}:{status_msg}"
                             )
+                            deferred_message_ids.append(msg.id)
+                            continue
 
-                    self._update_reporter_agent(
-                        app_ctx, reporter, task_id, assign_task=True
-                    )
+                        # QUAL-005: checklist 更新失敗はステータス更新済みなので
+                        # warning を記録するが applied として扱う
+                        if checklist:
+                            checklist_ok, checklist_msg = self._apply_checklist_to_dashboard(
+                                dashboard, task_id, checklist, log_message=message_text
+                            )
+                            if not checklist_ok:
+                                skipped_reasons.append(
+                                    f"checklist_update_error:{task_id}:{checklist_msg}"
+                                )
 
-                elif msg.message_type == MessageType.TASK_COMPLETE:
-                    reporter = msg.metadata.get("reporter")
-                    task = self.get_task(task_id)
-                    if task and task.status == TaskStatus.COMPLETED:
-                        skipped_reasons.append(f"already_completed:{task_id}")
-                        ack_message_ids.append(msg.id)
-                        continue
+                        reporter_updates.append((reporter, task_id, True))
 
-                    status_ok, status_msg = self.update_task_status(
-                        task_id, TaskStatus.COMPLETED, progress=100
-                    )
-                    if not status_ok:
-                        skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
-                        deferred_message_ids.append(msg.id)
-                        continue
+                    elif msg.message_type == MessageType.TASK_COMPLETE:
+                        reporter = msg.metadata.get("reporter")
+                        task = self._resolve_task(dashboard, task_id)
+                        if task and task.status == TaskStatus.COMPLETED:
+                            skipped_reasons.append(f"already_completed:{task_id}")
+                            ack_message_ids.append(msg.id)
+                            continue
 
-                    self._update_reporter_agent(
-                        app_ctx, reporter, task_id, assign_task=False
-                    )
+                        status_ok, status_msg = self._apply_status_to_dashboard(
+                            dashboard, task_id, TaskStatus.COMPLETED, progress=100
+                        )
+                        if not status_ok:
+                            skipped_reasons.append(
+                                f"status_update_rejected:{task_id}:{status_msg}"
+                            )
+                            deferred_message_ids.append(msg.id)
+                            continue
 
-                elif msg.message_type == MessageType.TASK_FAILED:
-                    reporter = msg.metadata.get("reporter")
-                    task = self.get_task(task_id)
-                    if task and task.status == TaskStatus.FAILED:
-                        skipped_reasons.append(f"already_failed:{task_id}")
-                        ack_message_ids.append(msg.id)
-                        continue
+                        reporter_updates.append((reporter, task_id, False))
 
-                    status_ok, status_msg = self.update_task_status(task_id, TaskStatus.FAILED)
-                    if not status_ok:
-                        skipped_reasons.append(f"status_update_rejected:{task_id}:{status_msg}")
-                        deferred_message_ids.append(msg.id)
-                        continue
+                    elif msg.message_type == MessageType.TASK_FAILED:
+                        reporter = msg.metadata.get("reporter")
+                        task = self._resolve_task(dashboard, task_id)
+                        if task and task.status == TaskStatus.FAILED:
+                            skipped_reasons.append(f"already_failed:{task_id}")
+                            ack_message_ids.append(msg.id)
+                            continue
 
-                    self._update_reporter_agent(
-                        app_ctx, reporter, task_id, assign_task=False
-                    )
+                        status_ok, status_msg = self._apply_status_to_dashboard(
+                            dashboard, task_id, TaskStatus.FAILED
+                        )
+                        if not status_ok:
+                            skipped_reasons.append(
+                                f"status_update_rejected:{task_id}:{status_msg}"
+                            )
+                            deferred_message_ids.append(msg.id)
+                            continue
 
-                applied += 1
-                ack_message_ids.append(msg.id)
+                        reporter_updates.append((reporter, task_id, False))
 
-            except (OSError, ValueError, KeyError, TypeError) as e:
-                logger.debug("タスク %s の Dashboard 更新をスキップ: %s", task_id, e)
-                skipped_reasons.append(f"update_error:{task_id}")
-                deferred_message_ids.append(msg.id)
+                    applied += 1
+                    ack_message_ids.append(msg.id)
+
+                except (OSError, ValueError, KeyError, TypeError) as e:
+                    logger.debug("タスク %s の Dashboard 更新をスキップ: %s", task_id, e)
+                    skipped_reasons.append(f"update_error:{task_id}")
+                    deferred_message_ids.append(msg.id)
+
+        self.run_dashboard_transaction(_apply_all)
+
+        # reporter エージェント状態の永続化（ファイルI/O・トランザクション外）
+        for reporter, task_id, assign_task in reporter_updates:
+            self._update_reporter_agent(app_ctx, reporter, task_id, assign_task=assign_task)
 
         try:
             if app_ctx.session_id and app_ctx.project_root:
