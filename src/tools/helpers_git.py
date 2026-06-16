@@ -8,12 +8,22 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# プロセス内キャッシュ: 入力パス文字列 → メインリポジトリルート
+# 同一パスのリポジトリ構成はプロセス生存中に変化しないため安全にキャッシュ可能
+_main_repo_root_cache: dict[str, str] = {}
+
+
+def clear_main_repo_root_cache() -> None:
+    """resolve_main_repo_root のプロセス内キャッシュをクリアする（主にテスト用）。"""
+    _main_repo_root_cache.clear()
+
 
 def resolve_main_repo_root(path: str | Path) -> str:
-    """パスからメインリポジトリのルートを解決する。
+    """パスからメインリポジトリのルートを解決する（プロセス内キャッシュ付き）。
 
     git worktree の場合はメインリポジトリのルートを返す。
     通常のリポジトリの場合はそのままルートを返す。
+    成功結果は入力パスをキーにプロセス内キャッシュされる。
 
     Args:
         path: 解決するパス（worktree またはリポジトリ内のパス）
@@ -21,6 +31,17 @@ def resolve_main_repo_root(path: str | Path) -> str:
     Returns:
         メインリポジトリのルートパス
     """
+    cache_key = str(Path(path))
+    cached = _main_repo_root_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    resolved = _resolve_main_repo_root_uncached(path)
+    _main_repo_root_cache[cache_key] = resolved
+    return resolved
+
+
+def _resolve_main_repo_root_uncached(path: str | Path) -> str:
+    """git コマンドでメインリポジトリのルートを解決する（キャッシュ無し）。"""
     path = Path(path)
 
     try:
