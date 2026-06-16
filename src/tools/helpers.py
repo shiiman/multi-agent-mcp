@@ -50,7 +50,7 @@ _SYMBOL_TO_MODULE = {
     "require_permission": "src.tools.helpers_permissions",
     "reset_agent_to_idle": "src.tools.helpers_permissions",
     "resolve_effective_caller_agent_id": "src.tools.helpers_permissions",
-    "resolve_main_repo_root": "src.tools.helpers_git",
+    "resolve_main_repo_root": "src.managers.git_utils",
     "resolve_project_root": "src.runtime_bootstrap",
     "save_agent_to_file": "src.tools.helpers_persistence",
     "save_agent_to_registry": "src.tools.helpers_registry",

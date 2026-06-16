@@ -1,7 +1,7 @@
 """品質ゲート検証ツール。
 
 ipc.py から分離した責務。IPC メッセージングとは独立した機能を提供する。
-汎用 Git ユーティリティ関数は helpers_git.py に集約。
+汎用 Git ユーティリティ関数は src.managers.git_utils に集約（helpers_git.py 経由で互換 import）。
 """
 
 from __future__ import annotations
