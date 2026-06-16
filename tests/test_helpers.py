@@ -590,7 +590,7 @@ class TestAgentFilePersistence:
 
     def test_save_agent_to_file_uses_agents_file_lock(self, persistence_ctx, sample_agent):
         """save 時に agents.json 更新ロックを取得することをテスト。"""
-        with patch("src.tools.helpers_persistence.fcntl.flock") as mock_flock:
+        with patch("src.managers.agent_persistence.fcntl.flock") as mock_flock:
             result = save_agent_to_file(persistence_ctx, sample_agent)
 
         assert result is True
@@ -617,7 +617,7 @@ class TestAgentFilePersistence:
         """remove 時に agents.json 更新ロックを取得することをテスト。"""
         save_agent_to_file(persistence_ctx, sample_agent)
 
-        with patch("src.tools.helpers_persistence.fcntl.flock") as mock_flock:
+        with patch("src.managers.agent_persistence.fcntl.flock") as mock_flock:
             result = remove_agent_from_file(persistence_ctx, "persist-agent-001")
 
         assert result is True

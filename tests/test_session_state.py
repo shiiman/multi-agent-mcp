@@ -15,7 +15,7 @@ from src.tools.session_state import (
 )
 
 # cleanup_session_resources 内で resolve_main_repo_root が呼ばれるのをモック
-_RESOLVE_PATCH = "src.tools.helpers_persistence.resolve_main_repo_root"
+_RESOLVE_PATCH = "src.managers.agent_persistence.resolve_main_repo_root"
 _HEALTHCHECK_PATCH = "src.managers.healthcheck_daemon.stop_healthcheck_daemon"
 
 
