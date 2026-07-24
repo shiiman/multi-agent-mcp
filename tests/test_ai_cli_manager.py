@@ -340,9 +340,9 @@ class TestResolveModelForCli:
         assert result == "sonnet"
 
     def test_explicit_model_not_converted(self):
-        """明示指定されたモデル名は変換されないことをテスト。"""
+        """明示指定されたモデル名は変換されない（未知CLI名は catch-all で素通し）ことをテスト。"""
         assert resolve_model_for_cli("codex", "gpt-5.4", "worker") == "gpt-5.4"
-        assert resolve_model_for_cli("gemini", "gemini-3-pro", "admin") == "gemini-3-pro"
+        assert resolve_model_for_cli("unknown", "some-model", "admin") == "some-model"
         assert resolve_model_for_cli("claude", "claude-opus-4-6", "admin") == "claude-opus-4-6"
         assert resolve_model_for_cli("cursor", "composer-1.5", "worker") == "composer-1.5"
 

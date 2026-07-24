@@ -30,7 +30,7 @@ AI CLI（Claude Code / Codex / Antigravity (agy) / Cursor）+ tmux + git worktre
 |------|------|------|
 | Claude Code | `claude` | デフォルト構成で利用可能 |
 | Codex | `codex` | デフォルト構成で利用可能 |
-| Antigravity (agy) | `agy` | デフォルト構成で利用可能。事前に端末CLI版のセットアップが必要（後述） |
+| Antigravity (agy) | `agy` | デフォルト構成で利用可能。事前に端末CLIのセットアップが必要（後述） |
 | Cursor | `cursor` | 既定コマンドは `agent` |
 
 ### agy（Antigravity CLI）のセットアップ
@@ -530,8 +530,8 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | sonnet | Claude CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.5 | Codex CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.5 | Codex CLIのWorkerデフォルトモデル |
-| `MCP_CLI_DEFAULT_AGY_ADMIN_MODEL` | gemini-3-pro-preview | agy (Antigravity CLI) のAdminデフォルトモデル |
-| `MCP_CLI_DEFAULT_AGY_WORKER_MODEL` | gemini-3-flash-preview | agy (Antigravity CLI) のWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_AGY_ADMIN_MODEL` | gemini-3-pro-preview | Agy CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_AGY_WORKER_MODEL` | gemini-3-flash-preview | Agy CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer-1.5 | Cursor CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer-1.5 | Cursor CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
