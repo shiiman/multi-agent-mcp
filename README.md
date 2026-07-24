@@ -65,6 +65,25 @@ agy
 
 サインインが完了すれば、`ai_cli="agy"` で Admin/Worker から利用できます。
 
+**eligibility 要件**
+
+agy でエージェントを起動するには、Antigravity の利用資格を満たす Google アカウントが必要です。
+一部の Google Workspace アカウントではサインインに成功しても
+`agy --print` 実行時に `Eligibility check failed: ... not eligible for Antigravity`
+のエラーで起動できないことがあります。この場合は個人の Google アカウントを使うか、
+Workspace 管理者に Antigravity の利用有効化を依頼してください。
+
+**実起動確認手順（手動）**
+
+eligibility が解決したアカウントで、実際にセッションが継続することを手動確認してください
+（本プロジェクトのテストコードでは `agy` の実起動検証は行っていません）。
+
+1. 小規模構成（Admin + Worker 1）で `ai_cli="agy"` を指定してワークスペースを起動する。
+2. tmux ペイン内で agy が `--prompt-interactive` により起動直後の応答だけで終了せず、
+   セッションを継続していることを確認する。
+3. Admin/Worker 間で IPC メッセージを送信し、ペインに `[IPC] 新しいメッセージ` の通知が
+   表示され、agy がそれに反応して作業を再開することを確認する（ワンショット終了しないこと）。
+
 ## 必要条件
 
 - Python 3.10以上
@@ -530,8 +549,8 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | sonnet | Claude CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.5 | Codex CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.5 | Codex CLIのWorkerデフォルトモデル |
-| `MCP_CLI_DEFAULT_AGY_ADMIN_MODEL` | gemini-3-pro-preview | Agy CLIのAdminデフォルトモデル |
-| `MCP_CLI_DEFAULT_AGY_WORKER_MODEL` | gemini-3-flash-preview | Agy CLIのWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_AGY_ADMIN_MODEL` | gemini-3.1-pro-high | Agy CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_AGY_WORKER_MODEL` | gemini-3.6-flash-medium | Agy CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer-1.5 | Cursor CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer-1.5 | Cursor CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
@@ -548,8 +567,9 @@ Worker上限は `MCP_MODEL_PROFILE_ACTIVE` に応じて
 `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` / `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS`
 のどちらかが適用されます。
 
-`MCP_MODEL_COST_TABLE_JSON` のデフォルトでは `gemini-3-pro-preview` / `gemini-3-flash-preview`
-を使用し、後方互換のため `gemini-3-pro` / `gemini-3-flash` キーも併記しています。
+`MCP_MODEL_COST_TABLE_JSON` の agy 分は `agy models` の実 ID（tier 内包、例 `gemini-3.1-pro-high` /
+`gemini-3.6-flash-medium`）で構成しています。1K トークン単価は暫定見積りのため、
+agy の公式単価が公開され次第、要更新です。
 
 ## ディレクトリ構造
 

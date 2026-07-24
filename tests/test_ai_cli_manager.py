@@ -126,32 +126,13 @@ class TestBuildStdinCommand:
         assert "/tmp/task.md" in cmd
         assert "< /tmp/task.md" not in cmd
 
-    def test_build_stdin_command_agy_effort_mapping(self, ai_cli_manager):
-        """agy の effort が low/medium/high 透過・xhigh→high・none→省略になること。"""
-        low = ai_cli_manager.build_stdin_command(
-            AICli.AGY, "/tmp/task.md", reasoning_effort="low"
-        )
-        assert "--effort low" in low
-
-        medium = ai_cli_manager.build_stdin_command(
-            AICli.AGY, "/tmp/task.md", reasoning_effort="medium"
-        )
-        assert "--effort medium" in medium
-
-        high = ai_cli_manager.build_stdin_command(
-            AICli.AGY, "/tmp/task.md", reasoning_effort="high"
-        )
-        assert "--effort high" in high
-
-        xhigh = ai_cli_manager.build_stdin_command(
-            AICli.AGY, "/tmp/task.md", reasoning_effort="xhigh"
-        )
-        assert "--effort high" in xhigh  # xhigh は high に丸める
-
-        none = ai_cli_manager.build_stdin_command(
-            AICli.AGY, "/tmp/task.md", reasoning_effort="none"
-        )
-        assert "--effort" not in none
+    def test_build_stdin_command_agy_no_effort_flag(self, ai_cli_manager):
+        """agy は tier 内包モデルIDを使うため --effort を付けないことをテスト。"""
+        for effort in ("low", "medium", "high", "xhigh", "none"):
+            cmd = ai_cli_manager.build_stdin_command(
+                AICli.AGY, "/tmp/task.md", reasoning_effort=effort
+            )
+            assert "--effort" not in cmd
 
     def test_build_stdin_command_cursor(self, ai_cli_manager):
         """Cursor は print モードを使わず通常起動コマンドを構築することをテスト。"""

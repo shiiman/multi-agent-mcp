@@ -134,18 +134,6 @@ class AiCliManager:
         else:  # PERFORMANCE
             return self.settings.model_profile_performance_cli
 
-    @staticmethod
-    def _map_agy_effort(effort: str) -> str | None:
-        """本プロジェクトの effort を agy の --effort 値へマッピングする。
-
-        agy は low/medium/high のみ対応。xhigh は high に丸め、none は省略。
-        """
-        if effort in {"low", "medium", "high"}:
-            return effort
-        if effort == "xhigh":
-            return "high"
-        return None  # none → --effort 省略
-
     def build_stdin_command(
         self,
         cli: AICli | str,
@@ -254,15 +242,14 @@ class AiCliManager:
         elif cli == AICli.AGY:
             # export MCP_PROJECT_ROOT=... && cd <path> &&
             # agy --model <model> --dangerously-skip-permissions
-            #     [--effort <e>] --prompt-interactive "<instruction>"
+            #     --prompt-interactive "<instruction>"
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
+            if effort != "none":
+                # agy はモデルID(例 gemini-3.1-pro-high)に tier を内包するため --effort は使わない
+                logger.debug("agy CLI では reasoning_effort=%s は未対応のため無視します", effort)
             parts.append("--dangerously-skip-permissions")
-            mapped = self._map_agy_effort(effort)
-            if mapped:
-                parts.extend(["--effort", mapped])
-            # --prompt-interactive で初期プロンプト実行後にセッションを継続（tmux 向き）
             parts.extend(["--prompt-interactive", quoted_prompt])
             command = " ".join(parts)
             if working_dir:
