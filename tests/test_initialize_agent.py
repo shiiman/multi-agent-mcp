@@ -240,13 +240,11 @@ class TestBuildCliArgsWithPrompt:
         assert "--dangerously-bypass-approvals-and-sandbox" in args
         assert args[-1] == "テストプロンプト"
 
-    def test_gemini_with_prompt(self, ai_cli_manager):
-        """Gemini CLI でプロンプトが --prompt オプションで渡されることをテスト。"""
-        args = ai_cli_manager._build_cli_args(
-            AICli.GEMINI, "/tmp/test", "テストプロンプト"
-        )
-        assert "--yolo" in args
-        assert "--prompt" in args
+    def test_agy_with_prompt(self, ai_cli_manager):
+        """agy CLI でプロンプトが --prompt-interactive で渡されることをテスト。"""
+        args = ai_cli_manager._build_cli_args(AICli.AGY, "/tmp/test", "テストプロンプト")
+        assert "agy" in args
+        assert "--prompt-interactive" in args
         assert "テストプロンプト" in args
 
     def test_cursor_with_prompt_uses_interactive_mode(self, ai_cli_manager):
@@ -274,10 +272,10 @@ class TestBuildCliArgsWithPrompt:
         args = ai_cli_manager._build_cli_args(AICli.CODEX, "/tmp/test", None)
         assert "--dangerously-bypass-approvals-and-sandbox" in args
 
-    def test_gemini_without_prompt_has_yolo_flag(self, ai_cli_manager):
-        """Gemini CLI でプロンプトなしでも --yolo フラグが含まれることをテスト。"""
-        args = ai_cli_manager._build_cli_args(AICli.GEMINI, "/tmp/test", None)
-        assert "--yolo" in args
+    def test_agy_without_prompt_has_skip_permissions(self, ai_cli_manager):
+        """agy CLI でプロンプトなしでも --dangerously-skip-permissions が含まれることをテスト。"""
+        args = ai_cli_manager._build_cli_args(AICli.AGY, "/tmp/test", None)
+        assert "--dangerously-skip-permissions" in args
 
     def test_cursor_without_prompt_uses_plain_command(self, ai_cli_manager):
         """Cursor CLI は prompt なしでも通常起動コマンドのみを返すことをテスト。"""

@@ -49,8 +49,8 @@ class AICli(str, Enum):
     CODEX = "codex"
     """OpenAI Codex CLI"""
 
-    GEMINI = "gemini"
-    """Google Gemini CLI"""
+    AGY = "agy"
+    """Antigravity CLI（Gemini CLI 後継）"""
 
     CURSOR = "cursor"
     """Cursor CLI"""
@@ -124,18 +124,18 @@ class ModelDefaults:
     CURSOR_DEFAULT = "composer-1.5"
     """Cursor デフォルトモデル"""
 
-    # Gemini CLI
-    GEMINI_DEFAULT = "gemini-3-pro-preview"
-    """Gemini デフォルトモデル"""
+    # Antigravity CLI (agy) — agy models の実 ID（tier 内包）
+    AGY_DEFAULT = "gemini-3.1-pro-high"
+    """agy デフォルトモデル（Admin 想定・高性能）"""
 
-    GEMINI_LIGHT = "gemini-3-flash-preview"
-    """Gemini 軽量モデル"""
+    AGY_LIGHT = "gemini-3.6-flash-medium"
+    """agy 軽量モデル（Worker 想定）"""
 
     # CLI 別デフォルトモデルマッピング
     CLI_DEFAULTS: ClassVar[dict[str, dict[str, str]]] = {
         "claude": {"admin": OPUS, "worker": SONNET},
         "codex": {"admin": CODEX_DEFAULT, "worker": CODEX_DEFAULT},
-        "gemini": {"admin": GEMINI_DEFAULT, "worker": GEMINI_LIGHT},
+        "agy": {"admin": AGY_DEFAULT, "worker": AGY_LIGHT},
         "cursor": {"admin": CURSOR_DEFAULT, "worker": CURSOR_DEFAULT},
     }
 
@@ -155,7 +155,7 @@ def resolve_model_for_cli(
     その CLI のデフォルトモデルへフォールバックする。
 
     Args:
-        cli: AI CLI 名（"claude", "codex", "gemini", "cursor"）
+        cli: AI CLI 名（"claude", "codex", "agy", "cursor"）
         model: 設定されたモデル名
         role: ロール（"admin" or "worker"）
         cli_defaults: CLI 別デフォルトモデルマッピング（Settings から構築）。
@@ -176,8 +176,9 @@ def resolve_model_for_cli(
             return value in ModelDefaults.CLAUDE_ALIASES or value.startswith("claude")
         if target_cli == "codex":
             return "codex" in value or value.startswith("gpt-")
-        if target_cli == "gemini":
-            return value.startswith("gemini")
+        if target_cli == "agy":
+            # agy は Gemini/Claude/GPT-OSS など混在モデルを扱うため prefix 検証しない
+            return True
         if target_cli == "cursor":
             return (
                 "codex" in value
@@ -210,7 +211,7 @@ def normalize_cli_name(cli: Any) -> str:
 DEFAULT_AI_CLI_COMMANDS: dict[str, str] = {
     AICli.CLAUDE: "claude",
     AICli.CODEX: "codex",
-    AICli.GEMINI: "gemini",
+    AICli.AGY: "agy",
     AICli.CURSOR: "agent",
 }
 
@@ -404,17 +405,17 @@ class Settings(BaseSettings):
     )
     """Codex CLI で Worker に使用するデフォルトモデル"""
 
-    cli_default_gemini_admin_model: str = Field(
-        default=ModelDefaults.GEMINI_DEFAULT,
-        description="Gemini CLI の Admin デフォルトモデル",
+    cli_default_agy_admin_model: str = Field(
+        default=ModelDefaults.AGY_DEFAULT,
+        description="Antigravity CLI (agy) の Admin デフォルトモデル",
     )
-    """Gemini CLI で Admin に使用するデフォルトモデル"""
+    """agy で Admin に使用するデフォルトモデル"""
 
-    cli_default_gemini_worker_model: str = Field(
-        default=ModelDefaults.GEMINI_LIGHT,
-        description="Gemini CLI の Worker デフォルトモデル",
+    cli_default_agy_worker_model: str = Field(
+        default=ModelDefaults.AGY_LIGHT,
+        description="Antigravity CLI (agy) の Worker デフォルトモデル",
     )
-    """Gemini CLI で Worker に使用するデフォルトモデル"""
+    """agy で Worker に使用するデフォルトモデル"""
 
     cli_default_cursor_admin_model: str = Field(
         default=ModelDefaults.CURSOR_DEFAULT,
@@ -516,6 +517,7 @@ class Settings(BaseSettings):
     """1回のAPI呼び出しあたりの推定トークン数（デフォルト: 5000）"""
 
     # 短縮キー(claude:opus等)は後方互換のため維持。正式キー(claude:claude-opus-4-7等)を併記
+    # agy(Antigravity CLI)の単価は暫定見積り。agy 公式単価が公開され次第、要更新
     model_cost_table_json: str = Field(
         default='{"claude:opus":0.03,"claude:sonnet":0.015,'
         '"claude:claude-opus-4-8":0.03,'
@@ -523,9 +525,13 @@ class Settings(BaseSettings):
         '"claude:claude-sonnet-4-6":0.015,'
         '"claude:claude-haiku-4-5-20251001":0.003,'
         '"codex:gpt-5.5":0.01,"codex:gpt-5.4":0.01,"codex:gpt-5.3-codex":0.01,'
-        '"gemini:gemini-3-pro-preview":0.012,'
-        '"gemini:gemini-3-flash-preview":0.003,'
-        '"gemini:gemini-3-pro":0.005,"gemini:gemini-3-flash":0.0025,'
+        '"agy:gemini-3.1-pro-high":0.012,"agy:gemini-3.1-pro-low":0.006,'
+        '"agy:gemini-3.6-flash-high":0.004,"agy:gemini-3.6-flash-medium":0.003,'
+        '"agy:gemini-3.6-flash-low":0.002,'
+        '"agy:gemini-3.5-flash-high":0.004,"agy:gemini-3.5-flash-medium":0.003,'
+        '"agy:gemini-3.5-flash-low":0.002,'
+        '"agy:claude-sonnet-4-6":0.015,"agy:claude-opus-4-6-thinking":0.03,'
+        '"agy:gpt-oss-120b-medium":0.01,'
         '"cursor:composer-1.5":0.01}',
         description="モデル別 1K トークン単価テーブル（JSON）",
     )
@@ -629,9 +635,9 @@ class Settings(BaseSettings):
                 "admin": self.cli_default_codex_admin_model,
                 "worker": self.cli_default_codex_worker_model,
             },
-            "gemini": {
-                "admin": self.cli_default_gemini_admin_model,
-                "worker": self.cli_default_gemini_worker_model,
+            "agy": {
+                "admin": self.cli_default_agy_admin_model,
+                "worker": self.cli_default_agy_worker_model,
             },
             "cursor": {
                 "admin": self.cli_default_cursor_admin_model,

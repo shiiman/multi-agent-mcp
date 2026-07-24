@@ -15,7 +15,7 @@ mode, the same workflow runs without git/worktree dependencies.
 - **Tmux Integration**: Each agent runs in an isolated tmux session
 - **Git Worktree Support**: Parallel development with isolated working directories
 - **Git Mode Switch**: `MCP_ENABLE_GIT` enables git mode by default and allows non-git projects when disabled
-- **AI CLI Selection**: Support for Claude Code, Codex, Gemini, and Cursor CLI
+- **AI CLI Selection**: Support for Claude Code, Codex, Antigravity (agy), and Cursor CLI
 - **Task Scheduling**: Priority-based task queue with dependency management
 - **Health Monitoring**: Stall/tmux死活監視 + 自動復旧 + daemon運用
 - **Cost Tracking**: API cost tracking integrated into Dashboard
@@ -309,8 +309,8 @@ Tools are defined in `src/tools/` modules using FastMCP decorators:
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | Claude CLI Worker default model | sonnet |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | Codex CLI Admin default model | gpt-5.5 |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | Codex CLI Worker default model | gpt-5.5 |
-| `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | Gemini CLI Admin default model | gemini-3-pro-preview |
-| `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | Gemini CLI Worker default model | gemini-3-flash-preview |
+| `MCP_CLI_DEFAULT_AGY_ADMIN_MODEL` | Agy CLI Admin default model | gemini-3.1-pro-high |
+| `MCP_CLI_DEFAULT_AGY_WORKER_MODEL` | Agy CLI Worker default model | gemini-3.6-flash-medium |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | Cursor CLI Admin default model | composer-1.5 |
 | `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | Cursor CLI Worker default model | composer-1.5 |
 | `MCP_WORKER_CLI_MODE` | Worker CLI mode (`uniform` / `per-worker`) | uniform |

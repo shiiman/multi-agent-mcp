@@ -1,6 +1,6 @@
 # Multi-Agent MCP
 
-AI CLI（Claude Code / Codex / Gemini / Cursor）+ tmux + git worktree
+AI CLI（Claude Code / Codex / Antigravity (agy) / Cursor）+ tmux + git worktree
 （または非gitディレクトリ）を使用したマルチエージェントワークフローの MCP サーバー。
 
 ## 概要
@@ -30,8 +30,59 @@ AI CLI（Claude Code / Codex / Gemini / Cursor）+ tmux + git worktree
 |------|------|------|
 | Claude Code | `claude` | デフォルト構成で利用可能 |
 | Codex | `codex` | デフォルト構成で利用可能 |
-| Gemini | `gemini` | デフォルト構成で利用可能 |
+| Antigravity (agy) | `agy` | デフォルト構成で利用可能。事前に端末CLIのセットアップが必要（後述） |
 | Cursor | `cursor` | 既定コマンドは `agent` |
+
+### agy（Antigravity CLI）のセットアップ
+
+agy は Gemini CLI の後継となる Antigravity の端末 CLI 版です。利用前に以下を行ってください。
+
+**インストール**
+
+```bash
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+```
+
+**デスクトップアプリとの PATH 衝突に注意**
+
+Antigravity デスクトップアプリをインストール済みの環境では、アプリ同梱の `agy` が
+`PATH` 上で先に解決されることがあります。端末 CLI 版を優先させるには、
+インストール先（通常 `~/.local/bin`）を `PATH` の先頭に追加するか、
+シェルの rc ファイルでエイリアスを設定してください。
+
+```bash
+# 例: ~/.zshrc / ~/.bashrc
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**サインイン**
+
+引数なしで `agy` を起動するとサインインフローが開始されます。
+
+```bash
+agy
+```
+
+サインインが完了すれば、`ai_cli="agy"` で Admin/Worker から利用できます。
+
+**eligibility 要件**
+
+agy でエージェントを起動するには、Antigravity の利用資格を満たす Google アカウントが必要です。
+一部の Google Workspace アカウントではサインインに成功しても
+`agy --print` 実行時に `Eligibility check failed: ... not eligible for Antigravity`
+のエラーで起動できないことがあります。この場合は個人の Google アカウントを使うか、
+Workspace 管理者に Antigravity の利用有効化を依頼してください。
+
+**実起動確認手順（手動）**
+
+eligibility が解決したアカウントで、実際にセッションが継続することを手動確認してください
+（本プロジェクトのテストコードでは `agy` の実起動検証は行っていません）。
+
+1. 小規模構成（Admin + Worker 1）で `ai_cli="agy"` を指定してワークスペースを起動する。
+2. tmux ペイン内で agy が `--prompt-interactive` により起動直後の応答だけで終了せず、
+   セッションを継続していることを確認する。
+3. Admin/Worker 間で IPC メッセージを送信し、ペインに `[IPC] 新しいメッセージ` の通知が
+   表示され、agy がそれに反応して作業を再開することを確認する（ワンショット終了しないこと）。
 
 ## 必要条件
 
@@ -42,7 +93,7 @@ AI CLI（Claude Code / Codex / Gemini / Cursor）+ tmux + git worktree
 ## 最短セットアップ
 
 1. MCP クライアントに `multi-agent-mcp` を登録します。
-   Claude / Codex は次の CLI 例を使い、Gemini / Cursor などで CLI サブコマンドが異なる場合は
+   Claude / Codex は次の CLI 例を使い、Antigravity (agy) / Cursor などで CLI サブコマンドが異なる場合は
    この後の JSON 設定例と同じ `command=uvx` / `args=[...]` を登録してください。
 2. クライアントを再起動し、MCP サーバーへ再接続します。
 3. クライアント上で `init_tmux_workspace("/path/to/project", session_id="issue-123")` を実行して
@@ -79,7 +130,7 @@ codex mcp add multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi
 codex mcp remove multi-agent-mcp
 ```
 
-**Gemini / Cursor など**
+**Antigravity (agy) / Cursor など**
 
 CLI からの追加コマンドが未提供、または実装差分があるクライアントでは、
 次の「設定ファイルに直接記述」の JSON 例と同じ内容を登録してください。
@@ -498,8 +549,8 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | sonnet | Claude CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.5 | Codex CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.5 | Codex CLIのWorkerデフォルトモデル |
-| `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro-preview | Gemini CLIのAdminデフォルトモデル |
-| `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash-preview | Gemini CLIのWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_AGY_ADMIN_MODEL` | gemini-3.1-pro-high | Agy CLIのAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_AGY_WORKER_MODEL` | gemini-3.6-flash-medium | Agy CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer-1.5 | Cursor CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer-1.5 | Cursor CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |
@@ -516,8 +567,9 @@ Worker上限は `MCP_MODEL_PROFILE_ACTIVE` に応じて
 `MCP_MODEL_PROFILE_STANDARD_MAX_WORKERS` / `MCP_MODEL_PROFILE_PERFORMANCE_MAX_WORKERS`
 のどちらかが適用されます。
 
-`MCP_MODEL_COST_TABLE_JSON` のデフォルトでは `gemini-3-pro-preview` / `gemini-3-flash-preview`
-を使用し、後方互換のため `gemini-3-pro` / `gemini-3-flash` キーも併記しています。
+`MCP_MODEL_COST_TABLE_JSON` の agy 分は `agy models` の実 ID（tier 内包、例 `gemini-3.1-pro-high` /
+`gemini-3.6-flash-medium`）で構成しています。1K トークン単価は暫定見積りのため、
+agy の公式単価が公開され次第、要更新です。
 
 ## ディレクトリ構造
 

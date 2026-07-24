@@ -1435,14 +1435,14 @@ class TestDashboardCost:
         """複数 CLI の呼び出しが正しくカウントされることをテスト。"""
         dashboard_manager.record_api_call(ai_cli="claude", estimated_tokens=500)
         dashboard_manager.record_api_call(ai_cli="codex", estimated_tokens=300)
-        dashboard_manager.record_api_call(ai_cli="gemini", estimated_tokens=200)
+        dashboard_manager.record_api_call(ai_cli="agy", estimated_tokens=200)
         dashboard_manager.record_api_call(ai_cli="cursor", estimated_tokens=100)
         estimate = dashboard_manager.get_cost_estimate()
         assert estimate["total_api_calls"] == 4
         assert estimate["estimated_tokens"] == 1100
         assert estimate["claude_calls"] == 1
         assert estimate["codex_calls"] == 1
-        assert estimate["gemini_calls"] == 1
+        assert estimate["agy_calls"] == 1
         assert estimate["cursor_calls"] == 1
 
     def test_cost_summary_with_warning(self, dashboard_manager):

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SHELL_COMMANDS = {"zsh", "bash", "sh", "fish"}
-_AI_RUNNING_COMMAND_PREFIXES = ("codex", "claude", "gemini", "agent", "cursor-agent")
+_AI_RUNNING_COMMAND_PREFIXES = ("codex", "claude", "agy", "agent", "cursor-agent")
 
 
 def _is_ai_running(pane_command: str) -> bool:

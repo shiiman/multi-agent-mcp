@@ -18,7 +18,7 @@ class DashboardCostMixin:
     _read_dashboard() と _write_dashboard() は DashboardManager で定義される。
     """
 
-    _SUPPORTED_COST_CLI_KEYS = ("claude", "codex", "gemini", "cursor")
+    _SUPPORTED_COST_CLI_KEYS = ("claude", "codex", "agy", "cursor")
 
     def record_api_call(
         self,
@@ -34,7 +34,7 @@ class DashboardCostMixin:
         """API呼び出しを記録する。
 
         Args:
-            ai_cli: 使用したAI CLI（claude/codex/gemini/cursor）
+            ai_cli: 使用したAI CLI（claude/codex/agy/cursor）
             model: 使用モデル
             estimated_tokens: 推定トークン数（Noneでデフォルト値）
             agent_id: エージェントID（オプション）
@@ -183,7 +183,7 @@ class DashboardCostMixin:
             "total_cost_usd": round(cost.total_cost_usd, 4),
             "claude_calls": cli_counts.get("claude", 0),
             "codex_calls": cli_counts.get("codex", 0),
-            "gemini_calls": cli_counts.get("gemini", 0),
+            "agy_calls": cli_counts.get("agy", 0),
             "cursor_calls": cli_counts.get("cursor", 0),
         }
 
@@ -209,7 +209,7 @@ class DashboardCostMixin:
             "by_cli": {
                 "claude": cli_counts.get("claude", 0),
                 "codex": cli_counts.get("codex", 0),
-                "gemini": cli_counts.get("gemini", 0),
+                "agy": cli_counts.get("agy", 0),
                 "cursor": cli_counts.get("cursor", 0),
             },
         }

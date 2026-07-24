@@ -555,7 +555,7 @@ def _prepare_worker_task_content(
 
         if source_path is not None:
             try:
-                # ワークスペース内にミラーを作成（Gemini CLI等のワークスペース外参照制限を回避）
+                # ワークスペース内にミラーを作成（agy 等のワークスペース外参照制限を回避）
                 mcp_dir = app_ctx.settings.mcp_dir
                 mirror_dir = project_root / mcp_dir / "runtime" / "templates" / "reports"
                 mirror_dir.mkdir(parents=True, exist_ok=True)

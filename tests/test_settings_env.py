@@ -123,15 +123,15 @@ class TestGenerateEnvTemplate:
         assert "MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL" in template
         assert "MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_CODEX_WORKER_MODEL" in template
-        assert "MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL" in template
-        assert "MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL" in template
+        assert "MCP_CLI_DEFAULT_AGY_ADMIN_MODEL" in template
+        assert "MCP_CLI_DEFAULT_AGY_WORKER_MODEL" in template
         assert "MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL" in template
         assert ModelDefaults.OPUS in template
         assert ModelDefaults.SONNET in template
         assert ModelDefaults.CODEX_DEFAULT in template
-        assert ModelDefaults.GEMINI_DEFAULT in template
-        assert ModelDefaults.GEMINI_LIGHT in template
+        assert ModelDefaults.AGY_DEFAULT in template
+        assert ModelDefaults.AGY_LIGHT in template
         assert ModelDefaults.CURSOR_DEFAULT in template
 
     def test_template_contains_thinking_tokens(self):
@@ -151,10 +151,12 @@ class TestGenerateEnvTemplate:
         template = generate_env_template()
         assert "MCP_COST_WARNING_THRESHOLD_USD" in template
         assert "MCP_MODEL_COST_TABLE_JSON" in template
-        assert "gemini:gemini-3-pro-preview" in template
-        assert "gemini:gemini-3-flash-preview" in template
-        assert "gemini:gemini-3-pro" in template
-        assert "gemini:gemini-3-flash" in template
+        assert "agy:gemini-3.1-pro-high" in template
+        assert "agy:gemini-3.1-pro-low" in template
+        assert "agy:gemini-3.6-flash-medium" in template
+        assert "agy:claude-sonnet-4-6" in template
+        assert "agy:claude-opus-4-6-thinking" in template
+        assert "agy:gpt-oss-120b-medium" in template
         assert "MCP_MODEL_COST_DEFAULT_PER_1K" in template
         assert "MCP_COST_PER_1K_TOKENS_" not in template
 
@@ -260,9 +262,9 @@ class TestWorkerCliAndModelResolution:
         settings.worker_cli_mode = WorkerCliMode.PER_WORKER
         settings.model_profile_active = "standard"
         settings.model_profile_standard_cli = AICli.CLAUDE
-        settings.worker_cli_2 = "gemini"
+        settings.worker_cli_2 = "agy"
         assert settings.get_worker_cli(1) == AICli.CLAUDE
-        assert settings.get_worker_cli(2) == AICli.GEMINI
+        assert settings.get_worker_cli(2) == AICli.AGY
 
     def test_get_worker_cli_uniform_cursor(self):
         settings = load_settings_for_project(None)

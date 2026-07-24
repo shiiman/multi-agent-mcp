@@ -289,14 +289,22 @@ cost:
 | `codex:gpt-5.5` | 0.01 |
 | `codex:gpt-5.4` | 0.01 |
 | `codex:gpt-5.3-codex` | 0.01 |
-| `gemini:gemini-3-pro-preview` | 0.012 |
-| `gemini:gemini-3-flash-preview` | 0.003 |
-| `gemini:gemini-3-pro` (legacy) | 0.005 |
-| `gemini:gemini-3-flash` (legacy) | 0.0025 |
+| `agy:gemini-3.1-pro-high` | 0.012 |
+| `agy:gemini-3.1-pro-low` | 0.006 |
+| `agy:gemini-3.6-flash-high` | 0.004 |
+| `agy:gemini-3.6-flash-medium` | 0.003 |
+| `agy:gemini-3.6-flash-low` | 0.002 |
+| `agy:gemini-3.5-flash-high` | 0.004 |
+| `agy:gemini-3.5-flash-medium` | 0.003 |
+| `agy:gemini-3.5-flash-low` | 0.002 |
+| `agy:claude-sonnet-4-6` | 0.015 |
+| `agy:claude-opus-4-6-thinking` | 0.03 |
+| `agy:gpt-oss-120b-medium` | 0.01 |
 | `cursor:composer-1.5` | 0.01 |
 
 未定義モデルは `MCP_MODEL_COST_DEFAULT_PER_1K`（デフォルト 0.01）を使用します。
-後方互換のため legacy キーも同じテーブルに併存させています。
+agy（Antigravity CLI）のキーは `agy models` の実ID（推論 tier 内包）です。
+1K トークン単価は暫定見積りのため、agy の公式単価が公開され次第、要更新です。
 
 ### コスト警告
 
