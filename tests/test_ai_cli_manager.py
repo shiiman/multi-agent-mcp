@@ -128,6 +128,16 @@ class TestBuildStdinCommand:
 
     def test_build_stdin_command_agy_effort_mapping(self, ai_cli_manager):
         """agy の effort が low/medium/high 透過・xhigh→high・none→省略になること。"""
+        low = ai_cli_manager.build_stdin_command(
+            AICli.AGY, "/tmp/task.md", reasoning_effort="low"
+        )
+        assert "--effort low" in low
+
+        medium = ai_cli_manager.build_stdin_command(
+            AICli.AGY, "/tmp/task.md", reasoning_effort="medium"
+        )
+        assert "--effort medium" in medium
+
         high = ai_cli_manager.build_stdin_command(
             AICli.AGY, "/tmp/task.md", reasoning_effort="high"
         )

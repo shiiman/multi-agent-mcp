@@ -155,7 +155,7 @@ def resolve_model_for_cli(
     その CLI のデフォルトモデルへフォールバックする。
 
     Args:
-        cli: AI CLI 名（"claude", "codex", "gemini", "cursor"）
+        cli: AI CLI 名（"claude", "codex", "agy", "cursor"）
         model: 設定されたモデル名
         role: ロール（"admin" or "worker"）
         cli_defaults: CLI 別デフォルトモデルマッピング（Settings から構築）。
