@@ -124,18 +124,18 @@ class ModelDefaults:
     CURSOR_DEFAULT = "composer-1.5"
     """Cursor デフォルトモデル"""
 
-    # Gemini CLI
-    GEMINI_DEFAULT = "gemini-3-pro-preview"
-    """Gemini デフォルトモデル"""
+    # Antigravity CLI (agy) — フェーズ2で agy models の実IDに確定
+    AGY_DEFAULT = "gemini-3-pro-preview"
+    """agy デフォルトモデル（暫定プレースホルダ）"""
 
-    GEMINI_LIGHT = "gemini-3-flash-preview"
-    """Gemini 軽量モデル"""
+    AGY_LIGHT = "gemini-3-flash-preview"
+    """agy 軽量モデル（暫定プレースホルダ）"""
 
     # CLI 別デフォルトモデルマッピング
     CLI_DEFAULTS: ClassVar[dict[str, dict[str, str]]] = {
         "claude": {"admin": OPUS, "worker": SONNET},
         "codex": {"admin": CODEX_DEFAULT, "worker": CODEX_DEFAULT},
-        "gemini": {"admin": GEMINI_DEFAULT, "worker": GEMINI_LIGHT},
+        "agy": {"admin": AGY_DEFAULT, "worker": AGY_LIGHT},
         "cursor": {"admin": CURSOR_DEFAULT, "worker": CURSOR_DEFAULT},
     }
 
@@ -405,17 +405,17 @@ class Settings(BaseSettings):
     )
     """Codex CLI で Worker に使用するデフォルトモデル"""
 
-    cli_default_gemini_admin_model: str = Field(
-        default=ModelDefaults.GEMINI_DEFAULT,
-        description="Gemini CLI の Admin デフォルトモデル",
+    cli_default_agy_admin_model: str = Field(
+        default=ModelDefaults.AGY_DEFAULT,
+        description="Antigravity CLI (agy) の Admin デフォルトモデル",
     )
-    """Gemini CLI で Admin に使用するデフォルトモデル"""
+    """agy で Admin に使用するデフォルトモデル"""
 
-    cli_default_gemini_worker_model: str = Field(
-        default=ModelDefaults.GEMINI_LIGHT,
-        description="Gemini CLI の Worker デフォルトモデル",
+    cli_default_agy_worker_model: str = Field(
+        default=ModelDefaults.AGY_LIGHT,
+        description="Antigravity CLI (agy) の Worker デフォルトモデル",
     )
-    """Gemini CLI で Worker に使用するデフォルトモデル"""
+    """agy で Worker に使用するデフォルトモデル"""
 
     cli_default_cursor_admin_model: str = Field(
         default=ModelDefaults.CURSOR_DEFAULT,
@@ -630,9 +630,9 @@ class Settings(BaseSettings):
                 "admin": self.cli_default_codex_admin_model,
                 "worker": self.cli_default_codex_worker_model,
             },
-            "gemini": {
-                "admin": self.cli_default_gemini_admin_model,
-                "worker": self.cli_default_gemini_worker_model,
+            "agy": {
+                "admin": self.cli_default_agy_admin_model,
+                "worker": self.cli_default_agy_worker_model,
             },
             "cursor": {
                 "admin": self.cli_default_cursor_admin_model,

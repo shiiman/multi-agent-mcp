@@ -190,9 +190,9 @@ MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL={v(s.cli_default_claude_worker_model)}
 MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL={v(s.cli_default_codex_admin_model)}
 MCP_CLI_DEFAULT_CODEX_WORKER_MODEL={v(s.cli_default_codex_worker_model)}
 
-# Gemini CLI
-MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL={v(s.cli_default_gemini_admin_model)}
-MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL={v(s.cli_default_gemini_worker_model)}
+# Antigravity CLI (agy)
+MCP_CLI_DEFAULT_AGY_ADMIN_MODEL={v(s.cli_default_agy_admin_model)}
+MCP_CLI_DEFAULT_AGY_WORKER_MODEL={v(s.cli_default_agy_worker_model)}
 
 # Cursor CLI
 MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL={v(s.cli_default_cursor_admin_model)}

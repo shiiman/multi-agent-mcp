@@ -123,15 +123,15 @@ class TestGenerateEnvTemplate:
         assert "MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL" in template
         assert "MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_CODEX_WORKER_MODEL" in template
-        assert "MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL" in template
-        assert "MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL" in template
+        assert "MCP_CLI_DEFAULT_AGY_ADMIN_MODEL" in template
+        assert "MCP_CLI_DEFAULT_AGY_WORKER_MODEL" in template
         assert "MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL" in template
         assert "MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL" in template
         assert ModelDefaults.OPUS in template
         assert ModelDefaults.SONNET in template
         assert ModelDefaults.CODEX_DEFAULT in template
-        assert ModelDefaults.GEMINI_DEFAULT in template
-        assert ModelDefaults.GEMINI_LIGHT in template
+        assert ModelDefaults.AGY_DEFAULT in template
+        assert ModelDefaults.AGY_LIGHT in template
         assert ModelDefaults.CURSOR_DEFAULT in template
 
     def test_template_contains_thinking_tokens(self):

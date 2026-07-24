@@ -364,7 +364,7 @@ class TestResolveModelForCli:
         """model=None の場合 CLI デフォルトを返すことをテスト。"""
         assert resolve_model_for_cli("claude", None) == ModelDefaults.SONNET
         assert resolve_model_for_cli("codex", None) == ModelDefaults.CODEX_DEFAULT
-        assert resolve_model_for_cli("gemini", None) == ModelDefaults.GEMINI_LIGHT
+        assert resolve_model_for_cli("agy", None) == ModelDefaults.AGY_LIGHT
 
     def test_custom_cli_defaults_override(self):
         """cli_defaults を渡すとハードコード値を上書きできることをテスト。"""
