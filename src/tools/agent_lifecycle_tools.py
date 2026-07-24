@@ -71,7 +71,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         Args:
             role: エージェントの役割（owner/admin/worker）
             working_dir: 作業ディレクトリのパス
-            ai_cli: 使用するAI CLI（claude/codex/gemini/cursor、省略でデフォルト）
+            ai_cli: 使用するAI CLI（claude/codex/agy/cursor、省略でデフォルト）
             caller_agent_id: 呼び出し元エージェントID（必須）
 
         Returns:

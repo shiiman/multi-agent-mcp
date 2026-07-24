@@ -1018,11 +1018,11 @@ class TestIsAiRunning:
 
         assert _is_ai_running("claude") is True
 
-    def test_gemini_is_detected(self):
-        """gemini コマンドが AI 実行中と判定されること。"""
+    def test_agy_is_detected(self):
+        """agy コマンドが AI 実行中と判定されること。"""
         from src.managers.healthcheck_manager import _is_ai_running
 
-        assert _is_ai_running("gemini") is True
+        assert _is_ai_running("agy") is True
 
     def test_agent_is_detected(self):
         """agent コマンドが AI 実行中と判定されること。"""

@@ -1,6 +1,6 @@
 # Multi-Agent MCP
 
-AI CLI（Claude Code / Codex / Gemini / Cursor）+ tmux + git worktree
+AI CLI（Claude Code / Codex / Antigravity (agy) / Cursor）+ tmux + git worktree
 （または非gitディレクトリ）を使用したマルチエージェントワークフローの MCP サーバー。
 
 ## 概要
@@ -30,8 +30,40 @@ AI CLI（Claude Code / Codex / Gemini / Cursor）+ tmux + git worktree
 |------|------|------|
 | Claude Code | `claude` | デフォルト構成で利用可能 |
 | Codex | `codex` | デフォルト構成で利用可能 |
-| Gemini | `gemini` | デフォルト構成で利用可能 |
+| Antigravity (agy) | `agy` | デフォルト構成で利用可能。事前に端末CLI版のセットアップが必要（後述） |
 | Cursor | `cursor` | 既定コマンドは `agent` |
+
+### agy（Antigravity CLI）のセットアップ
+
+agy は Gemini CLI の後継となる Antigravity の端末 CLI 版です。利用前に以下を行ってください。
+
+**インストール**
+
+```bash
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+```
+
+**デスクトップアプリとの PATH 衝突に注意**
+
+Antigravity デスクトップアプリをインストール済みの環境では、アプリ同梱の `agy` が
+`PATH` 上で先に解決されることがあります。端末 CLI 版を優先させるには、
+インストール先（通常 `~/.local/bin`）を `PATH` の先頭に追加するか、
+シェルの rc ファイルでエイリアスを設定してください。
+
+```bash
+# 例: ~/.zshrc / ~/.bashrc
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**サインイン**
+
+引数なしで `agy` を起動するとサインインフローが開始されます。
+
+```bash
+agy
+```
+
+サインインが完了すれば、`ai_cli="agy"` で Admin/Worker から利用できます。
 
 ## 必要条件
 
@@ -42,7 +74,7 @@ AI CLI（Claude Code / Codex / Gemini / Cursor）+ tmux + git worktree
 ## 最短セットアップ
 
 1. MCP クライアントに `multi-agent-mcp` を登録します。
-   Claude / Codex は次の CLI 例を使い、Gemini / Cursor などで CLI サブコマンドが異なる場合は
+   Claude / Codex は次の CLI 例を使い、Antigravity (agy) / Cursor などで CLI サブコマンドが異なる場合は
    この後の JSON 設定例と同じ `command=uvx` / `args=[...]` を登録してください。
 2. クライアントを再起動し、MCP サーバーへ再接続します。
 3. クライアント上で `init_tmux_workspace("/path/to/project", session_id="issue-123")` を実行して
@@ -79,7 +111,7 @@ codex mcp add multi-agent-mcp -- uvx --from git+https://github.com/shiiman/multi
 codex mcp remove multi-agent-mcp
 ```
 
-**Gemini / Cursor など**
+**Antigravity (agy) / Cursor など**
 
 CLI からの追加コマンドが未提供、または実装差分があるクライアントでは、
 次の「設定ファイルに直接記述」の JSON 例と同じ内容を登録してください。
@@ -498,8 +530,8 @@ cleanup_workspace(caller_agent_id="owner-id")
 | `MCP_CLI_DEFAULT_CLAUDE_WORKER_MODEL` | sonnet | Claude CLIのWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_ADMIN_MODEL` | gpt-5.5 | Codex CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CODEX_WORKER_MODEL` | gpt-5.5 | Codex CLIのWorkerデフォルトモデル |
-| `MCP_CLI_DEFAULT_GEMINI_ADMIN_MODEL` | gemini-3-pro-preview | Gemini CLIのAdminデフォルトモデル |
-| `MCP_CLI_DEFAULT_GEMINI_WORKER_MODEL` | gemini-3-flash-preview | Gemini CLIのWorkerデフォルトモデル |
+| `MCP_CLI_DEFAULT_AGY_ADMIN_MODEL` | gemini-3-pro-preview | agy (Antigravity CLI) のAdminデフォルトモデル |
+| `MCP_CLI_DEFAULT_AGY_WORKER_MODEL` | gemini-3-flash-preview | agy (Antigravity CLI) のWorkerデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_ADMIN_MODEL` | composer-1.5 | Cursor CLIのAdminデフォルトモデル |
 | `MCP_CLI_DEFAULT_CURSOR_WORKER_MODEL` | composer-1.5 | Cursor CLIのWorkerデフォルトモデル |
 | `MCP_WORKER_CLI_MODE` | uniform | Worker CLI設定モード（uniform/per-worker） |

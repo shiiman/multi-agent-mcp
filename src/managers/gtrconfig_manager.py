@@ -181,7 +181,7 @@ class GtrconfigManager:
             config["copy"]["include"].append("*.md")
 
         # AI CLI の設定ファイルがあれば include に追加
-        for cli_file in ["CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"]:
+        for cli_file in ["CLAUDE.md", "AGENTS.md", ".cursorrules"]:
             if (self.project_root / cli_file).exists() and cli_file not in config["copy"][
                 "include"
             ]:

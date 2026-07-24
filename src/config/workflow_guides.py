@@ -96,7 +96,7 @@ def get_role_template_path_for_workspace(
 ) -> Path:
     """ワークスペースから参照可能なロールテンプレートパスを返す。
 
-    Gemini CLI では read_file の参照先がワークスペース外だと失敗するため、
+    agy では read_file の参照先がワークスペース外だと失敗し得るため、
     テンプレートが workspace_root 配下に無い場合はミラーを作成して返す。
 
     Args:
