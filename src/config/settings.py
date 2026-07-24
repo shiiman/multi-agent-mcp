@@ -49,8 +49,8 @@ class AICli(str, Enum):
     CODEX = "codex"
     """OpenAI Codex CLI"""
 
-    GEMINI = "gemini"
-    """Google Gemini CLI"""
+    AGY = "agy"
+    """Antigravity CLI（Gemini CLI 後継）"""
 
     CURSOR = "cursor"
     """Cursor CLI"""
@@ -176,8 +176,9 @@ def resolve_model_for_cli(
             return value in ModelDefaults.CLAUDE_ALIASES or value.startswith("claude")
         if target_cli == "codex":
             return "codex" in value or value.startswith("gpt-")
-        if target_cli == "gemini":
-            return value.startswith("gemini")
+        if target_cli == "agy":
+            # agy は Gemini/Claude/GPT-OSS など混在モデルを扱うため prefix 検証しない
+            return True
         if target_cli == "cursor":
             return (
                 "codex" in value
@@ -210,7 +211,7 @@ def normalize_cli_name(cli: Any) -> str:
 DEFAULT_AI_CLI_COMMANDS: dict[str, str] = {
     AICli.CLAUDE: "claude",
     AICli.CODEX: "codex",
-    AICli.GEMINI: "gemini",
+    AICli.AGY: "agy",
     AICli.CURSOR: "agent",
 }
 

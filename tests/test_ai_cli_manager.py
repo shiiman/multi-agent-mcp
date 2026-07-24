@@ -29,8 +29,8 @@ class TestAiCliManager:
         cmd = ai_cli_manager.get_command(AICli.CODEX)
         assert cmd == "codex"
 
-        cmd = ai_cli_manager.get_command(AICli.GEMINI)
-        assert cmd == "gemini"
+        cmd = ai_cli_manager.get_command(AICli.AGY)
+        assert cmd == "agy"
 
         cmd = ai_cli_manager.get_command(AICli.CURSOR)
         assert cmd == "agent"
@@ -51,7 +51,7 @@ class TestAiCliManager:
     def test_get_all_cli_info(self, ai_cli_manager):
         """全CLI情報を取得できることをテスト。"""
         all_info = ai_cli_manager.get_all_cli_info()
-        assert len(all_info) == 4  # claude, codex, gemini, cursor
+        assert len(all_info) == 4  # claude, codex, agy, cursor
 
     def test_refresh_availability(self, ai_cli_manager):
         """利用可能性を再検出できることをテスト。"""
@@ -111,19 +111,37 @@ class TestBuildStdinCommand:
         assert "/repo/templates/roles/admin.md" in cmd
         assert "$(cat " not in cmd
 
-    def test_build_stdin_command_gemini(self, ai_cli_manager):
-        """Gemini のコマンドが正しく構築されることをテスト。"""
+    def test_build_stdin_command_agy(self, ai_cli_manager):
+        """agy のコマンドが正しく構築されることをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(
-            AICli.GEMINI, "/tmp/task.md", "/path/to/worktree"
+            AICli.AGY, "/tmp/task.md", "/path/to/worktree"
         )
-        assert "gemini" in cmd
-        assert "--yolo" in cmd
-        assert "--prompt" in cmd
+        assert "agy" in cmd
+        assert "--dangerously-skip-permissions" in cmd
+        assert "--prompt-interactive" in cmd
+        assert "--yolo" not in cmd
         # 全 CLI で cd && command 形式
         assert "cd" in cmd
         assert "/path/to/worktree" in cmd
         assert "/tmp/task.md" in cmd
         assert "< /tmp/task.md" not in cmd
+
+    def test_build_stdin_command_agy_effort_mapping(self, ai_cli_manager):
+        """agy の effort が low/medium/high 透過・xhigh→high・none→省略になること。"""
+        high = ai_cli_manager.build_stdin_command(
+            AICli.AGY, "/tmp/task.md", reasoning_effort="high"
+        )
+        assert "--effort high" in high
+
+        xhigh = ai_cli_manager.build_stdin_command(
+            AICli.AGY, "/tmp/task.md", reasoning_effort="xhigh"
+        )
+        assert "--effort high" in xhigh  # xhigh は high に丸める
+
+        none = ai_cli_manager.build_stdin_command(
+            AICli.AGY, "/tmp/task.md", reasoning_effort="none"
+        )
+        assert "--effort" not in none
 
     def test_build_stdin_command_cursor(self, ai_cli_manager):
         """Cursor は print モードを使わず通常起動コマンドを構築することをテスト。"""
@@ -180,11 +198,11 @@ class TestBuildStdinCommand:
         # worktree なしの場合は cd も含まれない
         assert "cd" not in cmd
 
-    def test_build_stdin_command_gemini_without_worktree(self, ai_cli_manager):
-        """worktree なしで Gemini コマンドが構築されることをテスト。"""
-        cmd = ai_cli_manager.build_stdin_command(AICli.GEMINI, "/tmp/task.md")
-        assert "gemini" in cmd
-        assert "--yolo" in cmd
+    def test_build_stdin_command_agy_without_worktree(self, ai_cli_manager):
+        """worktree なしで agy コマンドが構築されることをテスト。"""
+        cmd = ai_cli_manager.build_stdin_command(AICli.AGY, "/tmp/task.md")
+        assert "agy" in cmd
+        assert "--dangerously-skip-permissions" in cmd
         # worktree なしの場合は cd も含まれない
         assert "cd" not in cmd
 
@@ -224,15 +242,15 @@ class TestBuildStdinCommandWithModel:
         assert "codex exec" not in cmd
         assert "--message" not in cmd
 
-    def test_build_stdin_command_gemini_with_model(self, ai_cli_manager):
-        """Gemini で --model フラグが含まれることをテスト。"""
+    def test_build_stdin_command_agy_with_model(self, ai_cli_manager):
+        """agy で --model フラグが含まれることをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(
-            AICli.GEMINI, "/tmp/task.md", "/path/to/worktree",
+            AICli.AGY, "/tmp/task.md", "/path/to/worktree",
             model="gemini-3-pro",
         )
         assert "--model" in cmd
         assert "gemini-3-pro" in cmd
-        assert "--yolo" in cmd
+        assert "--yolo" not in cmd
 
     def test_build_stdin_command_codex_claude_alias_resolved(self, ai_cli_manager):
         """Codex で Claude 固有モデル名が CLI デフォルトに解決されることをテスト。"""
@@ -243,14 +261,14 @@ class TestBuildStdinCommandWithModel:
         assert "--model" in cmd
         assert ModelDefaults.CODEX_DEFAULT in cmd
 
-    def test_build_stdin_command_gemini_claude_alias_resolved(self, ai_cli_manager):
-        """Gemini で Claude 固有モデル名が CLI デフォルトに解決されることをテスト。"""
+    def test_build_stdin_command_agy_model_passthrough_no_validation(self, ai_cli_manager):
+        """agy はモデル互換性を検証せず、指定モデルをそのまま渡すことをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(
-            AICli.GEMINI, "/tmp/task.md", "/path/to/worktree",
+            AICli.AGY, "/tmp/task.md", "/path/to/worktree",
             model="sonnet", role="worker",
         )
         assert "--model" in cmd
-        assert ModelDefaults.GEMINI_LIGHT in cmd
+        assert "sonnet" in cmd
 
     def test_build_stdin_command_claude_model_passthrough(self, ai_cli_manager):
         """Claude で model がそのまま渡されることをテスト。"""
@@ -301,15 +319,15 @@ class TestResolveModelForCli:
         result = resolve_model_for_cli("codex", "sonnet", "worker")
         assert result == ModelDefaults.CODEX_DEFAULT
 
-    def test_gemini_fallback_admin(self):
-        """Gemini で opus → gemini-3-pro に解決されることをテスト。"""
-        result = resolve_model_for_cli("gemini", "opus", "admin")
-        assert result == ModelDefaults.GEMINI_DEFAULT
+    def test_agy_model_passthrough_admin(self):
+        """agy はモデル互換性を検証せず opus をそのまま返すことをテスト。"""
+        result = resolve_model_for_cli("agy", "opus", "admin")
+        assert result == "opus"
 
-    def test_gemini_fallback_worker(self):
-        """Gemini で sonnet → gemini-3-flash に解決されることをテスト。"""
-        result = resolve_model_for_cli("gemini", "sonnet", "worker")
-        assert result == ModelDefaults.GEMINI_LIGHT
+    def test_agy_model_passthrough_worker(self):
+        """agy はモデル互換性を検証せず sonnet をそのまま返すことをテスト。"""
+        result = resolve_model_for_cli("agy", "sonnet", "worker")
+        assert result == "sonnet"
 
     def test_explicit_model_not_converted(self):
         """明示指定されたモデル名は変換されないことをテスト。"""
@@ -324,15 +342,12 @@ class TestResolveModelForCli:
         assert result == ModelDefaults.CURSOR_DEFAULT
 
     def test_explicit_model_mismatch_converted_to_cli_default(self):
-        """CLI とモデルが不一致なら CLI デフォルトへ置換されることをテスト。"""
+        """CLI とモデルが不一致なら CLI デフォルトへ置換される（agy は無検証）ことをテスト。"""
         assert (
             resolve_model_for_cli("codex", "gemini-3-pro", "admin")
             == ModelDefaults.CODEX_DEFAULT
         )
-        assert (
-            resolve_model_for_cli("gemini", "gpt-5.4", "worker")
-            == ModelDefaults.GEMINI_LIGHT
-        )
+        assert resolve_model_for_cli("agy", "gpt-5.4", "worker") == "gpt-5.4"
         assert resolve_model_for_cli("claude", "gemini-3-pro", "worker") == ModelDefaults.SONNET
 
     def test_none_model_returns_none(self):
@@ -380,10 +395,10 @@ class TestBuildStdinCommandWithThinkingTokens:
         )
         assert "MAX_THINKING_TOKENS" not in cmd
 
-    def test_thinking_tokens_excluded_from_gemini(self, ai_cli_manager):
-        """Gemini では MAX_THINKING_TOKENS が設定されないことをテスト。"""
+    def test_thinking_tokens_excluded_from_agy(self, ai_cli_manager):
+        """agy では MAX_THINKING_TOKENS が設定されないことをテスト。"""
         cmd = ai_cli_manager.build_stdin_command(
-            AICli.GEMINI, "/tmp/task.md", "/path/to/worktree",
+            AICli.AGY, "/tmp/task.md", "/path/to/worktree",
             thinking_tokens=2000,
         )
         assert "MAX_THINKING_TOKENS" not in cmd
@@ -423,7 +438,7 @@ class TestBuildStdinCommandWithReasoningEffort:
 
     @pytest.mark.parametrize(
         "cli",
-        [AICli.CLAUDE, AICli.CODEX, AICli.GEMINI, AICli.CURSOR],
+        [AICli.CLAUDE, AICli.CODEX, AICli.AGY, AICli.CURSOR],
     )
     def test_invalid_effort_raises_value_error(self, ai_cli_manager, cli):
         """無効な reasoning_effort は全 CLI で ValueError にする。"""

@@ -135,11 +135,11 @@ class TestAlignCreateConfigsWithSlots:
     def test_pref_cli_task_is_aligned_to_matching_default_slot(self):
         """preferred_cli=cursor のタスクが cursor 既定 slot に寄ることをテスト。"""
         settings = MagicMock()
-        # worker 1..4: codex, codex, gemini, cursor
+        # worker 1..4: codex, codex, agy, cursor
         cli_map = {
             1: AICli.CODEX,
             2: AICli.CODEX,
-            3: AICli.GEMINI,
+            3: AICli.AGY,
             4: AICli.CURSOR,
         }
         settings.get_worker_cli.side_effect = lambda worker_no: cli_map[worker_no]
@@ -169,7 +169,7 @@ class TestAlignCreateConfigsWithSlots:
         settings = MagicMock()
         cli_map = {
             1: AICli.CODEX,
-            2: AICli.GEMINI,
+            2: AICli.AGY,
         }
         settings.get_worker_cli.side_effect = lambda worker_no: cli_map[worker_no]
         create_configs = [

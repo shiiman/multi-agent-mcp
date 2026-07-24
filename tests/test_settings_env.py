@@ -260,9 +260,9 @@ class TestWorkerCliAndModelResolution:
         settings.worker_cli_mode = WorkerCliMode.PER_WORKER
         settings.model_profile_active = "standard"
         settings.model_profile_standard_cli = AICli.CLAUDE
-        settings.worker_cli_2 = "gemini"
+        settings.worker_cli_2 = "agy"
         assert settings.get_worker_cli(1) == AICli.CLAUDE
-        assert settings.get_worker_cli(2) == AICli.GEMINI
+        assert settings.get_worker_cli(2) == AICli.AGY
 
     def test_get_worker_cli_uniform_cursor(self):
         settings = load_settings_for_project(None)

@@ -115,11 +115,11 @@ class TestResolveAgentCliName:
     def test_worker_without_slot_uses_agent_cli(self):
         """window/pane 未確定 Worker は agent.ai_cli を使用する。"""
         agent = _make_worker_agent(window_index=None, pane_index=None)
-        agent.ai_cli = AICli.GEMINI
+        agent.ai_cli = AICli.AGY
 
         app_ctx = MagicMock()
 
-        assert resolve_agent_cli_name(agent, app_ctx) == "gemini"
+        assert resolve_agent_cli_name(agent, app_ctx) == "agy"
 
     def test_non_worker_uses_agent_cli(self):
         """非 Worker は slot 解決せず agent.ai_cli を返す。"""

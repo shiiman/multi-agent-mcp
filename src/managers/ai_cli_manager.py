@@ -1,6 +1,6 @@
 """AI CLI管理マネージャー。
 
-複数のAI CLIツール（Claude Code, Codex, Gemini, Cursor）を管理する。
+複数のAI CLIツール（Claude Code, Codex, Antigravity(agy), Cursor）を管理する。
 """
 
 import logging
@@ -134,6 +134,18 @@ class AiCliManager:
         else:  # PERFORMANCE
             return self.settings.model_profile_performance_cli
 
+    @staticmethod
+    def _map_agy_effort(effort: str) -> str | None:
+        """本プロジェクトの effort を agy の --effort 値へマッピングする。
+
+        agy は low/medium/high のみ対応。xhigh は high に丸め、none は省略。
+        """
+        if effort in {"low", "medium", "high"}:
+            return effort
+        if effort == "xhigh":
+            return "high"
+        return None  # none → --effort 省略
+
     def build_stdin_command(
         self,
         cli: AICli | str,
@@ -239,19 +251,19 @@ class AiCliManager:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
             return f"{env_prefix}{command}"
 
-        elif cli == AICli.GEMINI:
+        elif cli == AICli.AGY:
             # export MCP_PROJECT_ROOT=... && cd <path> &&
-            # gemini --model <model> --yolo --prompt "<instruction>"
+            # agy --model <model> --dangerously-skip-permissions
+            #     [--effort <e>] --prompt-interactive "<instruction>"
             parts = [cmd]
             if resolved_model:
                 parts.extend(["--model", resolved_model])
-            if effort != "none":
-                logger.warning(
-                    "Gemini CLI では reasoning_effort=%s は未対応のため無視します",
-                    effort,
-                )
-            parts.append("--yolo")
-            parts.extend(["--prompt", quoted_prompt])
+            parts.append("--dangerously-skip-permissions")
+            mapped = self._map_agy_effort(effort)
+            if mapped:
+                parts.extend(["--effort", mapped])
+            # --prompt-interactive で初期プロンプト実行後にセッションを継続（tmux 向き）
+            parts.extend(["--prompt-interactive", quoted_prompt])
             command = " ".join(parts)
             if working_dir:
                 return f"{env_prefix}cd {shlex.quote(working_dir)} && {command}"
@@ -333,10 +345,10 @@ class AiCliManager:
             args.append("--dangerously-bypass-approvals-and-sandbox")
             if prompt:
                 args.append(prompt)
-        elif cli == AICli.GEMINI:
-            args.append("--yolo")
+        elif cli == AICli.AGY:
+            args.append("--dangerously-skip-permissions")
             if prompt:
-                args.extend(["--prompt", prompt])
+                args.extend(["--prompt-interactive", prompt])
         elif cli == AICli.CURSOR:
             # Cursor は print モードを使わず、通常起動でプロンプトを位置引数に渡す。
             args.append("--force")
